@@ -480,6 +480,7 @@ export class Dungeon {
       strafeDir: Math.random() < 0.5 ? 1 : -1,
       vx: 0, vz: 0, // impulse velocity (knockback + lunges)
       ringRadius: 1,
+      telT: -1, // guest-side boss telegraph clock (host drives atkT instead)
     };
     // the boss is flagged here so guests mirroring it via eSnap also get the
     // reference (HP bar) and the flag (loot/fanfare on death)
@@ -560,6 +561,12 @@ export class Dungeon {
     for (const e of [...this.enemies]) {
       if (this.game.net.isGuest) {
         e.creature.update(dt, elapsed); // guest: positions come from the host
+        // replay the host's boss telegraph locally (ground FX + HUD countdown)
+        if (e.telT >= 0) {
+          e.telT += dt;
+          if (e.telT >= e.telDur) { e.telT = -1; e.creature.setGlow(null); }
+          else this._bossTelegraphFx(e, e.telT / e.telDur, dt);
+        }
         continue;
       }
       this._updateEnemy(e, dt, elapsed, players);
@@ -638,6 +645,7 @@ export class Dungeon {
     // -------- attack state machine (takes priority over locomotion) --------
     if (e.atkState === "windup") {
       e.atkT += dt;
+      if (e.behavior === "boss") this._bossTelegraphFx(e, e.atkT / e.windupDur, dt);
       if (target) c.heading = Math.atan2(target.creature.position.x - c.position.x, target.creature.position.z - c.position.z);
       // melee foes lunge along their committed direction during the windup so
       // the blow lands on contact — they visibly charge in and collide instead
@@ -805,6 +813,29 @@ export class Dungeon {
     }
   }
 
+  // Ground sparks that trace where the boss's next attack will land, emitted
+  // every few frames through the windup: a red ring on the slam's full reach,
+  // an orange lane down the charge path, and a purple ripple swelling out to
+  // where the burst orbs will fly. frac is windup progress, 0 → 1.
+  _bossTelegraphFx(e, frac, dt) {
+    e.telFxT = (e.telFxT ?? 0) - dt;
+    if (e.telFxT > 0) return;
+    e.telFxT = 0.07;
+    const c = e.creature;
+    const P = this.game.particles;
+    const atk = e.bossAttack ?? "slam";
+    if (atk === "charge") {
+      for (let i = 1; i <= 9; i++) {
+        _v.set(c.position.x + e.chargeX * i * 1.1, 0.08, c.position.z + e.chargeZ * i * 1.1);
+        P.burst(_v, { color: 0xffb25a, n: 1, speed: 0.3, up: 0.6, gravity: 0, life: 0.28, size: 0.8 });
+      }
+    } else if (atk === "burst") {
+      P.ring(_v.copy(c.position).setY(0.08), c.radius + 0.4 + frac * 2.6, { color: 0xb06cff, n: 16, life: 0.3, size: 0.85 });
+    } else {
+      P.ring(_v.copy(c.position).setY(0.08), e.ringRadius + 0.25, { color: 0xff5a3a, n: 18, life: 0.3, size: 0.9 });
+    }
+  }
+
   // begin a telegraphed attack: crouch, glow, warn the ear
   _beginWindup(e, target) {
     const c = e.creature;
@@ -832,11 +863,17 @@ export class Dungeon {
     // a distinct glow colour per attack, all faster once enraged
     if (e.behavior === "boss") {
       const atk = e.bossAttack ?? "slam";
-      e.windupDur = (atk === "charge" ? 0.9 : atk === "burst" ? 0.62 : def.windup) * (e.enraged ? 0.75 : 1);
-      if (e.enraged) e.attackCd *= 0.65;
+      // longer windups + a fat gap between attacks so each pattern reads as
+      // its own beat: telegraph, dodge, punish, breathe
+      e.windupDur = (atk === "charge" ? 1.1 : atk === "burst" ? 0.85 : def.windup + 0.25) * (e.enraged ? 0.8 : 1);
+      e.attackCd = 2.8 + Math.random() * 0.9;
+      if (e.enraged) e.attackCd *= 0.75;
+      e.recoverDur = 0.85;
       e.isCharge = false; // patterns move on strike, not during the windup
       e.ringRadius = atk === "slam" ? def.reach + c.radius : 0;
       c.setGlow(atk === "charge" ? [0.9, 0.45, 0.05] : atk === "burst" ? [0.55, 0.15, 0.8] : def.glow);
+      // guests mirror the telegraph (HUD countdown + ground FX) from this
+      this.game.net.send({ t: "bossTel", id: e.id, atk, dur: e.windupDur, r: e.ringRadius, dx: e.chargeX ?? 0, dz: e.chargeZ ?? 0 });
     }
     this.game.audio.telegraph();
   }
@@ -916,15 +953,14 @@ export class Dungeon {
           game.audio.shoot();
           game.engine.shake(0.12);
         } else if (atk === "charge") {
-          // hurl itself past where the target stands; damage lands on contact
-          // during the dash (lungeHitT), so a sidestep makes it barrel past
+          // hurl itself down the lane locked (and telegraphed) at windup start;
+          // damage lands on contact during the dash (lungeHitT), so stepping
+          // out of the marked lane makes it barrel past
           if (target) {
-            _d.set(target.creature.position.x - c.position.x, 0, target.creature.position.z - c.position.z);
-            const dist = _d.length();
-            _d.normalize();
+            const dist = c.position.distanceTo(target.creature.position);
             const leap = (dist + 1.6) * LEAP_K;
-            e.vx = _d.x * leap;
-            e.vz = _d.z * leap;
+            e.vx = e.chargeX * leap;
+            e.vz = e.chargeZ * leap;
             c.animator.squash.kick(6);
             e.lungeHitT = 0.6;
           }

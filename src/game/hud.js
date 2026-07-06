@@ -29,6 +29,10 @@ export class HUD {
       <div id="bossbar" class="hidden">
         <div id="bossbar-name"></div>
         <div id="bossbar-track"><div id="bossbar-fill"></div></div>
+        <div id="bossbar-tel" class="hidden">
+          <span id="bossbar-tel-name"></span>
+          <div id="bossbar-tel-track"><div id="bossbar-tel-fill"></div></div>
+        </div>
       </div>
       <div id="toast-wrap"></div>
       <div id="floaties"></div>
@@ -63,6 +67,10 @@ export class HUD {
     this.bossbarNameEl = root.querySelector("#bossbar-name");
     this.bossbarFillEl = root.querySelector("#bossbar-fill");
     this._bossbarName = null;
+    this.bossTelEl = root.querySelector("#bossbar-tel");
+    this.bossTelNameEl = root.querySelector("#bossbar-tel-name");
+    this.bossTelFillEl = root.querySelector("#bossbar-tel-fill");
+    this._bossTelAtk = null;
     this.sheetEl = root.querySelector("#sheet");
     this.portraitsEl = root.querySelector("#portraits");
     this.floatiesEl = root.querySelector("#floaties");
@@ -231,6 +239,27 @@ export class HUD {
 
   hideBossBar() {
     this.bossbarEl.classList.add("hidden");
+    this.clearBossTelegraph();
+  }
+
+  /** Windup warning under the boss bar: which attack is coming + a fill that
+   * races toward the moment it lands. frac is windup progress, 0 → 1. */
+  setBossTelegraph(atk, frac) {
+    this.bossTelEl.classList.remove("hidden");
+    if (atk !== this._bossTelAtk) {
+      this._bossTelAtk = atk;
+      this.bossTelEl.dataset.atk = atk;
+      this.bossTelNameEl.textContent =
+        atk === "charge" ? "⚠ Charge — sidestep!" :
+        atk === "burst" ? "⚠ Orb Burst — weave the gaps!" :
+        "⚠ Slam — back away!";
+    }
+    this.bossTelFillEl.style.width = (Math.max(0, Math.min(1, frac)) * 100).toFixed(1) + "%";
+  }
+
+  clearBossTelegraph() {
+    this.bossTelEl.classList.add("hidden");
+    this._bossTelAtk = null;
   }
 
   /** Red screen pulse when the player takes a hit. */

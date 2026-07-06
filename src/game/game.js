@@ -178,6 +178,12 @@ export class Game {
     if (inDungeon && boss && boss.deadT < 0) {
       this.hud.showBossBar(boss.enraged ? "Ogre King — Enraged" : "Ogre King of the Cellar", boss.enraged);
       this.hud.setBossBar(boss.hp / boss.maxHp);
+      // incoming-attack warning while the boss winds up (guests run telT,
+      // mirrored from the host; the host reads its own attack clock)
+      const windFrac = boss.atkState === "windup" ? boss.atkT / boss.windupDur
+        : boss.telT >= 0 ? boss.telT / boss.telDur : -1;
+      if (windFrac >= 0) this.hud.setBossTelegraph(boss.bossAttack ?? "slam", windFrac);
+      else this.hud.clearBossTelegraph();
     } else this.hud.hideBossBar();
 
     // minimap: floor plan with entrance, exit, foes and players — dungeon only
@@ -2289,6 +2295,21 @@ export class Game {
           e.creature.heading = h;
           e.hp = hp;
         }
+        break;
+      }
+      case "bossTel": {
+        // host announced a boss windup: mirror the glow, ground FX and HUD
+        // countdown so guests can read the dodge too
+        if (!this.net.isGuest) return;
+        const e = D.enemies.find((v) => v.id === m.id);
+        if (!e) return;
+        e.bossAttack = m.atk;
+        e.telT = 0;
+        e.telDur = m.dur;
+        e.ringRadius = m.r;
+        e.chargeX = m.dx;
+        e.chargeZ = m.dz;
+        e.creature.setGlow(m.atk === "charge" ? [0.9, 0.45, 0.05] : m.atk === "burst" ? [0.55, 0.15, 0.8] : [0.95, 0.08, 0.05]);
         break;
       }
       case "eHurt": {

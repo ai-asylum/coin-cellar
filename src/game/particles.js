@@ -41,6 +41,27 @@ export class Particles {
     }
   }
 
+  // sparks placed on a circle's edge (attack-range telegraphs): they hover in
+  // place with a slight rise instead of scattering like burst() shrapnel
+  ring(pos, radius, { color = 0xff5a3a, n = 14, life = 0.35, size = 0.8, up = 0.5 } = {}) {
+    for (let i = 0; i < n; i++) {
+      if (this.pool.length >= MAX) break;
+      const a = (i / n) * Math.PI * 2 + Math.random() * 0.5;
+      this.pool.push({
+        x: pos.x + Math.cos(a) * radius, y: pos.y, z: pos.z + Math.sin(a) * radius,
+        vx: 0,
+        vy: up * (0.5 + Math.random()),
+        vz: 0,
+        g: 0,
+        life: life * (0.7 + Math.random() * 0.6),
+        t: 0,
+        size: size * (0.6 + Math.random() * 0.5),
+        color,
+        spin: Math.random() * 9,
+      });
+    }
+  }
+
   update(dt) {
     const alive = [];
     for (const p of this.pool) {
