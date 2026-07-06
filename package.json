@@ -1,0 +1,18 @@
+{
+  "name": "shop-slop",
+  "version": "0.1.0",
+  "description": "Co-op dungeon-crawling shopkeeper (Recettear-like) in Three.js with seamless blob-baked procedural characters.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "peerjs": "^1.5.5",
+    "three": "^0.169.0"
+  },
+  "devDependencies": {
+    "vite": "^5.4.0"
+  }
+}
