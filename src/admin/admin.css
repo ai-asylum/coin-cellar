@@ -1,0 +1,381 @@
+:root {
+  color-scheme: dark;
+  --bg:        #1a1030;
+  --bg-2:      #221641;
+  --panel:     #2a1d4a;
+  --panel-2:   #33255a;
+  --edge:      #40316b;
+  --ink:       #efe6ff;
+  --ink-dim:   #b3a0d6;
+  --accent:    #7a4dff;
+  --accent-d:  #5a34c9;
+  --gold:      #ffd27a;
+  --radius:    12px;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* inline icons (see src/core/icons.js) — scale with font-size, tint via
+   currentColor for the monochrome chrome glyphs */
+.ic {
+  width: 1em;
+  height: 1em;
+  display: inline-block;
+  vertical-align: -0.14em;
+  flex: none;
+}
+/* white-on-transparent pictogram PNGs used as masks — tint via currentColor */
+.ic-mask {
+  background-color: currentColor;
+  /* mask-image is set inline per-icon (see src/core/icons.js) */
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  -webkit-mask-position: center; mask-position: center;
+  -webkit-mask-size: contain; mask-size: contain;
+}
+/* full-colour merchandise icons — colour PNGs shown as-is, no tint */
+.ic-color {
+  background-repeat: no-repeat; background-position: center; background-size: contain;
+  filter: drop-shadow(0 1px 1px rgba(30, 16, 4, 0.35));
+}
+.ic-heart { color: #e23b4e; }
+.ic-coin, .ic-moneyfly, .ic-crown { color: #ffd27a; }
+.ic--empty { opacity: 0.3; }
+.card-icon .ic { width: 1em; height: 1em; vertical-align: -0.16em; }
+.section-head h2 .ic, .tab .ic { vertical-align: -0.16em; }
+.brand-mark .ic { width: 1em; height: 1em; vertical-align: -0.12em; }
+
+html,
+body {
+  width: 100%;
+  min-height: 100%;
+  background:
+    radial-gradient(120% 80% at 50% -10%, #2a1a52 0%, transparent 55%),
+    var(--bg);
+  color: var(--ink);
+  font-family: "Trebuchet MS", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+/* the single shared WebGL canvas sits above the page and paints each preview
+   into its card via the scissor test; transparent everywhere else. */
+.gl-overlay {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 20;
+}
+
+#admin-app {
+  position: relative;
+  z-index: 1;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 24px 28px 64px;
+}
+
+.boot {
+  padding: 80px 0;
+  text-align: center;
+  color: var(--ink-dim);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+/* ---------- header ---------- */
+.admin-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--edge);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.brand-mark {
+  font-size: 34px;
+  line-height: 1;
+  filter: drop-shadow(0 2px 6px rgba(122, 77, 255, 0.5));
+}
+
+.brand h1 {
+  font-size: 24px;
+  font-weight: 900;
+  letter-spacing: 0.01em;
+}
+
+.brand p {
+  font-size: 13px;
+  color: var(--ink-dim);
+  font-weight: 600;
+}
+
+.header-links {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.back-link {
+  color: var(--ink-dim);
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 14px;
+  padding: 8px 14px;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.back-link:hover {
+  color: var(--ink);
+  border-color: var(--accent);
+  background: var(--panel);
+}
+
+/* ---------- tabs ---------- */
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 22px 0 26px;
+}
+
+.tab {
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--ink-dim);
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  padding: 9px 18px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.tab:hover {
+  color: var(--ink);
+  border-color: var(--accent);
+}
+
+.tab.active {
+  color: #fff;
+  background: linear-gradient(180deg, var(--accent) 0%, var(--accent-d) 100%);
+  border-color: var(--accent);
+  box-shadow: 0 4px 16px rgba(122, 77, 255, 0.35);
+}
+
+/* ---------- section ---------- */
+.section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.section-head h2 {
+  font-size: 22px;
+  font-weight: 900;
+}
+
+.count {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-dim);
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  padding: 3px 11px;
+}
+
+/* ---------- grid + cards ---------- */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.card {
+  background: linear-gradient(180deg, var(--panel) 0%, var(--bg-2) 100%);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.card:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.card-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.card-icon {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.card-titles {
+  display: flex;
+  flex-direction: column;
+  margin-right: auto;
+}
+
+.card-titles h3 {
+  font-size: 17px;
+  font-weight: 900;
+}
+
+.card-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+
+.card-desc {
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--ink-dim);
+}
+
+/* ---------- 3D model preview ---------- */
+.model3d {
+  width: 100%;
+  height: 190px;
+  border-radius: 10px;
+  border: 1px solid var(--edge);
+  background:
+    radial-gradient(120% 90% at 50% 16%, rgba(150, 120, 220, 0.22), transparent 62%),
+    linear-gradient(180deg, #241547 0%, #160d2c 100%);
+  overflow: hidden;
+}
+
+.model3d--failed::after {
+  content: "preview unavailable";
+  display: grid;
+  place-items: center;
+  height: 100%;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-dim);
+}
+
+/* ---------- badges ---------- */
+.badge {
+  font-size: 10.5px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--ink-dim);
+  border: 1px solid var(--edge);
+  white-space: nowrap;
+}
+
+.badge.boss { color: #ff7da8; border-color: #6b2a45; background: #2e1622; }
+.badge.ranged { color: #7dd0ff; border-color: #2a4f6b; background: #142430; }
+.badge.player { color: #9dffbf; border-color: #2a6b45; background: #16301f; }
+.badge.price {
+  color: var(--gold);
+  border-color: #6b5a26;
+  background: #2a2410;
+  font-size: 14px;
+  padding: 4px 10px;
+}
+.badge.tier1 { color: #cfe3ff; border-color: #3a4f6b; background: #182333; }
+.badge.tier2 { color: #a6ffcf; border-color: #2a6b52; background: #142e22; }
+.badge.tier3 { color: #d9b3ff; border-color: #533a6b; background: #241633; }
+.badge.tier4 { color: var(--gold); border-color: #6b5a26; background: #2a2410; }
+
+/* ---------- stats ---------- */
+.stats {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0;
+}
+
+.stat {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  padding: 5px 0;
+  border-bottom: 1px dashed var(--edge);
+}
+.stat:last-child { border-bottom: none; }
+
+.stat-k {
+  color: var(--ink-dim);
+  font-weight: 600;
+}
+
+.stat-v {
+  font-weight: 800;
+  text-align: right;
+}
+
+/* ---------- swatches ---------- */
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--edge);
+}
+
+.swatch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-dim);
+}
+
+.swatch i {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.swatch code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  color: var(--ink);
+  opacity: 0.7;
+}
+
+@media (max-width: 560px) {
+  #admin-app { padding: 18px 14px 48px; }
+}

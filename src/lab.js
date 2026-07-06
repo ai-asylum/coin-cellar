@@ -9,6 +9,7 @@ import {
   heroSpec, customerSpec, goblinSpec, bruteSpec,
   skitterSpec, slimeSpec, wispSpec,
 } from "./chargen/species.js";
+import { icon } from "./core/icons.js";
 
 const engine = new Engine(document.getElementById("app"));
 engine.scene.background = new THREE.Color(0x241639);
@@ -91,17 +92,24 @@ engine.onTick((dt, t) => {
   engine.camTarget.set(0, 0.5, 0);
 });
 
-document.getElementById("lab-reroll").onclick = () => {
+const rerollBtn = document.getElementById("lab-reroll");
+const ragdollBtn = document.getElementById("lab-ragdoll");
+const walkBtn = document.getElementById("lab-walk");
+rerollBtn.innerHTML = `${icon("dice")} Reroll`;
+ragdollBtn.innerHTML = `${icon("skull")} Ragdoll`;
+walkBtn.innerHTML = `${icon("walk")} March`;
+
+rerollBtn.onclick = () => {
   seedBase = Math.floor(Math.random() * 99999);
   build();
 };
-document.getElementById("lab-ragdoll").onclick = () => {
+ragdollBtn.onclick = () => {
   for (const c of creatures) {
     const dir = new THREE.Vector3(c.position.x, -2, c.position.z).normalize().multiplyScalar(-6);
     c.die(dir);
   }
 };
-document.getElementById("lab-walk").onclick = () => {
+walkBtn.onclick = () => {
   marching = !marching;
 };
 

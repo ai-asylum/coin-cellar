@@ -1,9 +1,14 @@
-// Unified input: WASD / arrows on desktop, dynamic virtual joystick +
-// context action button on touch. The game reads:
+// Unified input: WASD / arrows to move, MOUSE to aim + click to attack on
+// desktop; dynamic virtual joystick + context action button on touch.
+// The game reads:
 //   input.move        THREE.Vector2 (len <= 1)
 //   input.actionEdge  true for the frame the action was pressed
-//   input.setActionLabel("⚔️") to relabel the context button
+//   input.pointer     THREE.Vector2 mouse in NDC (-1..1), for aim raycasts
+//   input.aimActive   true when the mouse is driving the aim (desktop)
+//   input.onKey       optional (code) => void callback for keyboard shortcuts
+//   input.setActionLabel("swords") to relabel the context button (icon name)
 import * as THREE from "three";
+import { icon } from "./icons.js";
 
 export class Input {
   constructor(hudEl) {
@@ -12,7 +17,14 @@ export class Input {
     this._actionQueued = false;
     this.actionEdge = false;
     this.actionHeld = false;
+    this._dodgeQueued = false;
+    this.dodgeEdge = false; // true for the frame a dodge/roll was requested
     this.isTouch = matchMedia("(pointer: coarse)").matches;
+
+    // mouse aim (desktop): pointer in normalized device coords, aim on until touch
+    this.pointer = new THREE.Vector2(0, 0);
+    this.aimActive = !this.isTouch;
+    this.onKey = null; // set by the game to receive shortcut keydowns
 
     window.addEventListener("keydown", (e) => {
       if (e.repeat) return;
@@ -21,6 +33,13 @@ export class Input {
         this._actionQueued = true;
         this.actionHeld = true;
       }
+      // dodge / roll: Shift, K, or L
+      if (e.code === "ShiftLeft" || e.code === "ShiftRight" || e.code === "KeyK" || e.code === "KeyL") {
+        this._dodgeQueued = true;
+      }
+      // shortcuts (skip while typing in a field)
+      const t = document.activeElement && document.activeElement.tagName;
+      if (t !== "INPUT" && t !== "TEXTAREA") this.onKey?.(e.code, e);
     });
     window.addEventListener("keyup", (e) => {
       this._keys.delete(e.code);
@@ -38,10 +57,11 @@ export class Input {
     this._joyOrigin = { x: 0, y: 0 };
     this._joyVec = { x: 0, y: 0 };
 
-    // --- action button
+    // --- action button (labelled by icon name; see core/icons.js)
     this.actionBtn = document.createElement("button");
     this.actionBtn.id = "action-btn";
-    this.actionBtn.textContent = "⚔️";
+    this._actionLabel = "swords";
+    this.actionBtn.innerHTML = icon("swords");
     hudEl.appendChild(this.actionBtn);
     const press = (e) => {
       e.preventDefault();
@@ -54,18 +74,62 @@ export class Input {
     this.actionBtn.addEventListener("mousedown", press);
     this.actionBtn.addEventListener("mouseup", release);
 
+    // --- dodge button (touch): a quick roll with i-frames
+    this.dodgeBtn = document.createElement("button");
+    this.dodgeBtn.id = "dodge-btn";
+    this.dodgeBtn.innerHTML = icon("walk");
+    hudEl.appendChild(this.dodgeBtn);
+    const dodgePress = (e) => {
+      e.preventDefault();
+      this._dodgeQueued = true;
+    };
+    this.dodgeBtn.addEventListener("touchstart", dodgePress, { passive: false });
+    this.dodgeBtn.addEventListener("mousedown", dodgePress);
+
     const area = document.getElementById("app");
     area.addEventListener("touchstart", (e) => this._touchStart(e), { passive: false });
     area.addEventListener("touchmove", (e) => this._touchMove(e), { passive: false });
     area.addEventListener("touchend", (e) => this._touchEnd(e));
     area.addEventListener("touchcancel", (e) => this._touchEnd(e));
 
-    if (!this.isTouch) this.stick.style.display = "none";
+    // --- mouse aim + click-to-attack (desktop). The HUD sits above the
+    // canvas with pointer-events:none, so clicks on buttons never reach here.
+    window.addEventListener("mousemove", (e) => {
+      this.aimActive = true;
+      this.pointer.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+    });
+    area.addEventListener("mousedown", (e) => {
+      if (e.button !== 0) return; // left click only
+      this.aimActive = true;
+      this._actionQueued = true;
+      this.actionHeld = true;
+    });
+    area.addEventListener("mouseup", (e) => {
+      if (e.button === 0) this.actionHeld = false;
+    });
+    // right mouse button = dodge / roll
+    area.addEventListener("mousedown", (e) => {
+      if (e.button === 2) {
+        this.aimActive = true;
+        this._dodgeQueued = true;
+      }
+    });
+    area.addEventListener("contextmenu", (e) => e.preventDefault());
+    // first touch hands control back to the virtual stick / on-screen button
+    window.addEventListener("touchstart", () => (this.aimActive = false), { passive: true });
+
+    if (!this.isTouch) {
+      this.stick.style.display = "none";
+      this.dodgeBtn.style.display = "none";
+    }
   }
 
-  setActionLabel(txt, show = true) {
-    if (this.actionBtn.textContent !== txt) this.actionBtn.textContent = txt;
-    this.actionBtn.classList.toggle("pulse", show && txt !== "⚔️");
+  setActionLabel(name, show = true) {
+    if (this._actionLabel !== name) {
+      this._actionLabel = name;
+      this.actionBtn.innerHTML = icon(name);
+    }
+    this.actionBtn.classList.toggle("pulse", show && name !== "swords");
   }
 
   _touchStart(e) {
@@ -110,6 +174,8 @@ export class Input {
   update() {
     this.actionEdge = this._actionQueued;
     this._actionQueued = false;
+    this.dodgeEdge = this._dodgeQueued;
+    this._dodgeQueued = false;
 
     let x = 0, y = 0;
     if (this._keys.has("KeyA") || this._keys.has("ArrowLeft")) x -= 1;

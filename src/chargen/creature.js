@@ -65,7 +65,13 @@ export class Creature extends THREE.Group {
     this.radius = spec.anim.radius;
     this.height = spec.anim.height;
     this._flashT = 0;
+    this._glow = null; // [r,g,b] steady emissive tint (attack telegraph)
     this._attackDur = 0.45;
+  }
+
+  /** Steady emissive tint for attack telegraphs. Pass null to clear. */
+  setGlow(rgb) {
+    this._glow = rgb;
   }
 
   /** Attach a prop (e.g. a sword) to the hand bone tip. */
@@ -110,11 +116,12 @@ export class Creature extends THREE.Group {
     }
     if (this._flashT > 0) {
       this._flashT -= dt;
-      if (this._flashT <= 0) this.bodyMat.emissive.setRGB(0, 0, 0);
-      else {
-        const k = this._flashT / 0.12;
-        this.bodyMat.emissive.setRGB(k, k * 0.9, k * 0.8);
-      }
+      const k = Math.max(this._flashT / 0.12, 0);
+      this.bodyMat.emissive.setRGB(k, k * 0.9, k * 0.8);
+    } else if (this._glow) {
+      this.bodyMat.emissive.setRGB(this._glow[0], this._glow[1], this._glow[2]);
+    } else {
+      this.bodyMat.emissive.setRGB(0, 0, 0);
     }
     this.animator.update(dt, elapsed);
     // keep the blob shadow glued to the floor even when we hop/float/die

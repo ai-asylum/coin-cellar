@@ -6,6 +6,7 @@ export default defineConfig({
   server: {
     host: true,
     open: false,
+    hmr: false,
   },
   build: {
     target: "es2020",
@@ -13,6 +14,7 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, "index.html"),
         lab: resolve(__dirname, "lab.html"),
+        admin: resolve(__dirname, "admin/index.html"),
       },
     },
   },

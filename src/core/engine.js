@@ -11,12 +11,14 @@ export class Engine {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.1;
+    this.renderer.toneMappingExposure = 1.05;
     mountEl.appendChild(this.renderer.domElement);
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x2b1c46);
-    this.scene.fog = new THREE.Fog(0x2b1c46, 26, 60);
+    // Moodier backdrop: deeper twilight purple, tighter fog so the light
+    // shafts have something to glow against and the room edges fall to dusk.
+    this.scene.background = new THREE.Color(0x1a1030);
+    this.scene.fog = new THREE.Fog(0x1a1030, 20, 52);
 
     this.camera = new THREE.PerspectiveCamera(46, 1, 0.1, 200);
     this.camera.position.set(0, 9, 8);
@@ -27,11 +29,14 @@ export class Engine {
     this.camOffset = new THREE.Vector3(0, 8.4, 7.2);
     this.camLookAhead = new THREE.Vector3();
     this.camShake = 0;
+    this.camPunch = new THREE.Vector3(); // transient positional kick (decays)
 
-    this.hemi = new THREE.HemisphereLight(0xcdb8ff, 0x3a2a55, 1.05);
+    // Moody key + fill: a dim cool ambient (so shadows read as blue dusk)
+    // and a strong warm, low-ish "sun" that the god-ray shafts trace.
+    this.hemi = new THREE.HemisphereLight(0xb7a1ff, 0x160e28, 0.6);
     this.scene.add(this.hemi);
-    this.sun = new THREE.DirectionalLight(0xfff2d8, 1.6);
-    this.sun.position.set(6, 12, 4);
+    this.sun = new THREE.DirectionalLight(0xffdca0, 1.9);
+    this.sun.position.set(7, 10, 5);
     this.scene.add(this.sun);
     this.scene.add(this.sun.target);
 
@@ -62,7 +67,18 @@ export class Engine {
   }
 
   shake(amount = 0.25) {
-    this.camShake = Math.min(0.8, this.camShake + amount);
+    // kept deliberately gentle — big values get scaled down and capped low
+    this.camShake = Math.min(0.4, this.camShake + amount * 0.45);
+  }
+
+  // A directional shove of the whole view — sells the impact direction of a
+  // hit far more than jitter alone. dx/dz are world-space; amt scales it.
+  punch(dx = 0, dz = 0, amt = 0.25) {
+    const len = Math.hypot(dx, dz) || 1;
+    this.camPunch.x += (dx / len) * amt;
+    this.camPunch.z += (dz / len) * amt;
+    const cap = 0.6;
+    this.camPunch.clampLength(0, cap);
   }
 
   start() {
@@ -83,6 +99,11 @@ export class Engine {
   _updateCamera(dt) {
     const want = _v1.copy(this.camTarget).add(this.camOffset);
     this.camera.position.lerp(want, 1 - Math.pow(0.0018, dt));
+    // apply + decay the impact punch (springy snap-back)
+    if (this.camPunch.lengthSq() > 1e-5) {
+      this.camera.position.add(this.camPunch);
+      this.camPunch.multiplyScalar(Math.pow(0.0009, dt));
+    } else this.camPunch.set(0, 0, 0);
     const look = _v2.copy(this.camTarget).add(this.camLookAhead);
     look.y += 0.6;
     if (this.camShake > 0.001) {

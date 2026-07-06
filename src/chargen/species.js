@@ -311,6 +311,26 @@ export function goblinSpec(seed, tier = 0) {
   return s;
 }
 
+// Hooded dungeon archer — slender, robed, keeps its distance and looses bolts.
+// Teal/indigo palette so it reads clearly apart from the green goblins.
+export function archerSpec(seed, tier = 0) {
+  const r = rng(seed * 71 + 13);
+  const skin = hsl(0.09 + r() * 0.04, 0.4, 0.5);
+  return humanoidSpec({
+    key: "arch" + seed + "_" + tier,
+    scale: 0.78 + tier * 0.04,
+    fat: 0.8,
+    headR: 0.24,
+    armR: 0.06,
+    skin,
+    cloth: hsl(0.53, 0.5, 0.36 + tier * 0.03),
+    pants: hsl(0.6, 0.4, 0.26),
+    accent: hsl(0.5, 0.7, 0.6),
+    earType: "point",
+    hat: "hood",
+  });
+}
+
 export function bruteSpec(seed, tier = 0) {
   const r = rng(seed * 131 + 5);
   const skin = hsl(0.02 + r() * 0.05, 0.5, 0.4);
@@ -324,6 +344,27 @@ export function bruteSpec(seed, tier = 0) {
     cloth: skin,
     pants: hsl(0.09, 0.4, 0.25),
     accent: hsl(0.0, 0.6, 0.35),
+    earType: "none",
+    hat: "horns",
+  });
+}
+
+// The cellar boss: a hulking, ashen-skinned ogre king that guards the sealed
+// arena on the final floor. A super-sized brute silhouette with a deep-red
+// palette so it reads unmistakably as "the big one".
+export function bossSpec(seed = 0) {
+  const r = rng(seed * 977 + 17);
+  const skin = hsl(0.99 + r() * 0.03, 0.55, 0.3);
+  return humanoidSpec({
+    key: "boss" + seed,
+    scale: 2.5,
+    fat: 1.9,
+    headR: 0.22,
+    armR: 0.18,
+    skin,
+    cloth: skin,
+    pants: hsl(0.02, 0.5, 0.18),
+    accent: hsl(0.12, 0.85, 0.5),
     earType: "none",
     hat: "horns",
   });
