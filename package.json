@@ -1,5 +1,5 @@
 {
-  "name": "shop-slop",
+  "name": "coin-cellar",
   "version": "0.1.0",
   "description": "Co-op dungeon-crawling shopkeeper (Recettear-like) in Three.js with seamless blob-baked procedural characters.",
   "type": "module",

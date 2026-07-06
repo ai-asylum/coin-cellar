@@ -23,7 +23,7 @@ const DEBT = [
   { day: 15, amt: 5200 },
 ];
 const START_INV = ["apple", "apple", "herb", "wsword"];
-const SAVE_KEY = "shopslop_save_v1";
+const SAVE_KEY = "coincellar_save_v1";
 
 export class Game {
   constructor(engine, input, audio, hud) {
@@ -403,7 +403,7 @@ export class Game {
     }
     if (!first) this.hud.banner(`☀️ Day ${this.day}`, "stock the tables — customers are coming", 2.2);
     else {
-      this.hud.banner("🏪 SHOP SLOP", "delve by night · deal by day", 3);
+      this.hud.banner("🏪 COIN CELLAR", "delve by night · deal by day", 3);
       if (this.day === 1) {
         setTimeout(() => this.hud.toast("🎒 Tap the bag to put items on your tables"), 3200);
         setTimeout(() => this.hud.toast("🗣️ Walk up to customers with ❗ to haggle"), 6600);

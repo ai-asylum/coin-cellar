@@ -4,7 +4,7 @@
 // The dream team split: one keeps shop while the other delves.
 import { Peer } from "peerjs";
 
-const PREFIX = "shopslop-";
+const PREFIX = "coincellar-";
 const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 export class Coop {

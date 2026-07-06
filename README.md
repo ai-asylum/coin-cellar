@@ -1,4 +1,4 @@
-# 🏪 Shop Slop — *delve by night, deal by day*
+# 🏪 Coin Cellar — *delve by night, deal by day*
 
 A mobile-first **co-op dungeon-crawling shopkeeper** built with Three.js.
 [Recettear](https://en.wikipedia.org/wiki/Recettear:_An_Item_Shop%27s_Tale) is
