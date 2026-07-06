@@ -390,6 +390,11 @@ export class Game {
     // the cellar is folded into the stairs prompt now, so there's no separate
     // return circle at the entrance.
     if (this.dungeon.active) {
+      // the return portal left behind by the fallen boss: step in to go home
+      if (this.dungeon.returnPortal) {
+        _v.copy(this.dungeon.returnPortal.pos);
+        if (_v.distanceTo(p) < 1.7) return { label: "home", hint: "Return", fn: () => this._returnHome(), focus: _v.clone().setY(0.06), color: 0x7fd8ff };
+      }
       // the sealed boss door: unlock it with the key, or read the "locked" cue
       if (this.dungeon.gatePos && !this.dungeon.gateOpen) {
         _v.copy(this.dungeon.gatePos).add(DUNGEON_ORIGIN);
@@ -1434,8 +1439,12 @@ export class Game {
   onBossDefeated(pos = null) {
     this.audio.victory();
     this.engine.shake(0.45);
-    this.hud.banner(`${icon("crown")} The Cellar Boss falls!`, "grab the spoils, then head home", 3.4);
-    if (pos) this.particles.burst(_v.copy(pos).setY(1), { color: 0xffe08a, n: 30, speed: 5, up: 2.2, life: 1.1, size: 1.3 });
+    this.hud.banner(`${icon("crown")} The Cellar Boss falls!`, "grab the spoils, then take the portal home", 3.4);
+    if (pos) {
+      this.particles.burst(_v.copy(pos).setY(1), { color: 0xffe08a, n: 30, speed: 5, up: 2.2, life: 1.1, size: 1.3 });
+      // a way out opens where the boss fell — step in to head straight home
+      this.dungeon.spawnReturnPortal(pos.x, pos.z);
+    }
   }
 
   // ================================================================ game over

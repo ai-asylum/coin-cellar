@@ -110,6 +110,8 @@ export class Dungeon {
     this.bossCenter = null;
     this.boss = null;
     this.keyChestId = -1;
+    // return portal home, conjured where the boss falls (world-space anchor)
+    this.returnPortal = null;
   }
 
   /** Build floor n from a seed (deterministic — co-op peers share the seed). */
@@ -544,6 +546,14 @@ export class Dungeon {
     }
 
     for (const s of this.shafts) s.userData.update(dt, elapsed);
+
+    // the return portal pulses and slowly spins once it's been conjured
+    if (this.returnPortal) {
+      const rp = this.returnPortal;
+      rp.mesh.rotation.y += dt * 0.7;
+      rp.disc.material.opacity = 0.45 + Math.sin(elapsed * 3) * 0.15;
+      rp.ring.material.opacity = 0.6 + Math.sin(elapsed * 3 + 1) * 0.15;
+    }
 
     // the boss gate slides up out of sight once it's been unlocked
     if (this.gate && this.gate.raiseT >= 0) {
@@ -1148,6 +1158,36 @@ export class Dungeon {
     }
   }
 
+  /** Conjure a shimmering return portal at world coords (wx,wz) — spawned when
+   * the boss falls so the player can step straight out of the arena and home.
+   * Built identically on host and guest (both run onBossDefeated), so it needs
+   * no dedicated net message to stay in sync. */
+  spawnReturnPortal(wx, wz) {
+    if (this.returnPortal) return;
+    const lx = wx - DUNGEON_ORIGIN.x, lz = wz - DUNGEON_ORIGIN.z;
+    const g = new THREE.Group();
+    g.position.set(lx, 0, lz);
+    // a glowing disc on the floor with a brighter outer ring
+    const disc = new THREE.Mesh(
+      new THREE.CircleGeometry(1.05, 28).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: 0x5dd0ff, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false })
+    );
+    disc.position.y = 0.05;
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(1.05, 1.35, 30).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: 0x9a6dff, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false })
+    );
+    ring.position.y = 0.06;
+    g.add(disc, ring);
+    this.group.add(g);
+    // a bright column of arcane light rising from the portal (animated via shafts)
+    const shaft = makeLightShaft({ color: 0x7fd8ff, length: 4.8, topWidth: 0.5, bottomWidth: 2.2, opacity: 0.55, tilt: 0, spin: 1.6, motes: 16 });
+    shaft.position.set(lx, 3.4, lz);
+    this.group.add(shaft);
+    this.shafts.push(shaft);
+    this.returnPortal = { pos: new THREE.Vector3(wx, 0, wz), mesh: g, disc, ring };
+  }
+
   /** x/z are WORLD coordinates. */
   spawnDrop(itemId, x, z, id = null) {
     const mesh = itemSprite(itemId);
@@ -1221,6 +1261,7 @@ export class Dungeon {
     this.boss = null;
     this.keyChestId = -1;
     this.isBoss = false;
+    this.returnPortal = null;
   }
 }
 
