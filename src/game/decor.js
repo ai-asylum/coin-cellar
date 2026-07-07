@@ -173,13 +173,34 @@ export const DECOR_BURST = {
 // Returns the list of destructible props (everything but the stones) so the
 // dungeon can let the player smash them into a particle puff.
 const CAVE_TINT = 0xc7c2d4;
+// default mix, matching the classic cellar look; a hole theme can override
+// both the category weights and the tint via opts.theme
+const CAVE_WEIGHTS = { mushrooms: 0.42, stones: 0.36, dead: 0.14, bones: 0.08 };
+const CAVE_HEIGHT = {
+  mushrooms: (r) => 0.45 + r() * 0.5,
+  stones: (r) => 0.55 + r() * 0.6,
+  dead: (r) => 1.6 + r() * 0.9,
+  bones: (r) => 0.7 + r() * 0.3,
+};
 export function scatterDungeonDecor(group, r, rooms, cellPos, opts = {}) {
-  const { skip = [] } = opts;
+  const { skip = [], theme = null } = opts;
+  const tint = theme?.tint ?? CAVE_TINT;
+  const weights = theme?.weights ?? CAVE_WEIGHTS;
+  const cats = Object.keys(weights);
+  const total = cats.reduce((s, c) => s + weights[c], 0);
+  const rollCat = () => {
+    let roll = r() * total;
+    for (const c of cats) {
+      roll -= weights[c];
+      if (roll <= 0) return c;
+    }
+    return cats[cats.length - 1];
+  };
   const blocked = (cx, cy) => skip.some((s) => Math.abs(s.x - cx) < 1.5 && Math.abs(s.y - cy) < 1.5);
   const destructibles = [];
 
   const add = (cat, wx, wz, height) => {
-    const s = decorSprite(pick(r, DECOR[cat]), { height, tint: CAVE_TINT });
+    const s = decorSprite(pick(r, DECOR[cat]), { height, tint });
     s.position.set(wx, 0, wz);
     group.add(s);
     const color = DECOR_BURST[cat];
@@ -201,11 +222,8 @@ export function scatterDungeonDecor(group, r, rooms, cellPos, opts = {}) {
       const gx = r() < 0.5 ? edgeX : room.x + 0.4 + r() * (room.w - 1);
       const gy = r() < 0.5 ? room.y + 0.4 + r() * (room.h - 1) : edgeY;
       const p = cellPos(gx, gy);
-      const roll = r();
-      if (roll < 0.42) add("mushrooms", p.x, p.z, 0.45 + r() * 0.5);
-      else if (roll < 0.78) add("stones", p.x, p.z, 0.55 + r() * 0.6);
-      else if (roll < 0.92) add("dead", p.x, p.z, 1.6 + r() * 0.9);
-      else add("bones", p.x, p.z, 0.7 + r() * 0.3);
+      const cat = rollCat();
+      add(cat, p.x, p.z, CAVE_HEIGHT[cat](r));
     }
   }
   return destructibles;

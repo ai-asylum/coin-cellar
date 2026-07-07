@@ -75,6 +75,49 @@ export const ENEMY_KINDS = {
   },
 };
 
+// Visual identity per sewer hole: floor/wall palette (indexed by floor,
+// clamped to the last entry), torch crystal colors, god-ray shaft colors and
+// the set-dressing mix. Index matches Sewer.holes; the tutorial's private
+// cellar (sewerHole -1) falls back to the classic look.
+const DEFAULT_THEME = {
+  palettes: [
+    [0x8a70b5, 0x715a99],
+    [0x5f93a8, 0x4d7a8c],
+    [0xa8756a, 0x8c5f55],
+    [0x7a75ad, 0x635e94],
+    [0x9c6693, 0x7f5178],
+  ],
+  torch: [0x9a6dff, 0x5dd0ff, 0xff9a5d],
+  shafts: [0x8fb6ff, 0xb98cff, 0x6fd6c8],
+  decor: null, // default cave mix (see scatterDungeonDecor)
+};
+export const HOLE_THEMES = [
+  { // Rat Warren — burrowed earth: warm browns, gnawed bones, dead roots
+    palettes: [[0xa8756a, 0x8c5f55], [0x9c6b55, 0x7f5643], [0x8a5f4d, 0x6f4c3d]],
+    torch: [0xff9a5d, 0xffd34d],
+    shafts: [0xffb97a, 0xd9a066],
+    decor: { tint: 0xd4c2b0, weights: { mushrooms: 0.15, stones: 0.4, dead: 0.25, bones: 0.2 } },
+  },
+  { // Flooded Deep — waterlogged stone: cold blues, slick rocks, pale caps
+    palettes: [[0x5f93a8, 0x4d7a8c], [0x54879e, 0x426a7d], [0x4a7a93, 0x385d70]],
+    torch: [0x5dd0ff, 0x6fd6c8],
+    shafts: [0x8fb6ff, 0x6fd6c8],
+    decor: { tint: 0xb8cfd8, weights: { mushrooms: 0.35, stones: 0.55, dead: 0.05, bones: 0.05 } },
+  },
+  { // Bone Hollow — ossuary: pale ash and dust, bone piles at every turn
+    palettes: [[0xa89a8a, 0x8c7f70], [0x9a8c7a, 0x7d7060], [0x8a7c6a, 0x6d6050]],
+    torch: [0xffe9c4, 0xff9a5d],
+    shafts: [0xffd9a0, 0xe8e0c8],
+    decor: { tint: 0xe0d8c8, weights: { mushrooms: 0.1, stones: 0.25, dead: 0.25, bones: 0.4 } },
+  },
+  { // Gloom Drain — fungal gloom: mossy greens, mushroom thickets
+    palettes: [[0x6a9a70, 0x557f5c], [0x5d8c66, 0x487252], [0x4f7d58, 0x3b6345]],
+    torch: [0x6fd6c8, 0x9a6dff],
+    shafts: [0x6fd6c8, 0x8fb6ff],
+    decor: { tint: 0xbcd4be, weights: { mushrooms: 0.55, stones: 0.25, dead: 0.15, bones: 0.05 } },
+  },
+];
+
 // A dungeon run is now exactly three floors deep; the third holds the boss.
 export const MAX_FLOORS = 3;
 export const FLOOR_MIX = [
@@ -212,14 +255,10 @@ export class Dungeon {
 
     const cellPos = (x, y) => new THREE.Vector3((x - GW / 2 + 0.5) * CELL, 0, (y - GH / 2 + 0.5) * CELL);
 
-    // --- floor slab
-    const palette = [
-      [0x8a70b5, 0x715a99],
-      [0x5f93a8, 0x4d7a8c],
-      [0xa8756a, 0x8c5f55],
-      [0x7a75ad, 0x635e94],
-      [0x9c6693, 0x7f5178],
-    ][Math.min(floorN - 1, 4) % 5];
+    // --- floor slab (colors come from the hole's theme; tutorial gets the default)
+    const theme = HOLE_THEMES[this.game.sewerHole] ?? DEFAULT_THEME;
+    this.theme = theme;
+    const palette = theme.palettes[Math.min(floorN - 1, theme.palettes.length - 1)];
     const floorTex = makeTilesTexture(palette, seed + floorN);
     // the floor only exists under open (walkable) cells — one merged quad per
     // cell rather than a single slab, so there's no floor hanging out beyond the
@@ -301,7 +340,7 @@ export class Dungeon {
         const p = cellPos(room.x, room.y);
         const crystal = new THREE.Mesh(
           new THREE.ConeGeometry(0.16, 0.55, 5),
-          new THREE.MeshBasicMaterial({ color: pick(r, [0x9a6dff, 0x5dd0ff, 0xff9a5d]) })
+          new THREE.MeshBasicMaterial({ color: pick(r, theme.torch) })
         );
         crystal.position.set(p.x + CELL * 0.3, 0.3, p.z + CELL * 0.3);
         crystal.rotation.z = 0.3;
@@ -315,6 +354,7 @@ export class Dungeon {
     // group-local props; store their world position so combat can smash them
     this.decor = scatterDungeonDecor(this.group, r, rooms, cellPos, {
       skip: [this.entranceCell, this.stairsCell],
+      theme: theme.decor,
     }).map((d) => ({ ...d, wx: d.x + DUNGEON_ORIGIN.x, wz: d.z + DUNGEON_ORIGIN.z }));
 
     // --- god-ray shafts: light leaking through cracks in the ceiling above.
@@ -331,7 +371,7 @@ export class Dungeon {
     for (const room of rooms.slice(1, -1)) {
       if (r() < 0.5) {
         const p = cellPos(room.cx, room.cy);
-        addShaft(p, { color: pick(r, [0x8fb6ff, 0xb98cff, 0x6fd6c8]), length: 4.4, topWidth: 0.5, bottomWidth: 2.1, opacity: 0.24 + r() * 0.1, tilt: 0.18 + r() * 0.3, spin: r() * Math.PI, motes: 10 });
+        addShaft(p, { color: pick(r, theme.shafts), length: 4.4, topWidth: 0.5, bottomWidth: 2.1, opacity: 0.24 + r() * 0.1, tilt: 0.18 + r() * 0.3, spin: r() * Math.PI, motes: 10 });
       }
     }
 

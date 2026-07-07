@@ -6,14 +6,30 @@
 //   pay the Guild every 3rd day or lose the shop.
 import * as THREE from "three";
 import { rng, pick, clamp, lerp } from "../core/engine.js";
-import { BlockyCreature } from "../chargen/blocky.js";
+import { BlockyCreature, variantForSeed } from "../chargen/blocky.js";
 import { Shop, SHOP } from "./shop.js";
 import { Dungeon, DUNGEON_ORIGIN, MAX_FLOORS } from "./dungeon.js";
+import { Sewer } from "./sewer.js";
 import { ITEMS, itemSprite, swordMesh } from "./items.js";
 import { Particles } from "./particles.js";
 import { SlashArc } from "./slash.js";
 import { Coop } from "../net/coop.js";
+import { Lobby } from "../net/lobby.js";
 import { icon, itemIcon } from "../core/icons.js";
+
+// Cross-browser fullscreen helpers (touch play runs fullscreen).
+export function isFullscreen() {
+  return !!(document.fullscreenElement || document.webkitFullscreenElement);
+}
+export function requestFullscreen() {
+  const el = document.documentElement;
+  const fn = el.requestFullscreen || el.webkitRequestFullscreen || el.webkitRequestFullScreen;
+  if (!fn) return;
+  try {
+    const r = fn.call(el);
+    if (r && typeof r.catch === "function") r.catch(() => {});
+  } catch (e) {}
+}
 
 const DAY_LEN = 160;
 const UNSEAL_FEE = 100; // what the Guild charges to unseal the cellar for a second delve
@@ -33,6 +49,8 @@ const DEBT = [
 // them straight down the trapdoor to earn their first stock (see _tutStart).
 const START_INV = [];
 const SAVE_KEY = "coincellar_save_v1";
+const NAME_KEY = "coincellar_name";
+const FRIENDS_KEY = "coincellar_friends";
 const LEVEL_INVULN = 1.8; // damage-immunity grace when arriving on a new floor
 
 export class Game {
@@ -85,6 +103,7 @@ export class Game {
     this.godMode = false;
     this._adminOpen = false;
     this.paused = false;
+    this._fsPaused = false; // set while a touch player is out of fullscreen
     this._escOpen = false;
     this._autoDealCd = 0; // brief breather between auto-opened haggles
     this.tutorial = null; // first-run onboarding step (see _tutStart); null once done
@@ -92,12 +111,25 @@ export class Game {
 
     this._load();
 
+    // Friends: a display name (so friends can find us on the broker) plus the
+    // list of names we've saved. If we already have a name, hop online right
+    // away so invites can land.
+    this.playerName = localStorage.getItem(NAME_KEY) || "";
+    this.friends = this._loadFriends();
+    if (this.playerName) this.net.goOnline(this.playerName);
+
     // running tally for the "good night" recap — reset each morning
     this.today = this._freshDayStats();
 
     // --- world
     this.shop = new Shop(this);
     this.dungeon = new Dungeon(this);
+    this.sewer = new Sewer(this);
+    // the shared-world lobby (Supabase Realtime): joined while in the sewer or
+    // down a hole, so strangers' avatars show up alongside the co-op partner
+    this.lobby = new Lobby(this);
+    this.sewerHole = -1; // which sewer hole the current dungeon hangs under
+    this._lobbyAvatars = new Map(); // lobby player id -> {creature, wasAtk}
 
     // --- player
     this.player = new BlockyCreature("a", { height: 1.3 });
@@ -109,10 +141,11 @@ export class Game {
       this.particles.burst(pos, { color: 0x9a8f80, n: 1, speed: 0.4, up: 0.5, gravity: 2, life: 0.35, size: 0.7 });
     };
 
-    this.remote = null; // {creature, target:{x,z,h}, area}
+    this.remote = null; // {creature, buf:[{t,x,z,h}], area}
     this.highlight = this._makeHighlight();
 
     this._wireHud();
+    this._initFullscreenGate();
     this.input.onKey = (code) => this._handleKey(code);
     this._morning(true);
     engine.onTick((dt, t) => this.update(dt, t));
@@ -127,8 +160,9 @@ export class Game {
   // ================================================================ loop
   update(dt, elapsed) {
     this.input.update();
-    if (this.paused) {
-      // ESC menu is up in single-player: freeze the world, keep the HUD live
+    if (this.paused || this._fsPaused) {
+      // Paused: ESC menu / descend prompt up, or a touch player has dropped out
+      // of fullscreen. Freeze the world but keep the HUD live.
       this.highlight.visible = false;
       this.hud.hideGuide();
       this.hud.hideInteractHint();
@@ -137,15 +171,18 @@ export class Game {
     }
     this._updatePlayer(dt, elapsed);
     this._updateRemote(dt, elapsed);
+    this._updateLobbyPlayers(dt, elapsed);
     this.shop.update(dt, elapsed);
     this._autoDeal(dt);
     this.dungeon.update(dt, elapsed);
+    this.sewer.update(dt, elapsed);
     this.particles.update(dt);
     this.slash.update(dt);
     this._updateUseFx(dt);
     this._updateTutGuide();
     this.hud.update();
     this.net.update(dt);
+    this.lobby.update(dt);
 
     // day "timer" (host authority): the sun only moves when AP is spent —
     // dayT eases toward the mark set by the remaining AP instead of ticking
@@ -155,7 +192,7 @@ export class Game {
       if (this.dayT > target) this.dayT = Math.max(target, this.dayT - rate * dt);
       // last AP spent: dusk falls once the final errand wraps up (rush served
       // and doors shut, player back up from the cellar)
-      if (this.dayT <= 0 && this.playerArea !== "dungeon" && !this.shop.doorsOpen && this.shop.customers.length === 0)
+      if (this.dayT <= 0 && this.playerArea === "shop" && !this.shop.doorsOpen && this.shop.customers.length === 0)
         this._nightfall();
     }
     if (this.phase === "day" && !this.gameOver) {
@@ -166,12 +203,13 @@ export class Game {
     // and locks onto the arena's centre once inside the boss room (fixed cam)
     const p = this.player.position;
     const inDungeon = this.playerArea === "dungeon";
+    const inSewer = this.playerArea === "sewer";
     const inBoss = inDungeon && this.dungeon.active && this.dungeon.inBossRoom(p);
-    const camTarget = inBoss ? this.dungeon.bossCenter : inDungeon ? p : _shopCenter;
-    const camOffset = inBoss ? _camBoss : inDungeon ? _camDungeon : _camShop;
+    const camTarget = inBoss ? this.dungeon.bossCenter : inDungeon || inSewer ? p : _shopCenter;
+    const camOffset = inBoss ? _camBoss : inDungeon ? _camDungeon : inSewer ? _camSewer : _camShop;
     this.engine.camTarget.lerp(camTarget, 1 - Math.pow(0.001, dt));
     this.engine.camOffset.lerp(camOffset, 1 - Math.pow(0.1, dt));
-    this.audio.setMood(this.gameOver ? null : inDungeon ? "dungeon" : this.phase === "day" ? "shop" : null);
+    this.audio.setMood(this.gameOver ? null : inDungeon || inSewer ? "dungeon" : this.phase === "day" ? "shop" : null);
 
     // boss health bar: pinned up while the boss lives and you're in the cellar
     const boss = this.dungeon.boss;
@@ -233,25 +271,19 @@ export class Game {
       c.position.z += mv.y * speed * dt;
     }
 
-    // facing: mouse aim on desktop, movement direction on touch
+    // facing follows the direction of movement
     const swinging = c.animator.attackT >= 0 && c.animator.attackT < 0.45;
     if (this._dashT >= 0) {
-      // keep the roll facing its travel direction (don't fight the aim)
+      // keep the roll facing its travel direction
       c.heading = Math.atan2(this._dashDX, this._dashDZ);
     } else if (swinging) {
       // hold the committed swing direction (set by _attack's aim assist) until
       // the blow lands, so the hit connects where the swoosh points
-    } else if (this.input.aimActive) {
-      const aim = this._aimPoint();
-      if (aim) {
-        const dx = aim.x - c.position.x;
-        const dz = aim.z - c.position.z;
-        if (dx * dx + dz * dz > 0.02) c.heading = Math.atan2(dx, dz);
-      }
     } else if (!sheetBlocked && (mv.x || mv.y)) {
       c.heading = Math.atan2(mv.x, mv.y);
     }
-    const colliders = this.playerArea === "shop" ? this.shop.colliders : this.dungeon.colliders;
+    const colliders = this.playerArea === "shop" ? this.shop.colliders
+      : this.playerArea === "sewer" ? this.sewer.colliders : this.dungeon.colliders;
     this.collide(c.position, c.radius * 0.8, colliders);
     if (this.playerArea === "shop") {
       c.position.x = clamp(c.position.x, -SHOP.W / 2 + 0.5, SHOP.W / 2 - 0.5);
@@ -344,15 +376,16 @@ export class Game {
     for (const m of h.userData.mats) m.color.setHex(c);
   }
 
-  // Raycast the mouse pointer onto the ground plane (torso height) so the
-  // player can aim in world space regardless of where they're standing.
-  _aimPoint() {
-    _ray.setFromCamera(this.input.pointer, this.engine.camera);
-    return _ray.ray.intersectPlane(_aimPlane, _v3) ? _v3 : null;
-  }
-
   // Keyboard shortcuts for the on-screen actions + the admin panel.
   _handleKey(code) {
+    // An open modal takes keyboard priority: J/K move the highlight, Enter
+    // picks it, Esc backs out — and the haggle sheet remaps those to nudge the
+    // price / seal the deal / walk away. The esc-menu keeps Esc = resume; the
+    // admin panel isn't a sheet, so it never intercepts here.
+    if (this.hud.sheetOpen && !this._adminOpen) {
+      if (code === "Escape" && this._escOpen) return this._closeEscMenu();
+      if (this.hud.sheetKey(code)) return;
+    }
     switch (code) {
       case "Backquote": return this._toggleAdmin();
       case "Escape":
@@ -362,7 +395,7 @@ export class Game {
         return this._toggleEscMenu();
       case "KeyB":
       case "KeyI": return this._toggleBag();
-      case "KeyC": return this._coopSheet();
+      case "KeyC": return this._friendSheet();
       case "KeyM": return document.getElementById("mute-btn").click();
       // NB: E / F (interact) are read as an input edge in _updatePlayer so they
       // stay separate from the Space/click attack — see the action routing there.
@@ -392,15 +425,26 @@ export class Game {
       // already delved today (solo): the Guild will unseal the cellar for a fee
       if (!this.net.connected && this.delvedToday && p.distanceTo(this.shop.trapdoorPos) < 1.5)
         return { label: "hole", hint: "Unseal", fn: () => this._delve(), focus: _focus.copy(this.shop.trapdoorPos).setY(0.06).clone(), color: 0x9aa0aa };
-      // display tables: aim with the mouse rather than shuffling the character
-      // up to each slot. A stocked slot offers a swap / take-back; an empty one
-      // takes stock from the storeroom.
+      // display tables: walk up to a slot to stock it. A stocked slot offers a
+      // swap / take-back; an empty one takes stock from the storeroom.
       const slot = this._tableSlotTarget();
       if (slot) {
         if (slot.item)
           return { label: "box", hint: "Swap", fn: () => this._replaceMenu(slot), focus: _focus.copy(slot.pos).clone(), color: 0xff9d5c };
         if (this.stash.length > 0)
           return { label: "box", hint: "Stock", fn: () => this._placeMenu(slot), focus: _focus.copy(slot.pos).clone(), color: 0x66ff9e };
+      }
+      return { label: "swords", fn: () => this._attack() };
+    }
+    // sewer: the ladder home and the four dungeon mouths
+    if (this.playerArea === "sewer") {
+      _v.copy(this.sewer.exitPos);
+      if (_v.distanceTo(p) < 1.7)
+        return { label: "home", hint: "Back to shop", fn: () => this._returnHome(), focus: _v.clone().setY(0.06), color: 0x8fd0ff };
+      for (const hole of this.sewer.holes) {
+        _v.copy(hole.pos);
+        if (_v.distanceTo(p) < 1.8)
+          return { label: "hole", hint: hole.name, fn: () => this._holePrompt(hole.id), focus: _v.clone().setY(0.06), color: hole.color };
       }
       return { label: "swords", fn: () => this._attack() };
     }
@@ -435,25 +479,10 @@ export class Game {
     return { label: "swords", fn: () => this._attack() };
   }
 
-  // Which display slot the "Stock / Swap" action lands on. On desktop we pick
-  // whatever slot sits under the mouse cursor — you aim at a table instead of
-  // walking the character right up to it — as long as the shopkeeper is still
-  // within arm's reach of the tables area. On touch (no pointer) we fall back
-  // to the nearest slot the player is standing beside.
+  // Which display slot the "Stock / Swap" action lands on: the nearest slot the
+  // player is standing beside.
   _tableSlotTarget() {
     const p = this.player.position;
-    if (this.input.aimActive) {
-      const aim = this._aimPoint();
-      if (!aim) return null;
-      let best = null, bd = 0.9; // how near the cursor must hover to a slot
-      for (const slot of this.shop.slots) {
-        const d = Math.hypot(slot.pos.x - aim.x, slot.pos.z - aim.z);
-        if (d < bd) { bd = d; best = slot; }
-      }
-      // keep it grounded: only stockable while the shopkeeper is nearby
-      if (best && Math.hypot(best.pos.x - p.x, best.pos.z - p.z) < 3.6) return best;
-      return null;
-    }
     let best = null, bd = 1.5;
     for (const slot of this.shop.slots) {
       const d = _v.copy(slot.pos).setY(0).distanceTo(p);
@@ -644,10 +673,13 @@ export class Game {
     this.engine.scene.add(this.player);
     this.player.animator.onFootstep = (pos, k) => this.audio.step();
     this.playerArea = "shop";
+    this.lobby.leave();
     this.hud.showHearts(false);
     this.hud.showBag(false);
     this.hud.showGold(true);
     this.hud.setGoldCorner(false);
+    this.hud.showDebt(true);
+    this.input.setDodgeVisible(false);
     this._save();
   }
 
@@ -1082,6 +1114,7 @@ export class Game {
     this.audio.stairs();
     this.day++;
     this.dungeon.dispose(); // fresh dungeon every day
+    this.sewerHole = -1;
     this.net.send({ t: "dungeonReset" });
     this._morning();
   }
@@ -1222,6 +1255,7 @@ export class Game {
       this.today.spent += fee;
       this.delvedToday = false;
       this.dungeon.dispose(); // scrap the morning's cleared floors — fresh run
+      this.sewerHole = -1;
       this.net.send({ t: "dungeonReset" });
       this.hud.toast(`${icon("hole")} The seal cracks open — one more run`);
       this._delve();
@@ -1229,21 +1263,84 @@ export class Game {
     el.querySelector("#unseal-no").onclick = () => this.hud.hideSheet();
   }
 
+  // Dropping through the trapdoor lands in the shared sewer now, not straight
+  // in a dungeon — the holes down there are the real entrances. The tutorial
+  // keeps the old direct drop: a private single-floor cellar on a random seed,
+  // no sewer, no lobby (sewerHole stays -1 so _enterDungeon never joins one).
   _startDelve() {
-    if (this.net.isGuest) {
-      if (!this.dungeon.active) {
-        this._wantDelve = true;
-        this.net.send({ t: "delveReq" });
-        this.hud.toast("Opening the cellar…");
-        return;
-      }
+    if (this.tutorial) {
+      this.sewerHole = -1;
+      if (!this.dungeon.active)
+        this.dungeon.generate(1, this.day * 1000 + Math.floor(Math.random() * 999));
       this._enterDungeon();
       return;
     }
-    if (!this.dungeon.active) {
-      const seed = this.day * 1000 + Math.floor(Math.random() * 999);
+    this._enterSewer();
+  }
+
+  _enterSewer() {
+    this.playerArea = "sewer";
+    this.hud.showHearts(false);
+    this.hud.showBag(true);
+    this.hud.showGold(true);
+    this.hud.setGoldCorner(true);
+    this.hud.showDebt(false);
+    this.input.setDodgeVisible(false);
+    if (this.hud.sheetOpen) this.hud.hideSheet();
+    this.player.position.copy(this.sewer.entrancePos).add(_v.set(0, 0, -1.4));
+    this.player.animator.prevPos.copy(this.player.position);
+    this.audio.stairs();
+    this._snapCamera();
+    this.lobby.join("sewer");
+    this.hud.banner(`${icon("hole")} The Sewers`, "shared tunnels — every hole hides its own dungeon", 2.4);
+  }
+
+  // Confirm sheet at a sewer hole's lip, mirroring the stairs prompt.
+  _holePrompt(id) {
+    if (this.hud.sheetOpen) return;
+    const hole = this.sewer.holes[id];
+    this.paused = !this.net.connected;
+    const el = this.hud.showSheet(`
+      <div class="sheet-title"><span class="big-emoji">${icon("hole")}</span>
+        <div><b>${hole.name}</b><br/><small>a dungeon lies below — today's layout is the same for everyone</small></div></div>
+      <div class="sheet-btns">
+        <button class="btn deny" id="hole-no">${icon("close")} Not this one</button>
+        <button class="btn deal" id="hole-yes">${icon("arrowDown")} Jump in</button>
+      </div>
+    `, "sheet-card");
+    el.querySelector("#hole-yes").onclick = () => {
+      this.paused = false;
+      this.hud.hideSheet();
+      this._enterHole(id);
+    };
+    el.querySelector("#hole-no").onclick = () => {
+      this.paused = false;
+      this.hud.hideSheet();
+    };
+  }
+
+  // Jump into hole `id`. Its dungeon seed is derived from the hole and the UTC
+  // day, so every player who picks this hole today delves an identical layout
+  // (and shares the hole's realtime channel). In PeerJS co-op the pair still
+  // shares one dungeon: the host generates, the guest requests.
+  _enterHole(id) {
+    if (this.net.isGuest) {
+      if (!this.dungeon.active) {
+        this.sewerHole = id;
+        this._wantDelve = true;
+        this.net.send({ t: "delveReq", hole: id });
+        return;
+      }
+      // the pair shares one dungeon: whichever hole is open is where we land
+      // (sewerHole already tracks it from the host's "floor" message)
+      this._enterDungeon();
+      return;
+    }
+    if (!this.dungeon.active || this.sewerHole !== id) {
+      this.sewerHole = id;
+      const seed = holeSeed(id);
       this.dungeon.generate(1, seed);
-      this.net.send({ t: "floor", n: 1, seed });
+      this.net.send({ t: "floor", n: 1, seed, hole: id });
       this._syncState();
     }
     this._enterDungeon();
@@ -1350,16 +1447,21 @@ export class Game {
     this.hud.showBag(true);
     this.hud.showGold(true);
     this.hud.setGoldCorner(true);
+    this.hud.showDebt(false);
+    this.input.setDodgeVisible(true);
     _v.copy(this.dungeon.entrancePos).add(DUNGEON_ORIGIN);
     this.player.position.set(_v.x + 0.8, 0, _v.z + 0.8);
     this.player.animator.prevPos.copy(this.player.position);
     this._invulnT = Math.max(this._invulnT, LEVEL_INVULN); // grace on arrival
     this.today.deepest = Math.max(this.today.deepest, this.dungeon.floor);
+    // hop onto this hole's realtime channel so fellow delvers show up
+    if (this.sewerHole >= 0) this.lobby.join(`hole:${utcDay()}:${this.sewerHole}`);
     this.audio.stairs();
     this._snapCamera();
     const finalFloor = this.dungeon.floor >= MAX_FLOORS;
+    const place = this.sewer.holes[this.sewerHole]?.name ?? "Cellar";
     this.hud.banner(
-      finalFloor ? `${icon("skull")} Cellar — Final Floor` : `${icon("hole")} Cellar — Floor ${this.dungeon.floor}`,
+      finalFloor ? `${icon("skull")} ${place} — Final Floor` : `${icon("hole")} ${place} — Floor ${this.dungeon.floor}`,
       finalFloor ? (this._hasBossKey() ? "unlock the sealed door — the boss waits within" : "find a Brass Key to breach the boss door") : "",
       finalFloor ? 2.6 : 1.6
     );
@@ -1368,11 +1470,14 @@ export class Game {
 
   _returnHome() {
     this.playerArea = "shop";
+    this.lobby.leave();
     this._depositBag();
     this.hud.showHearts(false);
     this.hud.showBag(false);
     this.hud.showGold(true);
     this.hud.setGoldCorner(false);
+    this.hud.showDebt(true);
+    this.input.setDodgeVisible(false);
     if (this.hud.sheetOpen) this.hud.hideSheet();
     this.player.position.copy(this.shop.trapdoorPos).add(_v.set(1.2, 0, 0.5));
     this.player.animator.prevPos.copy(this.player.position);
@@ -1385,9 +1490,10 @@ export class Game {
 
   // jump the camera straight to the current area's framing (no glide)
   _snapCamera() {
-    const inDungeon = this.playerArea === "dungeon";
-    this.engine.camTarget.copy(inDungeon ? this.player.position : _shopCenter);
-    this.engine.camOffset.copy(inDungeon ? _camDungeon : _camShop);
+    const area = this.playerArea;
+    const follow = area === "dungeon" || area === "sewer";
+    this.engine.camTarget.copy(follow ? this.player.position : _shopCenter);
+    this.engine.camOffset.copy(area === "dungeon" ? _camDungeon : area === "sewer" ? _camSewer : _camShop);
   }
 
   // At the stairs down: ask whether to press on or head back. Saying no is the
@@ -1563,10 +1669,34 @@ export class Game {
     this.hud.showBag(this.playerArea === "dungeon");
     this.hud.showGold(true);
     this.hud.setGoldCorner(this.playerArea === "dungeon");
-    document.getElementById("coop-btn").onclick = () => this._coopSheet();
+    this.hud.showDebt(this.playerArea !== "dungeon");
+    this.input.setDodgeVisible(this.playerArea === "dungeon");
+    document.getElementById("coop-btn").onclick = () => this._friendSheet();
     document.getElementById("pause-btn").onclick = () => this._toggleEscMenu();
     // set the mute button to match saved preference
     document.getElementById("mute-btn").innerHTML = icon(this.audio.muted ? "soundOff" : "soundOn");
+  }
+
+  // --------------------------------------------------------- fullscreen gate
+  // On touch, the game runs fullscreen. The first tap enters it (wired from the
+  // Play button), and if the player ever drops out we freeze the sim and put up
+  // a "tap to go fullscreen" gate. Skipped where the Fullscreen API is missing
+  // (e.g. iPhone Safari) so the game stays playable.
+  _initFullscreenGate() {
+    this.fsGate = document.getElementById("fs-gate");
+    if (!this.fsGate || !this.input.isTouch) return;
+    const el = document.documentElement;
+    const supported = !!(el.requestFullscreen || el.webkitRequestFullscreen || el.webkitRequestFullScreen);
+    if (!supported) return;
+    const sync = () => {
+      const fs = isFullscreen();
+      this._fsPaused = !fs;
+      this.fsGate.classList.toggle("hidden", fs);
+    };
+    document.addEventListener("fullscreenchange", sync);
+    document.addEventListener("webkitfullscreenchange", sync);
+    this.fsGate.addEventListener("click", () => requestFullscreen());
+    sync();
   }
 
   // ------------------------------------------------------------- pause / ESC
@@ -1582,10 +1712,10 @@ export class Game {
       <div class="sheet-btns esc-col">
         <button class="btn deal" id="esc-resume">${icon("play")} Resume</button>
         <button class="btn" id="esc-sound">${icon(this.audio.muted ? "soundOff" : "soundOn")} Sound: ${this.audio.muted ? "off" : "on"}</button>
-        <button class="btn" id="esc-coop">${icon("people")} Co-op</button>
+        <button class="btn" id="esc-coop">${icon("people")} Friends</button>
         <button class="btn deny" id="esc-restart">${icon("recycle")} New shop</button>
       </div>
-      <div class="esc-hint"><b>WASD</b> move · <b>mouse</b> aim · <b>click/Space</b> attack · <b>E</b> interact · <b>Shift</b> roll · <b>B</b> bag · <b>\`</b> admin</div>
+      <div class="esc-hint"><b>WASD</b> move · <b>click/Space</b> attack · <b>E</b> interact · <b>Shift</b> roll · <b>B</b> bag · <b>J/K</b> menus · <b>Enter/Esc</b> pick · <b>\`</b> admin</div>
     `, "sheet-card");
     el.querySelector("#esc-x").onclick = () => this._closeEscMenu();
     el.querySelector("#esc-resume").onclick = () => this._closeEscMenu();
@@ -1596,7 +1726,7 @@ export class Game {
     };
     el.querySelector("#esc-coop").onclick = () => {
       this._closeEscMenu();
-      this._coopSheet();
+      this._friendSheet();
     };
     el.querySelector("#esc-restart").onclick = () => {
       if (confirm("Start a new shop? This wipes your saved progress.")) this._reset();
@@ -1843,6 +1973,9 @@ export class Game {
         this.hud.hideSheet();
       };
     });
+    // same as the replace menu: float the choices right above the slot so the
+    // storeroom picks land under the cursor.
+    this.hud.anchorSheetAbove(slot.pos);
   }
 
   // Opened by the context action at an occupied table: pick a storeroom item
@@ -1872,6 +2005,9 @@ export class Game {
         this.hud.hideSheet();
       };
     });
+    // pop the menu open right above the table slot being edited so the swap
+    // choices land under the cursor instead of at the bottom of the screen.
+    this.hud.anchorSheetAbove(slot.pos);
   }
 
   // Swap the item on a filled table for one from the storeroom: the displayed
@@ -1896,30 +2032,146 @@ export class Game {
     this._save();
   }
 
-  _coopSheet() {
+  // -------------------------------------------------------------- friends
+  _loadFriends() {
+    try {
+      const a = JSON.parse(localStorage.getItem(FRIENDS_KEY));
+      return Array.isArray(a) ? a.filter((f) => typeof f === "string") : [];
+    } catch {
+      return [];
+    }
+  }
+
+  _saveFriends() {
+    try {
+      localStorage.setItem(FRIENDS_KEY, JSON.stringify(this.friends));
+    } catch {}
+  }
+
+  // Pick / change our display name and (re)register on the broker so friends
+  // can reach us by it.
+  setPlayerName(name) {
+    name = String(name).trim().slice(0, 16);
+    if (!name) return;
+    this.playerName = name;
+    try { localStorage.setItem(NAME_KEY, name); } catch {}
+    this.net.goOnline(name);
+  }
+
+  addFriend(name) {
+    name = String(name).trim().slice(0, 16);
+    if (!name) return;
+    const key = name.toLowerCase();
+    if (key === this.playerName.toLowerCase()) return; // no adding yourself
+    if (this.friends.some((f) => f.toLowerCase() === key)) return;
+    this.friends.push(name);
+    this._saveFriends();
+  }
+
+  removeFriend(name) {
+    this.friends = this.friends.filter((f) => f !== name);
+    this._saveFriends();
+  }
+
+  _friendSheet() {
     if (this.hud.sheetOpen) return this.hud.hideSheet();
+    this._renderFriendSheet();
+  }
+
+  _renderFriendSheet() {
+    const inShop = this.playerArea === "shop";
+    const connected = this.net.connected;
+    let body;
+    if (!this.playerName) {
+      // First time: you need a name before anyone can invite you.
+      body = `
+        <div id="fr-status" class="hg-speech">Pick a name so friends can find you.</div>
+        <div class="sheet-btns">
+          <input id="fr-name" class="fr-input" maxlength="16" placeholder="Your name" autocapitalize="off" autocomplete="off" />
+          <button class="btn deal" id="fr-setname">Save</button>
+        </div>`;
+    } else {
+      const rows = this.friends.length
+        ? this.friends
+            .map(
+              (f) => `
+          <div class="fr-row">
+            <span class="fr-name">${icon("people")} ${esc(f)}</span>
+            <div class="fr-row-btns">
+              <button class="btn small fr-invite" data-name="${esc(f)}" ${inShop && !connected ? "" : "disabled"}>Invite</button>
+              <button class="icon-btn fr-remove" data-name="${esc(f)}" aria-label="Remove ${esc(f)}">${icon("close")}</button>
+            </div>
+          </div>`
+            )
+            .join("")
+        : `<small class="empty">No friends yet — add one below.</small>`;
+      const statusMsg = connected
+        ? "A friend is in your shop!"
+        : inShop
+          ? "Invite a friend to teleport into your shop."
+          : "Come up to the shop to invite a friend.";
+      body = `
+        <div class="fr-you">You're <b>${esc(this.playerName)}</b> <button class="btn small" id="fr-rename">Rename</button></div>
+        <div id="fr-status" class="hg-speech">${statusMsg}</div>
+        <div class="fr-list">${rows}</div>
+        <div class="sheet-btns">
+          <input id="fr-add" class="fr-input" maxlength="16" placeholder="Add friend by name" autocapitalize="off" autocomplete="off" />
+          <button class="btn deal" id="fr-addbtn">Add</button>
+        </div>
+        ${connected ? `<div class="sheet-btns"><button class="btn deny" id="fr-leave">Leave session</button></div>` : ""}`;
+    }
     const el = this.hud.showSheet(`
       <div class="sheet-title"><span class="big-emoji">${icon("people")}</span>
-        <div><b>Co-op</b><br/><small>one deals, one delves — shared gold</small></div>
-        <button class="icon-btn" id="co-close">${icon("close")}</button></div>
-      <div id="co-status" class="hg-speech">${this.net.connected ? "Connected!" : "Play with a friend over the internet."}</div>
+        <div><b>Friends</b><br/><small>invite a friend to your shop</small></div>
+        <button class="icon-btn" id="fr-close">${icon("close")}</button></div>
+      ${body}
+    `, "sheet-card");
+    const status = el.querySelector("#fr-status");
+    this.net.onStatus = (s) => { if (status) status.textContent = s; };
+    el.querySelector("#fr-close").onclick = () => this.hud.hideSheet();
+
+    if (!this.playerName) {
+      const save = () => {
+        const v = el.querySelector("#fr-name").value;
+        if (v.trim()) { this.setPlayerName(v); this._renderFriendSheet(); }
+      };
+      el.querySelector("#fr-setname").onclick = save;
+      el.querySelector("#fr-name").addEventListener("keydown", (e) => { if (e.key === "Enter") save(); });
+      return;
+    }
+
+    el.querySelector("#fr-rename").onclick = () => {
+      const v = prompt("Your name:", this.playerName);
+      if (v && v.trim()) { this.setPlayerName(v); this._renderFriendSheet(); }
+    };
+    const add = () => {
+      const input = el.querySelector("#fr-add");
+      if (input.value.trim()) { this.addFriend(input.value); input.value = ""; this._renderFriendSheet(); }
+    };
+    el.querySelector("#fr-addbtn").onclick = add;
+    el.querySelector("#fr-add").addEventListener("keydown", (e) => { if (e.key === "Enter") add(); });
+    el.querySelectorAll(".fr-invite").forEach((b) => (b.onclick = () => this.net.invite(b.dataset.name)));
+    el.querySelectorAll(".fr-remove").forEach((b) => (b.onclick = () => { this.removeFriend(b.dataset.name); this._renderFriendSheet(); }));
+    const leave = el.querySelector("#fr-leave");
+    if (leave) leave.onclick = () => { this.net.leave(); this._renderFriendSheet(); };
+  }
+
+  // A friend has invited us to teleport into their shop. You can only accept
+  // from above ground — no bailing out of a live delve.
+  onTpInvite(fromName) {
+    this.audio.doorbell?.();
+    const canAccept = this.playerArea !== "dungeon";
+    const el = this.hud.showSheet(`
+      <div class="sheet-title"><span class="big-emoji">${icon("people")}</span>
+        <div><b>${esc(fromName)} invites you</b><br/><small>teleport into their shop</small></div></div>
+      <div class="hg-speech">${canAccept ? "Hop over and lend a hand?" : "You're deep in the cellar — surface before you can teleport."}</div>
       <div class="sheet-btns">
-        <button class="btn" id="co-host">Host</button>
-        <input id="co-code" maxlength="4" placeholder="CODE" autocapitalize="characters" />
-        <button class="btn deal" id="co-join">Join</button>
+        <button class="btn deny" id="tp-decline">Decline</button>
+        <button class="btn deal" id="tp-accept" ${canAccept ? "" : "disabled"}>Accept</button>
       </div>
     `, "sheet-card");
-    const status = el.querySelector("#co-status");
-    this.net.onStatus = (s) => (status.textContent = s);
-    el.querySelector("#co-close").onclick = () => this.hud.hideSheet();
-    el.querySelector("#co-host").onclick = () => {
-      const code = this.net.host();
-      status.textContent = `Room code: ${code} — waiting…`;
-    };
-    el.querySelector("#co-join").onclick = () => {
-      const code = el.querySelector("#co-code").value.trim();
-      if (code.length === 4) this.net.join(code);
-    };
+    el.querySelector("#tp-decline").onclick = () => { this.net.declineInvite(); this.hud.hideSheet(); };
+    el.querySelector("#tp-accept").onclick = () => { this.net.acceptInvite(); };
   }
 
   // ================================================================ admin panel
@@ -1953,7 +2205,7 @@ export class Game {
         <button data-a="debt">${icon("scroll")} Skip debt</button>
         <button data-a="reset" class="danger">${icon("recycle")} Wipe save</button>
       </div>
-      <div class="admin-hints">keys: <b>WASD</b> move · <b>mouse</b> aim · <b>click/Space</b> attack · <b>E</b> interact · <b>B</b> bag · <b>C</b> co-op · <b>M</b> mute</div>
+      <div class="admin-hints">keys: <b>WASD</b> move · <b>click/Space</b> attack · <b>E</b> interact · <b>B</b> bag · <b>C</b> friends · <b>M</b> mute</div>
     `;
     this.hud.root.appendChild(el);
     this.adminEl = el;
@@ -2059,7 +2311,8 @@ export class Game {
   // ================================================================ net
   onPeerJoined() {
     // host: send full state
-    this.hud.toast(`${icon("people")} Partner joined!`);
+    this.hud.hideSheet();
+    this.hud.banner(`${icon("people")} A friend teleported in!`, "", 2);
     this.net.send({
       t: "welcome",
       day: this.day, phase: this.phase, gold: this.gold, debtIdx: this.debtIdx,
@@ -2069,19 +2322,20 @@ export class Game {
       stocked: this.shop.slots.map((s) => s.item),
       floor: this.dungeon.active ? this.dungeon.floor : 0,
       seed: this.dungeon.seed ?? 0,
+      hole: this.sewerHole,
       gateOpen: this.dungeon.gateOpen,
     });
     this._spawnRemote();
   }
 
   onJoinedHost() {
-    this.hud.toast(`${icon("people")} Joined! The host runs the shop clock.`);
-    this._spawnRemote();
     this.hud.hideSheet();
+    this.hud.banner(`${icon("people")} Teleported to your friend's shop!`, "", 2.4);
+    this._spawnRemote();
   }
 
   onPeerLeft() {
-    this.hud.toast(`${icon("people")} Partner disconnected.`);
+    this.hud.toast(`${icon("people")} Your friend left.`);
     if (this.remote) {
       this.remote.creature.dispose();
       this.remote = null;
@@ -2094,17 +2348,85 @@ export class Game {
     c.position.set(1.5, 0, 3);
     c.holdItem(swordMesh(0xd7dde6, 0x3f5f9e, 0.55));
     this.engine.scene.add(c);
-    this.remote = { creature: c, target: { x: 1.5, z: 3, h: 0 }, area: "shop", dead: false, wasAtk: false };
+    this.remote = {
+      creature: c,
+      buf: [{ t: performance.now() / 1000, x: 1.5, z: 3, h: 0 }],
+      area: "shop",
+      dead: false,
+      wasAtk: false,
+    };
   }
 
   _updateRemote(dt, elapsed) {
     const r = this.remote;
     if (!r) return;
     const c = r.creature;
-    c.position.x = lerp(c.position.x, r.target.x, 1 - Math.pow(0.0001, dt));
-    c.position.z = lerp(c.position.z, r.target.z, 1 - Math.pow(0.0001, dt));
-    c.heading = r.target.h;
+    // Positions arrive as ~11 Hz snapshots; render 150 ms in the past so we
+    // always sit between two snapshots and glide instead of chasing the
+    // newest one (which reads as move-stop-move jitter).
+    const t = performance.now() / 1000 - 0.15;
+    const buf = r.buf;
+    while (buf.length > 2 && buf[1].t <= t) buf.shift();
+    const a = buf[0], b = buf[1];
+    if (b && b.t > a.t) {
+      const k = clamp((t - a.t) / (b.t - a.t), 0, 1);
+      c.position.x = lerp(a.x, b.x, k);
+      c.position.z = lerp(a.z, b.z, k);
+      c.heading = lerpAngle(a.h, b.h, k);
+    } else if (a) {
+      c.position.x = a.x;
+      c.position.z = a.z;
+      c.heading = a.h;
+    }
     c.update(dt, elapsed);
+  }
+
+  // Avatars for the lobby crowd (Supabase Realtime): everyone sharing our
+  // current zone — the sewer, or the same hole's dungeon. Purely visual;
+  // they use the same snapshot-interpolation trick as the co-op remote.
+  _updateLobbyPlayers(dt, elapsed) {
+    const av = this._lobbyAvatars;
+    for (const [id, a] of av) {
+      if (!this.lobby.players.has(id)) {
+        a.creature.dispose();
+        av.delete(id);
+      }
+    }
+    const myFloor = this.playerArea === "dungeon" ? this.dungeon.floor : 0;
+    for (const [id, pl] of this.lobby.players) {
+      if (!pl.buf.length) continue; // presence known, no position yet
+      let a = av.get(id);
+      if (!a) {
+        const c = new BlockyCreature(variantForSeed(hashStr(id)), { height: 1.3 });
+        c.holdItem(swordMesh(0xd7dde6, 0x3f5f9e, 0.55));
+        const last = pl.buf[pl.buf.length - 1];
+        c.position.set(last.x, 0, last.z);
+        this.engine.scene.add(c);
+        a = { creature: c, wasAtk: false };
+        av.set(id, a);
+      }
+      const c = a.creature;
+      // hide delvers on other floors of the same hole (identical world coords)
+      c.visible = pl.floor === myFloor && !pl.dead;
+      if (!c.visible) continue;
+      const t = performance.now() / 1000 - 0.15;
+      const buf = pl.buf;
+      while (buf.length > 2 && buf[1].t <= t) buf.shift();
+      const s0 = buf[0], s1 = buf[1];
+      if (s1 && s1.t > s0.t) {
+        const k = clamp((t - s0.t) / (s1.t - s0.t), 0, 1);
+        c.position.x = lerp(s0.x, s1.x, k);
+        c.position.z = lerp(s0.z, s1.z, k);
+        c.heading = lerpAngle(s0.h, s1.h, k);
+      } else if (s0) {
+        c.position.x = s0.x;
+        c.position.z = s0.z;
+        c.heading = s0.h;
+      }
+      if (pl.atk && !a.wasAtk) c.attack();
+      a.wasAtk = pl.atk;
+      c.update(dt, elapsed);
+    }
   }
 
   onNetMessage(m) {
@@ -2113,7 +2435,9 @@ export class Game {
       case "p": {
         const r = this.remote;
         if (!r) return;
-        r.target = { x: m.x, z: m.z, h: m.h };
+        if (m.area !== r.area) r.buf.length = 0; // area change is a teleport: snap
+        r.buf.push({ t: performance.now() / 1000, x: m.x, z: m.z, h: m.h });
+        if (r.buf.length > 12) r.buf.shift();
         r.area = m.area;
         r.dead = !!m.dead;
         if (m.atk && !r.wasAtk) r.creature.attack();
@@ -2130,6 +2454,7 @@ export class Game {
         this._updateDebtChip();
         m.stocked.forEach((item, i) => this._applyStockSlot(i, item));
         if (m.floor > 0) {
+          if (m.hole != null) this.sewerHole = m.hole;
           D.generate(m.floor, m.seed);
           if (m.gateOpen) D.openGate();
         }
@@ -2181,12 +2506,14 @@ export class Game {
       // ---- guest -> host intents
       case "delveReq": {
         if (this.net.isGuest) return;
+        // first delver picks the hole; once a dungeon is live the pair shares
+        // it, so a request for a different hole just lands in the open one
         if (!D.active) {
-          const seed = this.day * 1000 + Math.floor(Math.random() * 999);
-          D.generate(1, seed);
+          this.sewerHole = m.hole ?? 0;
+          D.generate(1, holeSeed(this.sewerHole));
           this._syncState();
         }
-        this.net.send({ t: "floor", n: D.floor, seed: D.seed });
+        this.net.send({ t: "floor", n: D.floor, seed: D.seed, hole: this.sewerHole });
         break;
       }
       case "stairsReq": {
@@ -2194,7 +2521,7 @@ export class Game {
         if (D.floor >= MAX_FLOORS) return; // boss floor is the deepest
         const n = D.floor + 1;
         D.generate(n, D.seed);
-        this.net.send({ t: "floor", n, seed: D.seed });
+        this.net.send({ t: "floor", n, seed: D.seed, hole: this.sewerHole });
         if (this.playerArea === "dungeon") this._enterDungeon();
         break;
       }
@@ -2362,6 +2689,7 @@ export class Game {
       case "floor": {
         if (!this.net.isGuest) return;
         const wasIn = this.playerArea === "dungeon";
+        if (m.hole != null) this.sewerHole = m.hole;
         D.generate(m.n, m.seed);
         if (wasIn || this._wantDelve) this._enterDungeon();
         this._wantDelve = false;
@@ -2369,6 +2697,7 @@ export class Game {
       }
       case "dungeonReset":
         D.dispose();
+        this.sewerHole = -1;
         if (this.playerArea === "dungeon") this._returnHome();
         break;
       case "eSnap": {
@@ -2543,15 +2872,43 @@ function _easeOutBack(x) {
   return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2);
 }
 
+function lerpAngle(a, b, k) {
+  let d = (b - a) % (Math.PI * 2);
+  if (d > Math.PI) d -= Math.PI * 2;
+  if (d < -Math.PI) d += Math.PI * 2;
+  return a + d * k;
+}
+
+// Friend names are player-supplied — escape them before dropping into markup.
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+  ));
+}
+
+// Sewer-hole dungeon seeds: derived from the UTC day and the hole index, so
+// every client that jumps into the same hole today generates the same layout
+// without exchanging a single message.
+function utcDay() {
+  return Math.floor(Date.now() / 86400000);
+}
+function holeSeed(hole) {
+  return utcDay() * 8191 + hole * 127 + 5;
+}
+
+// small stable hash for picking a lobby avatar's look from its session id
+function hashStr(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
-const _v3 = new THREE.Vector3();
 const _focus = new THREE.Vector3();
-const _ray = new THREE.Raycaster();
-// aim plane at roughly torso height (y = 0.6) so the cursor maps to the ground
-const _aimPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.6);
 const _camShop = new THREE.Vector3(0, 10.2, 8.6);
 const _camDungeon = new THREE.Vector3(0, 8.4, 8.2);
+const _camSewer = new THREE.Vector3(0, 9.6, 8.6);
 // pulled back + higher so the whole boss arena stays framed while the cam is fixed
 const _camBoss = new THREE.Vector3(0, 13.5, 10);
 // fixed look-at point for the shop so the camera holds a steady framing
