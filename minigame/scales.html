@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#1a1028" />
+    <title>Scale Balancing — Coin Cellar bargaining prototype</title>
+    <link rel="icon" type="image/png" href="/logo.png" />
+    <link rel="stylesheet" href="./style.css" />
+    <style>
+      .scale { position: relative; height: 190px; margin-bottom: 4px; }
+      .post {
+        position: absolute; left: 50%; bottom: 0; transform: translateX(-50%);
+        width: 12px; height: 120px; background: var(--wood-dark); border-radius: 6px;
+      }
+      .post::after {
+        content: ""; position: absolute; bottom: -6px; left: -34px;
+        width: 80px; height: 12px; background: var(--wood-dark); border-radius: 6px;
+      }
+      .beam {
+        position: absolute; left: 50%; top: 46px; width: 320px; height: 10px;
+        margin-left: -160px; background: var(--wood); border-radius: 5px;
+        transform-origin: center; transition: transform 0.5s cubic-bezier(0.3, 1.6, 0.5, 1);
+      }
+      .pan {
+        position: absolute; top: 8px; width: 96px; text-align: center;
+        transition: transform 0.5s cubic-bezier(0.3, 1.6, 0.5, 1);
+      }
+      .pan .dish {
+        background: var(--parch-2); border: 2px solid var(--wood); border-radius: 0 0 40px 40px;
+        min-height: 44px; padding: 4px 2px; font-size: 22px;
+        display: flex; flex-wrap: wrap; justify-content: center; align-content: flex-end; gap: 1px;
+      }
+      .pan.left { left: -22px; }
+      .pan.right { right: -22px; }
+      .pan .chip { font-size: 15px; font-weight: 900; background: #ffe9a8; border: 1px solid var(--gold); border-radius: 8px; padding: 0 4px; cursor: pointer; }
+      .hint { text-align: center; font-size: 13px; color: var(--ink-soft); font-weight: 600; margin-top: 10px; }
+      .ask { text-align: center; font-weight: 900; font-size: 20px; margin: 6px 0 8px; }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      import { rollCustomer, gradeSale, setupUI, pageShell, MOODS, pick } from "./common.js";
+
+      pageShell({
+        title: "6 · Scale Balancing",
+        tag: "Stack gold against the item until the customer sees a fair balance",
+        gameHTML: `
+          <div class="scale">
+            <div class="post"></div>
+            <div class="beam" id="beam">
+              <div class="pan left"><div class="dish" id="itempan"></div></div>
+              <div class="pan right"><div class="dish" id="goldpan"></div></div>
+            </div>
+          </div>
+          <div class="ask">Asking: <span class="gold" id="ask">0g</span></div>
+          <div class="row" id="weights"></div>
+          <div class="row" style="margin-top:10px">
+            <button class="btn primary" id="propose">Propose ⚖️</button>
+          </div>
+          <div class="hint">The beam shows how your ask sits against what they think it's worth —
+          but it wobbles, and stingier customers read heavier. Tap a weight to add it,
+          tap a chip on the pan to take it back. Ask too much and they knock a weight off: strike.</div>`,
+      });
+
+      const ui = setupUI();
+      const $ = (id) => document.getElementById(id);
+      const DENOMS = [1, 5, 10, 25, 100];
+
+      let cust, weights, strikes, over, wobbleT;
+
+      const ask = () => weights.reduce((s, w) => s + w, 0);
+
+      function renderPans() {
+        $("itempan").textContent = cust.item.icon;
+        $("goldpan").innerHTML = weights
+          .map((w, i) => `<span class="chip" data-i="${i}">${w}</span>`)
+          .join("");
+        $("goldpan").querySelectorAll(".chip").forEach((el) => {
+          el.onclick = () => { if (!over) { weights.splice(+el.dataset.i, 1); update(); } };
+        });
+        $("ask").textContent = ask() + "g";
+      }
+
+      // beam tilt: right-heavy (asking too much) dips right; noise per archetype
+      function tilt() {
+        const bluff = { Cheapskate: 2, Regular: 4, Wealthy: 6, Collector: 9 }[cust.arch.name];
+        const diff = (ask() - cust.maxPay) / cust.maxPay;
+        const angle = Math.max(-20, Math.min(20, diff * 34)) + (Math.random() * 2 - 1) * bluff;
+        $("beam").style.transform = `rotate(${angle}deg)`;
+        document.querySelectorAll(".pan").forEach((p) => (p.style.transform = `rotate(${-angle}deg)`));
+      }
+
+      function update() {
+        renderPans();
+        tilt();
+        ui.strikes(strikes);
+      }
+
+      function start() {
+        cust = rollCustomer();
+        weights = []; strikes = 0; over = false;
+        ui.showCustomer(cust);
+        ui.say(pick([
+          `"Weigh the ${cust.item.name} out fair, shopkeep."`,
+          `"The scales don't lie. Usually."`,
+          `"Balance it out and we have a deal."`,
+        ]));
+        // keep the beam idly wobbling so the noise can't be averaged at a glance
+        clearInterval(wobbleT);
+        wobbleT = setInterval(() => { if (!over) tilt(); }, 900);
+        update();
+      }
+
+      $("weights").innerHTML = DENOMS.map((d) => `<button class="btn" data-w="${d}">+${d}g</button>`).join("");
+      $("weights").querySelectorAll("button").forEach((b) => {
+        b.onclick = () => { if (!over) { weights.push(+b.dataset.w); update(); } };
+      });
+
+      $("propose").onclick = () => {
+        if (over || ask() === 0) return;
+        const price = ask();
+        if (price <= cust.maxPay) {
+          over = true;
+          clearInterval(wobbleT);
+          const grade = gradeSale(price, cust.maxPay);
+          ui.mood(grade === "perfect" ? MOODS.star : MOODS.happy);
+          ui.finish(grade, price, grade === "cheap" ? "The beam sat well in their favour." : "", cust.maxPay);
+        } else {
+          strikes++;
+          // they flick the heaviest weight off the pan in protest
+          const heaviest = weights.indexOf(Math.max(...weights));
+          weights.splice(heaviest, 1);
+          ui.mood(strikes >= 2 ? MOODS.angry : MOODS.huff);
+          ui.say(`"That pan's FAR too heavy!" *flick*`);
+          if (strikes >= 3) {
+            over = true;
+            clearInterval(wobbleT);
+            setTimeout(() => ui.finish("fail", 0, `${cust.name} tipped the scales and left.`, cust.maxPay), 500);
+          }
+          update();
+        }
+      };
+
+      $("next").onclick = start;
+      start();
+    </script>
+  </body>
+</html>

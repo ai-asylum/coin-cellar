@@ -97,6 +97,7 @@ export class Dungeon {
     this.enemies = [];
     this.drops = [];
     this.chests = [];
+    this.decor = []; // destructible billboard props (smashable, no loot)
     this.shafts = []; // god-ray light shafts (animated each frame)
     this.colliders = [];
     this.projectiles = new Projectiles(game.engine.scene);
@@ -311,9 +312,10 @@ export class Dungeon {
     // --- billboard set dressing: mushrooms, stones, dead trees & bones tucked
     // into the rooms (seeded off the same rng so co-op peers match). Skips the
     // entrance and stairs cells so nothing clutters the arrival/exit spots.
-    scatterDungeonDecor(this.group, r, rooms, cellPos, {
+    // group-local props; store their world position so combat can smash them
+    this.decor = scatterDungeonDecor(this.group, r, rooms, cellPos, {
       skip: [this.entranceCell, this.stairsCell],
-    });
+    }).map((d) => ({ ...d, wx: d.x + DUNGEON_ORIGIN.x, wz: d.z + DUNGEON_ORIGIN.z }));
 
     // --- god-ray shafts: light leaking through cracks in the ceiling above.
     // Cool arcane glow over the entrance portal, warm dusk over the stairs,
@@ -1058,9 +1060,11 @@ export class Dungeon {
       const dx = c.position.x - pos.x;
       const dz = c.position.z - pos.z;
       const dist = Math.hypot(dx, dz);
-      if (dist > range + c.radius) continue;
+      // reach counts both bodies' girth, so a hit lands when the blade would
+      // reasonably reach the foe — not only when centres nearly overlap
+      if (dist > range + c.radius + attacker.radius) continue;
       const dot = (dx * fwdX + dz * fwdZ) / (dist || 1);
-      if (dot < arc && dist > 0.7) continue;
+      if (dot < arc && dist > 1.0) continue;
       hitAny = true;
       const nx = dx / (dist || 1);
       const nz = dz / (dist || 1);
@@ -1074,7 +1078,57 @@ export class Dungeon {
         this.damageEnemy(e, dmg, nx, nz, { crit, finisher, knock });
       }
     }
+    // the same swing bursts open any treasure chest it sweeps through — there's
+    // no dedicated "open" button any more, you crack them with the blade
+    for (const chest of this.chests) {
+      if (chest.opened) continue;
+      const dx = chest.mesh.position.x + DUNGEON_ORIGIN.x - pos.x;
+      const dz = chest.mesh.position.z + DUNGEON_ORIGIN.z - pos.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist > range + attacker.radius + 0.5) continue;
+      const dot = (dx * fwdX + dz * fwdZ) / (dist || 1);
+      if (dot < arc && dist > 1.0) continue;
+      hitAny = true;
+      game._openChest(chest);
+    }
+    // the same swing shatters any destructible scenery it sweeps through — a
+    // purely cosmetic puff of leaves/dust/bone, no loot, and rocks are spared
+    if (this._smashDecor(pos, fwdX, fwdZ, range, arc)) hitAny = true;
     return hitAny;
+  }
+
+  // Smash every destructible prop caught in the swing's reach + frontal arc.
+  // Cosmetic only: bursts particles, plays a crunch, drops nothing. Runs
+  // client-side for everyone (the layout is seeded, so peers agree).
+  _smashDecor(pos, fwdX, fwdZ, range, arc) {
+    if (!this.decor.length) return false;
+    let hit = false;
+    for (let i = this.decor.length - 1; i >= 0; i--) {
+      const d = this.decor[i];
+      const dx = d.wx - pos.x;
+      const dz = d.wz - pos.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist > range + d.radius) continue;
+      const dot = (dx * fwdX + dz * fwdZ) / (dist || 1);
+      if (dot < arc && dist > 1.0) continue;
+      this.decor.splice(i, 1);
+      this._burstDecor(d);
+      hit = true;
+    }
+    return hit;
+  }
+
+  // Pop one prop: a two-tone particle spray (its own colour plus a paler mote)
+  // scaled to its size, a light crunch, then free the sprite.
+  _burstDecor(d) {
+    const game = this.game;
+    const n = Math.round(10 + d.height * 8);
+    _v.set(d.wx, d.height * 0.45, d.wz);
+    game.particles.burst(_v, { color: d.color, n, speed: 3 + d.height, up: 2 + d.height * 0.8, life: 0.6, size: 0.9 + d.height * 0.2 });
+    game.particles.burst(_v, { color: 0xffffff, n: Math.ceil(n * 0.35), speed: 2.4, up: 2.2, life: 0.45, size: 0.7 });
+    game.audio.projHit?.();
+    disposeDecor(d.group);
+    d.group.removeFromParent();
   }
 
   damageEnemy(e, dmg, kx = 0, kz = 0, opts = {}) {
@@ -1245,6 +1299,7 @@ export class Dungeon {
     for (const d of this.drops) d.mesh.removeFromParent();
     this.drops = [];
     this.chests = [];
+    this.decor = [];
     for (const s of this.shafts) s.userData.dispose();
     this.shafts = [];
     this.colliders = [];

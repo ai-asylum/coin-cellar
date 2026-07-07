@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#1a1028" />
+    <title>Auction Frenzy — Coin Cellar bargaining prototype</title>
+    <link rel="icon" type="image/png" href="/logo.png" />
+    <link rel="stylesheet" href="./style.css" />
+    <style>
+      .bidders { display: flex; gap: 12px; margin-bottom: 12px; }
+      .bidder {
+        flex: 1; text-align: center; padding: 10px 6px;
+        background: var(--parch-2); border: 2px solid var(--wood-light); border-radius: 12px;
+        transition: opacity 0.3s, border-color 0.2s;
+      }
+      .bidder.leader { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold); }
+      .bidder.out { opacity: 0.35; }
+      .bidder .bface { font-size: 40px; }
+      .bidder b { display: block; font-size: 15px; }
+      .bidder .barch { color: var(--ink-soft); font-size: 12px; font-weight: 600; }
+      .bidder .paddle { font-size: 20px; min-height: 26px; }
+      .bid { text-align: center; font-weight: 900; font-size: 26px; margin-bottom: 4px; }
+      .say { text-align: center; font-style: italic; font-size: 14px; min-height: 20px; margin-bottom: 10px; }
+      .hint { text-align: center; font-size: 13px; color: var(--ink-soft); font-weight: 600; margin-top: 10px; }
+    </style>
+  </head>
+  <body>
+    <a class="back" href="./index.html">← all prototypes</a>
+    <h1>18 · Auction Frenzy</h1>
+    <div class="tag">Two buyers want the same piece — play them against each other</div>
+    <div class="sheet">
+      <div class="item"><span id="itemname"></span><span class="base" id="itembase"></span></div>
+      <div class="bidders">
+        <div class="bidder" id="b0"><div class="bface"></div><b></b><span class="barch"></span><div class="paddle"></div></div>
+        <div class="bidder" id="b1"><div class="bface"></div><b></b><span class="barch"></span><div class="paddle"></div></div>
+      </div>
+      <div class="bid">Current bid: <span class="gold" id="bid"></span></div>
+      <div class="say" id="say"></div>
+      <div class="row">
+        <button class="btn" id="r0"></button>
+        <button class="btn" id="r1"></button>
+        <button class="btn" id="r2"></button>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button class="btn primary" id="hammer">SOLD! 🔨</button>
+      </div>
+      <div class="hint">Each goad asks the trailing buyer to beat the bid by that much.
+      Small steps are safe but slow; big jumps can scare them off — and an outrageous jump
+      can make BOTH walk, leaving you with dead stock. Hammer while someone still holds a paddle.</div>
+    </div>
+    <div class="stats" id="stats"></div>
+    <div class="result" id="result">
+      <div class="card">
+        <div class="grade" id="grade"></div>
+        <div class="detail" id="detail"></div>
+        <button class="btn primary" id="next">Next lot</button>
+      </div>
+    </div>
+
+    <script type="module">
+      import { ARCHETYPES, ITEMS, NAMES, pick } from "./common.js";
+
+      const $ = (id) => document.getElementById(id);
+      let item, bidders, bid, leader, over, earned = 0, deals = 0, lots = 0;
+
+      const INCS = [0.06, 0.14, 0.35]; // goad size as a fraction of base value
+
+      function rollBidder() {
+        const arch = pick(ARCHETYPES);
+        return {
+          name: pick(NAMES), arch,
+          ceiling: Math.round(item.base * (arch.lo + Math.random() * (arch.hi - arch.lo))),
+          out: false,
+        };
+      }
+
+      function renderBidders() {
+        bidders.forEach((b, i) => {
+          const el = $("b" + i);
+          el.querySelector(".bface").textContent = b.out ? "🚪" : b.arch.face;
+          el.querySelector("b").textContent = b.name;
+          el.querySelector(".barch").textContent = b.arch.name;
+          el.querySelector(".paddle").textContent = leader === i ? "🙋 holds the bid" : b.out ? "walked out" : "";
+          el.classList.toggle("leader", leader === i);
+          el.classList.toggle("out", b.out);
+        });
+        $("bid").textContent = bid + "g";
+      }
+
+      function say(t) { $("say").textContent = t; }
+
+      function finish(grade, price, detail) {
+        over = true;
+        if (price > 0) { earned += price; deals++; }
+        $("grade").textContent = grade === "fail" ? "DEAD STOCK" : grade.toUpperCase() + (grade === "perfect" ? "!" : "");
+        $("grade").className = "grade " + grade;
+        $("detail").textContent = detail;
+        $("result").classList.add("show");
+        $("stats").textContent = `${deals}/${lots} lots sold · ${earned}g earned this session`;
+      }
+
+      function goad(inc) {
+        if (over) return;
+        const trailing = leader === null ? 0 : 1 - leader;
+        const t = bidders[trailing];
+        const ask = bid + Math.max(1, Math.round(item.base * inc));
+        if (t.out) { say(`Only ${bidders[leader].name} is left — hammer it or push your luck.`); return; }
+        // will the trailing buyer beat it? headroom vs the size of the jump
+        const headroom = (t.ceiling - ask) / t.ceiling;
+        const nerve = 0.9 - inc * 1.6; // big jumps feel like being played
+        if (ask <= t.ceiling && Math.random() < 0.35 + headroom * 1.6 * nerve + 0.25) {
+          bid = ask;
+          leader = trailing;
+          say(pick([
+            `"${ask}g!" ${t.name} thrusts a paddle up.`,
+            `${t.name}: "I'll not lose it to THEM. ${ask}g."`,
+            `${t.name} glares across the room. "${ask}g."`,
+          ]));
+        } else {
+          t.out = true;
+          say(`${t.name} shakes their head and lowers the paddle.`);
+          // an outrageous jump makes the leader smell a shill and re-check their ceiling
+          if (inc >= 0.3 && leader !== null && (bid > bidders[leader].ceiling * 0.9 || Math.random() < 0.35)) {
+            bidders[leader].out = true;
+            leader = null;
+            say(`"This reeks of a setup." BOTH buyers walk out.`);
+            renderBidders();
+            setTimeout(() => finish("fail", 0,
+              `Nobody left to sell to.\n(ceilings were ${bidders[0].ceiling}g and ${bidders[1].ceiling}g)`), 700);
+            return;
+          }
+        }
+        renderBidders();
+      }
+
+      $("hammer").onclick = () => {
+        if (over || leader === null) return;
+        const price = bid;
+        const best = Math.max(bidders[0].ceiling, bidders[1].ceiling);
+        const grade = price >= best * 0.92 ? "perfect" : price >= best * 0.75 ? "good" : "cheap";
+        finish(grade, price, `Sold to ${bidders[leader].name} for ${price}g.\n(ceilings were ${bidders[0].ceiling}g and ${bidders[1].ceiling}g)`);
+      };
+
+      INCS.forEach((inc, i) => ($("r" + i).onclick = () => goad(inc)));
+
+      function start() {
+        lots++;
+        item = pick(ITEMS);
+        bidders = [null, null].map(rollBidder);
+        bid = Math.round(item.base * 0.55);
+        leader = 0; // first buyer opens eagerly
+        over = false;
+        $("itemname").textContent = `${item.icon} ${item.name}`;
+        $("itembase").textContent = `base value ${item.base}g`;
+        INCS.forEach((inc, i) => ($("r" + i).textContent = `Goad +${Math.max(1, Math.round(item.base * inc))}g`));
+        $("result").classList.remove("show");
+        say(`${bidders[0].name} opens at ${bid}g. ${bidders[1].name} is eyeing the same ${item.name}...`);
+        renderBidders();
+      }
+
+      $("next").onclick = start;
+      start();
+    </script>
+  </body>
+</html>

@@ -19,6 +19,8 @@ export class Input {
     this.actionHeld = false;
     this._dodgeQueued = false;
     this.dodgeEdge = false; // true for the frame a dodge/roll was requested
+    this._interactQueued = false;
+    this.interactEdge = false; // true for the frame the interact key was pressed
     this.isTouch = matchMedia("(pointer: coarse)").matches;
 
     // mouse aim (desktop): pointer in normalized device coords, aim on until touch
@@ -36,6 +38,11 @@ export class Input {
       // dodge / roll: Shift, K, or L
       if (e.code === "ShiftLeft" || e.code === "ShiftRight" || e.code === "KeyK" || e.code === "KeyL") {
         this._dodgeQueued = true;
+      }
+      // interact (portals, stairs, chests, doors, haggle): E or F — kept apart
+      // from the attack button so the two never fight over the same press
+      if (e.code === "KeyE" || e.code === "KeyF") {
+        this._interactQueued = true;
       }
       // shortcuts (skip while typing in a field)
       const t = document.activeElement && document.activeElement.tagName;
@@ -86,6 +93,21 @@ export class Input {
     this.dodgeBtn.addEventListener("touchstart", dodgePress, { passive: false });
     this.dodgeBtn.addEventListener("mousedown", dodgePress);
 
+    // --- interact button (touch): portals / stairs / chests — only shown when
+    // something's in reach, so it never steals the attack button's press
+    this.interactBtn = document.createElement("button");
+    this.interactBtn.id = "interact-btn";
+    this.interactBtn.innerHTML = icon("arrowDown");
+    this.interactBtn.style.display = "none";
+    hudEl.appendChild(this.interactBtn);
+    this._interactLabel = null;
+    const interactPress = (e) => {
+      e.preventDefault();
+      this._interactQueued = true;
+    };
+    this.interactBtn.addEventListener("touchstart", interactPress, { passive: false });
+    this.interactBtn.addEventListener("mousedown", interactPress);
+
     const area = document.getElementById("app");
     area.addEventListener("touchstart", (e) => this._touchStart(e), { passive: false });
     area.addEventListener("touchmove", (e) => this._touchMove(e), { passive: false });
@@ -132,6 +154,17 @@ export class Input {
     this.actionBtn.classList.toggle("pulse", show && name !== "swords");
   }
 
+  // Show/hide the touch interact button and label it with the current context
+  // icon (portal, stairs, chest, …). Desktop uses E/F, so it stays hidden there.
+  setInteract(name, show = true) {
+    const on = show && !!name && this.isTouch;
+    if (name && this._interactLabel !== name) {
+      this._interactLabel = name;
+      this.interactBtn.innerHTML = icon(name);
+    }
+    this.interactBtn.style.display = on ? "flex" : "none";
+  }
+
   _touchStart(e) {
     for (const t of e.changedTouches) {
       if (this._joyId === null) {
@@ -176,6 +209,8 @@ export class Input {
     this._actionQueued = false;
     this.dodgeEdge = this._dodgeQueued;
     this._dodgeQueued = false;
+    this.interactEdge = this._interactQueued;
+    this._interactQueued = false;
 
     let x = 0, y = 0;
     if (this._keys.has("KeyA") || this._keys.has("ArrowLeft")) x -= 1;

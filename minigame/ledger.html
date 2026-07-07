@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#1a1028" />
+    <title>Debt Ledger — Coin Cellar bargaining prototype</title>
+    <link rel="icon" type="image/png" href="/logo.png" />
+    <link rel="stylesheet" href="./style.css" />
+    <style>
+      .week { text-align: center; font-weight: 900; font-size: 18px; margin-bottom: 10px; }
+      .debtor {
+        display: flex; align-items: center; gap: 10px;
+        background: var(--parch-2); border: 2px solid var(--wood-light); border-radius: 12px;
+        padding: 8px 10px; margin-bottom: 8px;
+      }
+      .debtor.done { opacity: 0.55; }
+      .debtor.gone { opacity: 0.35; filter: grayscale(1); }
+      .debtor .dface { font-size: 30px; flex: none; }
+      .debtor .info { flex: 1; min-width: 0; }
+      .debtor .info b { font-size: 14px; }
+      .debtor .info .sub { font-size: 12px; color: var(--ink-soft); font-weight: 600; }
+      .debtor .info .outcome { font-size: 12px; font-weight: 700; font-style: italic; }
+      .debtor .acts { display: flex; gap: 4px; flex: none; }
+      .debtor .acts .btn { font-size: 13px; padding: 6px 8px; border-radius: 10px; }
+      .totals { display: flex; justify-content: space-between; font-weight: 800; font-size: 14px; margin: 10px 2px 0; }
+      .hint { text-align: center; font-size: 13px; color: var(--ink-soft); font-weight: 600; margin-top: 10px; }
+    </style>
+  </head>
+  <body>
+    <a class="back" href="./index.html">← all prototypes</a>
+    <h1>20 · Debt Ledger</h1>
+    <div class="tag">Collection day — squeeze too hard and a regular never comes back</div>
+    <div class="sheet">
+      <div class="week" id="week"></div>
+      <div id="debtors"></div>
+      <div class="totals"><span>Collected: <span class="gold" id="gold">0g</span></span><span id="regulars"></span></div>
+      <div class="row" style="margin-top:12px"><button class="btn primary" id="endweek" disabled>Close the ledger →</button></div>
+      <div class="hint">Four weeks of collections. Per debtor pick one approach:
+      <b>Gentle</b> rarely collects but never offends · <b>Firm</b> is a coin-flip ·
+      <b>Threaten</b> nearly always collects but risks losing the regular for good.
+      Unpaid debts grow 10% weekly and grudges deepen. Regulars lost stop generating new debts —
+      final score is gold banked against customers kept.</div>
+    </div>
+    <div class="stats" id="stats"></div>
+    <div class="result" id="result">
+      <div class="card">
+        <div class="grade" id="grade"></div>
+        <div class="detail" id="detail"></div>
+        <button class="btn primary" id="next">New ledger</button>
+      </div>
+    </div>
+
+    <script type="module">
+      import { ARCHETYPES, NAMES, pick } from "./common.js";
+
+      const $ = (id) => document.getElementById(id);
+      const WEEKS = 4;
+      // collect chance / chance the regular walks forever (scaled by grudge)
+      const APPROACHES = {
+        gentle: { label: "🕊️", collect: 0.3, lose: 0 },
+        firm: { label: "✊", collect: 0.55, lose: 0.1 },
+        threaten: { label: "🗡️", collect: 0.85, lose: 0.4 },
+      };
+
+      let week, gold, debtors, resolved, over;
+
+      function newDebtor() {
+        const arch = pick(ARCHETYPES);
+        return {
+          name: pick(NAMES.filter((n) => !debtors?.some((d) => d.name === n))) ?? pick(NAMES),
+          arch,
+          owed: Math.round(20 + Math.random() * 120),
+          grudge: 0, // deepens each rough approach; multiplies walk risk
+          gone: false, acted: false, outcome: "",
+        };
+      }
+
+      function render() {
+        $("week").textContent = `📖 Week ${week} of ${WEEKS}`;
+        $("gold").textContent = gold + "g";
+        $("regulars").textContent = `Regulars: ${"👤".repeat(debtors.filter((d) => !d.gone).length)}`;
+        $("debtors").innerHTML = debtors.map((d, i) => `
+          <div class="debtor ${d.gone ? "gone" : d.acted ? "done" : ""}">
+            <div class="dface">${d.gone ? "🪦" : d.arch.face}</div>
+            <div class="info">
+              <b>${d.name}</b> <span class="sub">owes ${d.owed}g${d.grudge ? " · " + "😾".repeat(d.grudge) : ""}</span>
+              <div class="outcome">${d.outcome}</div>
+            </div>
+            <div class="acts">${d.gone || d.acted ? "" : Object.entries(APPROACHES).map(([k, a]) =>
+              `<button class="btn" data-i="${i}" data-k="${k}" title="${k}">${a.label}</button>`).join("")}
+            </div>
+          </div>`).join("");
+        $("debtors").querySelectorAll("button").forEach((b) => (b.onclick = () => act(+b.dataset.i, b.dataset.k)));
+        $("endweek").disabled = !debtors.every((d) => d.acted || d.gone);
+      }
+
+      function act(i, kind) {
+        if (over) return;
+        const d = debtors[i], a = APPROACHES[kind];
+        d.acted = true;
+        // Cheapskates hate paying, Wealthy shrug off pressure
+        const stubborn = { Cheapskate: -0.15, Regular: 0, Wealthy: 0.1, Collector: 0.05 }[d.arch.name];
+        if (Math.random() < a.collect + stubborn) {
+          gold += d.owed;
+          d.outcome = `paid ${d.owed}g ${kind === "threaten" ? "…through gritted teeth" : "with a nod"}`;
+          d.owed = 0;
+        } else {
+          d.outcome = `"Next week, I SWEAR."`;
+        }
+        if (kind !== "gentle") d.grudge++;
+        if (Math.random() < a.lose * (1 + d.grudge * 0.5)) {
+          d.gone = true;
+          d.outcome = `stormed off — never coming back` + (d.owed ? ` (and took the ${d.owed}g with them)` : "");
+        }
+        render();
+      }
+
+      $("endweek").onclick = () => {
+        if (over) return;
+        if (week >= WEEKS) return finishRun();
+        week++;
+        for (const d of debtors) {
+          if (d.gone) continue;
+          d.acted = false; d.outcome = "";
+          d.owed = Math.round(d.owed * 1.1); // unpaid debt accrues
+          if (d.owed === 0 && Math.random() < 0.7) d.owed = Math.round(15 + Math.random() * 90); // regulars keep buying on credit
+        }
+        // surviving shop reputation attracts a fresh credit customer
+        if (debtors.filter((x) => !x.gone).length < 5) debtors.push(newDebtor());
+        render();
+      };
+
+      function finishRun() {
+        over = true;
+        const kept = debtors.filter((d) => !d.gone).length;
+        const grade = gold >= 300 && kept >= 3 ? "perfect" : gold >= 180 && kept >= 2 ? "good" : gold >= 80 ? "fair" : "fail";
+        $("grade").textContent = grade === "fail" ? "BANKRUPT WEEK" : grade.toUpperCase() + (grade === "perfect" ? "!" : "");
+        $("grade").className = "grade " + grade;
+        $("detail").textContent = `${gold}g collected · ${kept} regular${kept === 1 ? "" : "s"} kept\n` +
+          (kept === 0 ? "An empty shop is a quiet shop." : grade === "perfect" ? "Feared AND loved. Mostly loved." : "");
+        $("result").classList.add("show");
+        $("stats").textContent = `run over — ${gold}g, ${kept} regulars`;
+      }
+
+      function start() {
+        week = 1; gold = 0; over = false;
+        debtors = [];
+        debtors = [newDebtor(), newDebtor(), newDebtor(), newDebtor()];
+        $("result").classList.remove("show");
+        render();
+      }
+
+      $("next").onclick = start;
+      start();
+    </script>
+  </body>
+</html>

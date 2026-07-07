@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#1a1028" />
+    <title>Patience Hourglass — Coin Cellar bargaining prototype</title>
+    <link rel="icon" type="image/png" href="/logo.png" />
+    <link rel="stylesheet" href="./style.css" />
+    <style>
+      .stall { display: flex; align-items: center; justify-content: center; gap: 26px; margin: 6px 0 10px; }
+      .glass { width: 70px; height: 130px; position: relative; }
+      .bulb {
+        position: absolute; left: 8px; right: 8px; height: 56px; overflow: hidden;
+        border: 3px solid var(--wood-dark); background: rgba(255, 255, 255, 0.35);
+      }
+      .bulb.top { top: 0; border-radius: 26px 26px 6px 6px; }
+      .bulb.bot { bottom: 0; border-radius: 6px 6px 26px 26px; }
+      .sand { position: absolute; left: 0; right: 0; bottom: 0; background: #e9b04e; transition: height 0.2s linear; }
+      .neck { position: absolute; top: 56px; left: 50%; width: 8px; height: 18px; margin-left: -4px; background: rgba(255,255,255,0.35); border-left: 3px solid var(--wood-dark); border-right: 3px solid var(--wood-dark); }
+      .offerbox { text-align: center; }
+      .offerbox .cur { font-size: 30px; font-weight: 900; }
+      .offerbox .note { font-size: 12px; color: var(--ink-soft); font-weight: 700; }
+      .hint { text-align: center; font-size: 13px; color: var(--ink-soft); font-weight: 600; margin-top: 10px; }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      import { rollCustomer, gradeSale, setupUI, pageShell, MOODS, pick } from "./common.js";
+
+      pageShell({
+        title: "19 · Patience Hourglass",
+        tag: "Their offer creeps up the longer you stall — but the sand is falling",
+        gameHTML: `
+          <div class="stall">
+            <div class="glass">
+              <div class="bulb top"><div class="sand" id="sandTop" style="height:100%"></div></div>
+              <div class="neck"></div>
+              <div class="bulb bot"><div class="sand" id="sandBot" style="height:0%"></div></div>
+            </div>
+            <div class="offerbox">
+              <div class="cur"><span class="gold" id="offer"></span></div>
+              <div class="note">their current offer</div>
+            </div>
+          </div>
+          <div class="row">
+            <button class="btn" id="stallBtn">Stall 🗣️ ("Lovely weather...")</button>
+            <button class="btn primary" id="deal">Deal 🤝</button>
+          </div>
+          <div class="hint">The offer rises on its own while they linger. The hourglass drains at a
+          hidden speed — Collectors browse forever, Cheapskates bolt. Stalling tops up a little sand,
+          but repeat chatter wears thin and can backfire, costing a big pinch instead. Sand out = gone.</div>`,
+      });
+
+      const ui = setupUI();
+      const $ = (id) => document.getElementById(id);
+
+      let cust, sand, drain, offer0, elapsed, over, raf, lastT, stallUses, moodT;
+
+      // offer climbs from ~55% toward ~100% of maxPay, decelerating
+      const offerAt = (s) => Math.round(cust.maxPay * (1 - 0.45 * Math.exp(-s / 9)));
+
+      function tick(t) {
+        if (!over) raf = requestAnimationFrame(tick);
+        const dt = Math.min((t - lastT) / 1000, 0.05);
+        lastT = t;
+        elapsed += dt;
+        sand -= drain * dt;
+        $("sandTop").style.height = Math.max(0, sand) + "%";
+        $("sandBot").style.height = Math.min(100, 100 - sand) + "%";
+        $("offer").textContent = offerAt(elapsed) + "g";
+        if ((moodT -= dt) < 0) {
+          moodT = 2.2;
+          ui.mood(sand > 55 ? MOODS.happy : sand > 25 ? MOODS.think : MOODS.huff);
+          if (sand <= 25) ui.say(pick([`"Right, I really must be going..."`, `*taps foot*`, `"Is that the time?"`]));
+        }
+        if (sand <= 0 && !over) {
+          over = true;
+          ui.mood(MOODS.huff);
+          setTimeout(() => ui.finish("fail", 0, `${cust.name} drifted out the door.`, cust.maxPay), 400);
+        }
+      }
+
+      function start() {
+        cust = rollCustomer();
+        // hidden drain speed by archetype: Cheapskates bolt, Collectors linger
+        drain = { Cheapskate: 9, Regular: 6.5, Wealthy: 5, Collector: 3.2 }[cust.arch.name] * (0.85 + Math.random() * 0.3);
+        sand = 100; elapsed = 0; over = false; stallUses = 0; moodT = 0;
+        ui.showCustomer(cust);
+        ui.strikes(0);
+        ui.say(pick([
+          `"Hmm, this ${cust.item.name}... maybe. Maybe."`,
+          `"I shouldn't. ...How much is the ${cust.item.name} again?"`,
+          `"Just browsing! ...Mostly."`,
+        ]));
+        cancelAnimationFrame(raf);
+        lastT = performance.now();
+        raf = requestAnimationFrame(tick);
+      }
+
+      $("stallBtn").onclick = () => {
+        if (over) return;
+        stallUses++;
+        // each repeat is less charming and more likely to backfire
+        if (Math.random() < 0.75 - stallUses * 0.15) {
+          sand = Math.min(100, sand + 14);
+          ui.mood(MOODS.happy);
+          ui.say(pick([`"Ha! You're a character."`, `"Oh, I couldn't agree more."`, `"...and how's your mother? Do go on."`]));
+        } else {
+          sand -= 18;
+          ui.mood(MOODS.confused);
+          ui.say(pick([`"You said that already."`, `"Are you keeping me here on purpose?"`, `"Mmhm. Anyway—"`]));
+        }
+      };
+
+      $("deal").onclick = () => {
+        if (over) return;
+        over = true;
+        const price = offerAt(elapsed);
+        const grade = gradeSale(price, cust.maxPay);
+        ui.mood(grade === "perfect" ? MOODS.star : MOODS.happy);
+        ui.finish(grade, price, `You let them simmer ${elapsed.toFixed(1)}s.`, cust.maxPay);
+      };
+
+      $("next").onclick = start;
+      start();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#1a1028" />
+    <title>Gift Wrapping — Coin Cellar bargaining prototype</title>
+    <link rel="icon" type="image/png" href="/logo.png" />
+    <link rel="stylesheet" href="./style.css" />
+    <style>
+      #table { display: block; width: 100%; border: 2px solid var(--wood); border-radius: 12px; touch-action: none; cursor: crosshair; }
+      .score { text-align: center; font-weight: 900; font-size: 18px; margin: 8px 0 10px; }
+      .hint { text-align: center; font-size: 13px; color: var(--ink-soft); font-weight: 600; margin-top: 10px; }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      import { rollCustomer, setupUI, pageShell, MOODS, pick } from "./common.js";
+
+      pageShell({
+        title: "8 · Gift Wrapping",
+        tag: "The sale is made — now wrap it nicely, because the tip depends on it",
+        gameHTML: `
+          <canvas id="table" width="520" height="300"></canvas>
+          <div class="score">Ribbon coverage: <span class="gold" id="cov">0%</span></div>
+          <div class="row">
+            <button class="btn primary" id="bow">Tie the bow 🎀</button>
+          </div>
+          <div class="hint">Trace the dotted outline with the ribbon (drag along it).
+          Base price is already agreed — neat wrapping earns a tip of up to +30%,
+          straying off the line wastes ribbon and docks it. Sloppy work (&lt;40%) and they
+          demand a discount instead.</div>`,
+      });
+
+      const ui = setupUI();
+      const $ = (id) => document.getElementById(id);
+      const canvas = $("table"), ctx = canvas.getContext("2d");
+      const TOL = 16; // px within the outline that counts as "on the line"
+
+      // outline shapes, one picked per customer
+      const SHAPES = {
+        box: (t) => rectPoint(160, 70, 200, 160, t),
+        diamond: (t) => polyPoint([[260, 50], [400, 150], [260, 250], [120, 150]], t),
+        star: (t) => starPoint(260, 150, 105, 48, 5, t),
+      };
+      function rectPoint(x, y, w, h, t) {
+        const per = 2 * (w + h), d = t * per;
+        if (d < w) return [x + d, y];
+        if (d < w + h) return [x + w, y + (d - w)];
+        if (d < 2 * w + h) return [x + w - (d - w - h), y + h];
+        return [x, y + h - (d - 2 * w - h)];
+      }
+      function polyPoint(pts, t) {
+        const segs = pts.map((p, i) => {
+          const q = pts[(i + 1) % pts.length];
+          return { p, q, len: Math.hypot(q[0] - p[0], q[1] - p[1]) };
+        });
+        const per = segs.reduce((s, x) => s + x.len, 0);
+        let d = t * per;
+        for (const s of segs) {
+          if (d <= s.len) { const k = d / s.len; return [s.p[0] + (s.q[0] - s.p[0]) * k, s.p[1] + (s.q[1] - s.p[1]) * k]; }
+          d -= s.len;
+        }
+        return pts[0];
+      }
+      function starPoint(cx, cy, R, r, n, t) {
+        const pts = [];
+        for (let i = 0; i < n * 2; i++) {
+          const a = (i / (n * 2)) * Math.PI * 2 - Math.PI / 2;
+          const rad = i % 2 ? r : R;
+          pts.push([cx + Math.cos(a) * rad, cy + Math.sin(a) * rad]);
+        }
+        return polyPoint(pts, t);
+      }
+
+      let cust, price, samples, covered, ink, offPath, drawing, over, shape;
+
+      function layout() {
+        shape = SHAPES[pick(Object.keys(SHAPES))];
+        samples = [];
+        for (let i = 0; i < 160; i++) samples.push(shape(i / 160));
+        covered = new Array(samples.length).fill(false);
+        ink = []; offPath = 0;
+      }
+
+      function draw() {
+        const w = canvas.width, h = canvas.height;
+        ctx.clearRect(0, 0, w, h);
+        ctx.fillStyle = "#e2c286"; ctx.fillRect(0, 0, w, h);
+        // parcel silhouette + dotted outline
+        ctx.setLineDash([6, 6]);
+        ctx.strokeStyle = "#8a6438"; ctx.lineWidth = 2;
+        ctx.beginPath();
+        samples.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+        ctx.closePath(); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.font = "34px serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText(cust.item.icon, 260, 150);
+        // ribbon ink
+        ctx.strokeStyle = "#c0392b"; ctx.lineWidth = 6; ctx.lineCap = "round";
+        ctx.beginPath();
+        ink.forEach((seg) => { ctx.moveTo(seg[0][0], seg[0][1]); seg.forEach(([x, y]) => ctx.lineTo(x, y)); });
+        ctx.stroke();
+        ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+      }
+
+      function coverage() { return covered.filter(Boolean).length / covered.length; }
+
+      function addInk(p) {
+        const seg = ink[ink.length - 1];
+        seg.push([p.x, p.y]);
+        let on = false;
+        samples.forEach(([x, y], i) => {
+          if ((p.x - x) ** 2 + (p.y - y) ** 2 < TOL * TOL) { covered[i] = true; on = true; }
+        });
+        if (!on) offPath++;
+        $("cov").textContent = Math.round(coverage() * 100) + "%";
+      }
+
+      const pos = (e) => {
+        const r = canvas.getBoundingClientRect();
+        return { x: ((e.clientX - r.left) / r.width) * canvas.width, y: ((e.clientY - r.top) / r.height) * canvas.height };
+      };
+      canvas.addEventListener("pointerdown", (e) => {
+        if (over) return;
+        canvas.setPointerCapture(e.pointerId);
+        drawing = true; ink.push([]);
+        addInk(pos(e)); draw();
+      });
+      canvas.addEventListener("pointermove", (e) => { if (drawing && !over) { addInk(pos(e)); draw(); } });
+      canvas.addEventListener("pointerup", () => (drawing = false));
+
+      function start() {
+        cust = rollCustomer();
+        price = Math.round(cust.maxPay * 0.85); // price pre-agreed, only the tip is in play
+        over = false; drawing = false;
+        layout();
+        ui.showCustomer(cust);
+        ui.strikes(0);
+        ui.say(pick([
+          `"${price}g as agreed — wrap the ${cust.item.name} up nice, would you?"`,
+          `"It's a gift! Make the ${cust.item.name} look the part."`,
+          `"Deal at ${price}g. Now — ribbon it properly."`,
+        ]));
+        $("cov").textContent = "0%";
+        draw();
+      }
+
+      $("bow").onclick = () => {
+        if (over) return;
+        over = true;
+        const cov = coverage();
+        const sloppy = Math.min(0.3, offPath / 600); // wasted ribbon docks the tip
+        const quality = Math.max(0, cov - sloppy);
+        if (cov < 0.4) {
+          const discounted = Math.round(price * 0.8);
+          ui.mood(MOODS.huff);
+          ui.finish("cheap", discounted, `"THAT's the wrapping?!" They demanded 20% off.\nCoverage ${Math.round(cov * 100)}%`);
+        } else {
+          const tip = Math.round(price * 0.3 * quality);
+          const grade = quality > 0.8 ? "perfect" : quality > 0.55 ? "good" : "fair";
+          ui.mood(grade === "perfect" ? MOODS.star : MOODS.happy);
+          ui.finish(grade, price + tip, `${price}g + ${tip}g tip for the wrapping.\nCoverage ${Math.round(cov * 100)}%${offPath > 200 ? ", but quite a lot of stray ribbon" : ""}`);
+        }
+      };
+
+      $("next").onclick = start;
+      start();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#1a1028" />
+    <title>Coin Counter — Coin Cellar bargaining prototype</title>
+    <link rel="icon" type="image/png" href="/logo.png" />
+    <link rel="stylesheet" href="./style.css" />
+    <style>
+      #table { display: block; width: 100%; border: 2px solid var(--wood); border-radius: 12px; touch-action: none; cursor: grab; }
+      .total { text-align: center; font-weight: 900; font-size: 22px; margin: 8px 0 10px; }
+      .hint { text-align: center; font-size: 13px; color: var(--ink-soft); font-weight: 600; margin-top: 10px; }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      import { rollCustomer, setupUI, pageShell, MOODS, pick } from "./common.js";
+
+      pageShell({
+        title: "4 · Coin Counter",
+        tag: "They're selling — slide real coins across the table to make your offer",
+        gameHTML: `
+          <canvas id="table" width="520" height="290"></canvas>
+          <div class="total">On the table: <span class="gold" id="total">0g</span></div>
+          <div class="row">
+            <button class="btn primary" id="offerBtn">Slide it over 🤝</button>
+            <button class="btn danger" id="walk">Not interested</button>
+          </div>
+          <div class="hint">This one's the reverse haggle: the customer wants to sell YOU their find.
+          Drag coins from your purse (left) onto the mat (right). They have a hidden floor —
+          watch their face as the pile grows. Lowball too hard three times and they keep it.
+          Lower winning offers grade better: you're the one paying.</div>`,
+      });
+
+      const ui = setupUI();
+      const $ = (id) => document.getElementById(id);
+      const canvas = $("table"), ctx = canvas.getContext("2d");
+
+      const DENOMS = [
+        { val: 1, r: 13, c1: "#b87f4a", c2: "#8a5a2e" }, // copper
+        { val: 5, r: 15, c1: "#c9c9cf", c2: "#8f8f99" }, // silver
+        { val: 10, r: 17, c1: "#e9b04e", c2: "#b07a1f" }, // gold
+        { val: 25, r: 19, c1: "#ffe9a8", c2: "#c8871f" }, // crown
+      ];
+      const MAT_X = 250; // coins right of this line count toward the offer
+
+      let cust, minSell, strikes, over, coins, drag = null, lastBand = null;
+
+      const total = () => coins.reduce((s, c) => (c.x > MAT_X ? s + c.val : s), 0);
+
+      function draw() {
+        const w = canvas.width, h = canvas.height;
+        ctx.clearRect(0, 0, w, h);
+        // table felt + mat
+        ctx.fillStyle = "#e2c286"; ctx.fillRect(0, 0, w, h);
+        ctx.fillStyle = "#7a9958";
+        ctx.beginPath(); ctx.roundRect(MAT_X + 8, 12, w - MAT_X - 20, h - 24, 14); ctx.fill();
+        ctx.strokeStyle = "#5c7742"; ctx.lineWidth = 3; ctx.stroke();
+        ctx.fillStyle = "rgba(255,255,255,0.5)"; ctx.font = "700 13px Trebuchet MS";
+        ctx.fillText("THE MAT — coins here are offered", MAT_X + 26, 32);
+        // purse stacks
+        ctx.fillStyle = "#5a3410"; ctx.font = "700 13px Trebuchet MS";
+        ctx.fillText("YOUR PURSE (drag a stack)", 16, 24);
+        DENOMS.forEach((d, i) => {
+          drawCoin(60 + i * 52, 70, d, true);
+          ctx.fillStyle = "#5a3410"; ctx.textAlign = "center";
+          ctx.fillText(`${d.val}g`, 60 + i * 52, 105);
+          ctx.textAlign = "left";
+        });
+        for (const c of coins) drawCoin(c.x, c.y, c.d, false);
+        if (drag) drawCoin(drag.x, drag.y, drag.d, false);
+      }
+
+      function drawCoin(x, y, d, stack) {
+        for (let s = stack ? 2 : 0; s >= 0; s--) {
+          ctx.beginPath(); ctx.arc(x, y + s * 4, d.r, 0, Math.PI * 2);
+          ctx.fillStyle = d.c1; ctx.fill();
+          ctx.strokeStyle = d.c2; ctx.lineWidth = 3; ctx.stroke();
+        }
+        ctx.fillStyle = d.c2; ctx.font = `700 ${d.r - 2}px Trebuchet MS`;
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText(d.val, x, y);
+        ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+      }
+
+      // Noisy qualitative readout of the pile vs their hidden floor. A delighted
+      // face means you're overpaying — the tell cuts both ways.
+      function react() {
+        const t = total();
+        const c = t / minSell + (Math.random() * 2 - 1) * 0.08;
+        const band = c < 0.5 ? 0 : c < 0.9 ? 1 : c < 1.15 ? 2 : 3;
+        if (band === lastBand) return;
+        lastBand = band;
+        ui.mood([MOODS.huff, MOODS.think, MOODS.happy, MOODS.eager][band]);
+        ui.say([
+          `"You're not serious with that pile."`,
+          `"Getting warmer..."`,
+          `"Now we're talking."`,
+          `"Ohh! I mean — ahem — 'if you insist.'"`,
+        ][band]);
+      }
+
+      function pos(e) {
+        const r = canvas.getBoundingClientRect();
+        return { x: ((e.clientX - r.left) / r.width) * canvas.width, y: ((e.clientY - r.top) / r.height) * canvas.height };
+      }
+
+      canvas.addEventListener("pointerdown", (e) => {
+        if (over) return;
+        canvas.setPointerCapture(e.pointerId);
+        const p = pos(e);
+        // grab a placed coin first, else spawn from a purse stack
+        for (let i = coins.length - 1; i >= 0; i--) {
+          const c = coins[i];
+          if ((p.x - c.x) ** 2 + (p.y - c.y) ** 2 < c.d.r ** 2) {
+            drag = c; coins.splice(i, 1); draw(); return;
+          }
+        }
+        DENOMS.forEach((d, i) => {
+          const sx = 60 + i * 52;
+          if ((p.x - sx) ** 2 + (p.y - 74) ** 2 < (d.r + 8) ** 2) drag = { x: p.x, y: p.y, val: d.val, d };
+        });
+        draw();
+      });
+      canvas.addEventListener("pointermove", (e) => {
+        if (!drag) return;
+        const p = pos(e);
+        drag.x = Math.max(14, Math.min(canvas.width - 14, p.x));
+        drag.y = Math.max(14, Math.min(canvas.height - 14, p.y));
+        draw();
+      });
+      canvas.addEventListener("pointerup", () => {
+        if (!drag) return;
+        // dropping back on the purse side discards the coin
+        if (drag.x > MAT_X - 30) coins.push(drag);
+        drag = null;
+        $("total").textContent = total() + "g";
+        react();
+        draw();
+      });
+
+      function start() {
+        cust = rollCustomer();
+        // same roll as shop.js sellers: floor at 45–75% of base value
+        minSell = Math.round(cust.item.base * (0.45 + Math.random() * 0.3));
+        strikes = 0; over = false; coins = []; lastBand = null;
+        ui.showCustomer(cust);
+        ui.strikes(0);
+        ui.say(pick([
+          `"Wanna buy this ${cust.item.name}?"`,
+          `"Got a ${cust.item.name} here. Make me an offer."`,
+          `"I'll let this ${cust.item.name} go — cheap."`,
+        ]));
+        $("total").textContent = "0g";
+        draw();
+      }
+
+      $("offerBtn").onclick = () => {
+        if (over) return;
+        const t = total();
+        if (t >= minSell) {
+          over = true;
+          // buying grades mirror shop.js: the less over the floor, the better
+          const grade = t <= minSell * 1.1 ? "perfect" : t <= minSell * 1.35 ? "good" : "fair";
+          ui.mood(grade === "fair" ? MOODS.star : MOODS.happy);
+          ui.finish(grade, 0, `Bought the ${cust.item.name} for ${t}g\n(their floor was ${minSell}g — resale value ${cust.item.base}g)`);
+        } else {
+          strikes++;
+          ui.strikes(strikes);
+          ui.mood(strikes >= 2 ? MOODS.angry : MOODS.huff);
+          ui.say(`"Only ${t}g? I won't take less than ${Math.round(minSell * (1.04 + Math.random() * 0.1))}g."`);
+          if (strikes >= 3) {
+            over = true;
+            setTimeout(() => ui.finish("fail", 0, `${cust.name} kept the ${cust.item.name}.\n(their floor was ${minSell}g)`), 600);
+          }
+        }
+      };
+      $("walk").onclick = () => {
+        if (over) return;
+        over = true;
+        ui.finish("fail", 0, `You passed.\n(their floor was ${minSell}g)`);
+      };
+
+      $("next").onclick = start;
+      start();
+    </script>
+  </body>
+</html>

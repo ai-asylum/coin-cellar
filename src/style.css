@@ -304,11 +304,11 @@ button { font-family: inherit; cursor: pointer; }
 #tut-guide.edge { transform: translate(-50%, -50%); }
 #tut-guide .tg-text {
   background: linear-gradient(#f3dfb0, #e2c286); color: var(--ink);
-  border: 2px solid var(--wood); border-radius: 12px;
-  padding: 4px 11px; font-size: 14px; font-weight: 800; white-space: nowrap;
+  border: 2px solid var(--wood); border-radius: 14px;
+  padding: 6px 15px; font-size: 19px; font-weight: 800; white-space: nowrap;
   box-shadow: 0 2px 0 var(--wood-dark), inset 0 1px 0 #fff7e4;
 }
-#tut-guide .tg-arrow { width: 26px; height: 26px; }
+#tut-guide .tg-arrow { width: 38px; height: 38px; }
 #tut-guide .tg-bob { display: block; width: 100%; height: 100%; }
 #tut-guide:not(.edge) .tg-bob { animation: tgbob 0.85s ease-in-out infinite; }
 #tut-guide svg { display: block; width: 100%; height: 100%; }
@@ -382,6 +382,25 @@ button { font-family: inherit; cursor: pointer; }
 #dodge-btn .ic { width: 1em; height: 1em; }
 #dodge-btn:active { transform: scale(0.9); }
 @media (pointer: fine) { #dodge-btn { display: none; } }
+
+/* interact button — portals / stairs / chests. Sits just above the attack
+   button so the swing and the "use this" press never share a target. Shown
+   only while something's in reach (toggled from input.setInteract). */
+#interact-btn {
+  pointer-events: auto;
+  position: absolute; right: calc(24px + env(safe-area-inset-right));
+  bottom: calc(120px + env(safe-area-inset-bottom));
+  width: 66px; height: 66px; border-radius: 50%; font-size: 28px;
+  background: radial-gradient(circle at 35% 30%, #d6ffe0, #4fae72);
+  border: 3px solid #2f6e4d; color: #143a23;
+  box-shadow: 0 4px 0 #1f5236, 0 0 18px rgba(120, 255, 170, 0.4);
+  display: none; align-items: center; justify-content: center;
+  animation: interactpulse 1.1s infinite;
+}
+#interact-btn .ic { width: 1em; height: 1em; }
+#interact-btn:active { transform: scale(0.9); }
+@keyframes interactpulse { 50% { box-shadow: 0 4px 0 #1f5236, 0 0 30px rgba(140, 255, 190, 0.85); border-color: #7bf0aa; } }
+@media (pointer: fine) { #interact-btn { display: none !important; } }
 
 /* backpack button — big bag sprite parked on the bottom edge, just inboard of
    the action/dodge cluster (dungeon-only; the bag panel grows out of this icon) */

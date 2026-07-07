@@ -272,11 +272,7 @@ export class HUD {
   }
 
   toast(text) {
-    const el = document.createElement("div");
-    el.className = "toast";
-    el.innerHTML = text;
-    this.toastWrap.appendChild(el);
-    setTimeout(() => el.remove(), 2600);
+    // Disabled for now.
   }
 
   /** Floating text at a world position (damage numbers, +gold). */

@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#1a1028" />
+    <title>Handshake Grip — Coin Cellar bargaining prototype</title>
+    <link rel="icon" type="image/png" href="/logo.png" />
+    <link rel="stylesheet" href="./style.css" />
+    <style>
+      .gripzone { text-align: center; }
+      .hands { font-size: 56px; margin: 6px 0; display: inline-block; }
+      .hands.shake1 { animation: tremble 0.12s infinite; }
+      .hands.shake2 { animation: tremble 0.06s infinite; }
+      @keyframes tremble { 25% { transform: translate(2px, -1px) rotate(1.5deg); } 75% { transform: translate(-2px, 1px) rotate(-1.5deg); } }
+      .meter {
+        position: relative; height: 40px; border-radius: 12px; overflow: hidden;
+        background: var(--parch-2); border: 2px solid var(--wood); margin-bottom: 8px;
+      }
+      .meter .fill { position: absolute; inset: 0; width: 0%; background: linear-gradient(90deg, #cfe3b8, #ffe9a8 60%, #d98a62); }
+      .meter .price {
+        position: absolute; inset: 0; display: grid; place-items: center;
+        font-weight: 900; font-size: 19px; text-shadow: 0 1px 0 #fff7e4;
+      }
+      .hint { text-align: center; font-size: 13px; color: var(--ink-soft); font-weight: 600; margin-top: 10px; }
+      #squeeze { font-size: 18px; padding: 14px 26px; touch-action: none; }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      import { rollCustomer, gradeSale, setupUI, pageShell, MOODS, pick } from "./common.js";
+
+      pageShell({
+        title: "5 · Handshake Grip",
+        tag: "One squeeze seals the deal — harder is richer, too hard is a broken hand",
+        gameHTML: `
+          <div class="gripzone">
+            <div class="hands" id="hands">🤝</div>
+            <div class="meter"><div class="fill" id="fill"></div><div class="price" id="price">—</div></div>
+            <div class="row"><button class="btn primary" id="squeeze">HOLD to squeeze</button></div>
+          </div>
+          <div class="hint">Hold the button: the longer you grip, the higher the price when you let go.
+          Somewhere past their limit the handshake turns into a crush — they yelp and the deal dies.
+          One handshake per customer. Watch the tremble.</div>`,
+      });
+
+      const ui = setupUI();
+      const $ = (id) => document.getElementById(id);
+
+      let cust, grip, holding, danger, over, raf, lastT, moodT;
+
+      // grip 0→1 over ~1.8s; price sweeps from a lowball to 15% past their limit
+      const priceAt = (g) => Math.round(cust.item.base * 0.5 + (cust.maxPay * 1.15 - cust.item.base * 0.5) * g);
+
+      function tick(t) {
+        if (!over) raf = requestAnimationFrame(tick);
+        const dt = Math.min((t - lastT) / 1000, 0.05);
+        lastT = t;
+        if (holding && !over) {
+          grip = Math.min(1, grip + dt / 1.8);
+          const price = priceAt(grip);
+          $("price").textContent = `${price}g`;
+          $("fill").style.width = grip * 100 + "%";
+          const ratio = price / cust.maxPay;
+          $("hands").className = "hands" + (ratio > 0.95 ? " shake2" : ratio > 0.78 ? " shake1" : "");
+          // occasional noisy grunts instead of a readable gauge
+          if ((moodT -= dt) < 0) {
+            moodT = 0.45;
+            const bluff = (Math.random() - 0.5) * 0.16;
+            const r = ratio + bluff;
+            ui.mood(r < 0.7 ? MOODS.happy : r < 0.9 ? MOODS.think : MOODS.confused);
+            ui.say(r < 0.7 ? `"Firm grip!"` : r < 0.9 ? `"Quite... the grip..."` : `"Easy—! Easy now..."`);
+          }
+          if (price > cust.maxPay) {
+            danger += dt;
+            if (danger > 0.4) return crush();
+          }
+        }
+      }
+
+      function crush() {
+        over = true;
+        holding = false;
+        $("hands").className = "hands";
+        $("hands").textContent = "💥";
+        ui.mood(MOODS.angry);
+        ui.say(`"YEOWCH! My hand! Deal's OFF!"`);
+        setTimeout(() => ui.finish("fail", 0, `You crushed ${cust.name}'s hand.`, cust.maxPay), 700);
+      }
+
+      function release() {
+        if (!holding || over) return;
+        holding = false;
+        over = true;
+        $("hands").className = "hands";
+        const price = Math.min(priceAt(grip), cust.maxPay);
+        if (grip < 0.12) {
+          ui.mood(MOODS.confused);
+          ui.finish("fail", 0, `Limp handshake. ${cust.name} lost all confidence in the price.`, cust.maxPay);
+          return;
+        }
+        const grade = gradeSale(price, cust.maxPay);
+        ui.mood(grade === "perfect" ? MOODS.star : MOODS.happy);
+        ui.finish(grade, price, grade === "cheap" ? "A polite little shake." : "", cust.maxPay);
+      }
+
+      function start() {
+        cust = rollCustomer();
+        grip = 0; holding = false; danger = 0; over = false; moodT = 0;
+        $("hands").textContent = "🤝";
+        $("hands").className = "hands";
+        $("price").textContent = "—";
+        $("fill").style.width = "0%";
+        ui.showCustomer(cust);
+        ui.strikes(0);
+        ui.say(pick([
+          `"Let's shake on the ${cust.item.name}, then."`,
+          `"A firm hand tells me a fair price."`,
+          `"Deal's done when the hands part!"`,
+        ]));
+        cancelAnimationFrame(raf);
+        lastT = performance.now();
+        raf = requestAnimationFrame(tick);
+      }
+
+      const btn = $("squeeze");
+      btn.addEventListener("pointerdown", (e) => { e.preventDefault(); if (!over) { holding = true; danger = 0; } });
+      window.addEventListener("pointerup", release);
+      btn.addEventListener("pointerleave", release);
+
+      $("next").onclick = start;
+      start();
+    </script>
+  </body>
+</html>

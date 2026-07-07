@@ -153,20 +153,42 @@ export function populateStreet(group, r, { W, backZ, streetHalfX }) {
   }
 }
 
+// Burst colour for each destructible prop, keyed by catalogue category. Stones
+// are absent on purpose — rocks don't shatter into a puff, they just sit there.
+export const DECOR_BURST = {
+  trees: 0x5aa84f,
+  smallTrees: 0x5aa84f,
+  bushes: 0x5fae54,
+  flowers: 0x9bd77a,
+  mushrooms: 0xd98ab8,
+  dead: 0x8a6a45,
+  bones: 0xe8e0c8,
+};
+
 // --------------------------------------------------------- dungeon floors
 // Freckle the cellar with grim set dressing: dark stones and pale mushrooms
 // tucked into room corners, the odd gnarled dead tree against a wall, and a
 // stray bone pile. Seeded off the floor's rng so co-op peers see the same
 // layout, and dimmed to a cool tint so it sits in the cellar's moody light.
+// Returns the list of destructible props (everything but the stones) so the
+// dungeon can let the player smash them into a particle puff.
 const CAVE_TINT = 0xc7c2d4;
 export function scatterDungeonDecor(group, r, rooms, cellPos, opts = {}) {
   const { skip = [] } = opts;
   const blocked = (cx, cy) => skip.some((s) => Math.abs(s.x - cx) < 1.5 && Math.abs(s.y - cy) < 1.5);
+  const destructibles = [];
 
   const add = (cat, wx, wz, height) => {
     const s = decorSprite(pick(r, DECOR[cat]), { height, tint: CAVE_TINT });
     s.position.set(wx, 0, wz);
     group.add(s);
+    const color = DECOR_BURST[cat];
+    if (color != null) {
+      // hit radius roughly follows the prop's footprint, clamped so tiny
+      // flowers are still swingable and big dead trees aren't a huge target
+      destructibles.push({ group: s, x: wx, z: wz, height, color, radius: clampR(height * 0.4) });
+    }
+    return s;
   };
 
   for (const room of rooms) {
@@ -186,4 +208,7 @@ export function scatterDungeonDecor(group, r, rooms, cellPos, opts = {}) {
       else add("bones", p.x, p.z, 0.7 + r() * 0.3);
     }
   }
+  return destructibles;
 }
+
+const clampR = (v) => Math.max(0.55, Math.min(1.0, v));

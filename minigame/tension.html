@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#1a1028" />
+    <title>Tension Meter — Coin Cellar bargaining prototype</title>
+    <link rel="icon" type="image/png" href="/logo.png" />
+    <link rel="stylesheet" href="./style.css" />
+    <style>
+      .meter {
+        position: relative; height: 46px; border-radius: 12px; overflow: hidden;
+        background: linear-gradient(90deg, #cfe3b8, #f3dfb0 55%, #e8b48a 80%, #d98a62);
+        border: 2px solid var(--wood); margin-bottom: 6px;
+      }
+      .meter .fill {
+        position: absolute; inset: 0; width: 0%;
+        background: linear-gradient(#ffe9a8, #e9b04e);
+        border-right: 3px solid var(--wood-dark);
+        transition: width 0.18s;
+      }
+      .meter .price {
+        position: absolute; inset: 0; display: grid; place-items: center;
+        font-weight: 900; font-size: 20px; color: var(--ink);
+        text-shadow: 0 1px 0 #fff7e4;
+      }
+      .scale { display: flex; justify-content: space-between; font-size: 12px; font-weight: 700; color: var(--ink-soft); margin-bottom: 14px; }
+      .hint { text-align: center; font-size: 13px; color: var(--ink-soft); font-weight: 600; margin-top: 10px; }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      import { rollCustomer, gradeSale, setupUI, pageShell, MOODS, pick } from "./common.js";
+
+      pageShell({
+        title: "1 · Tension Meter",
+        tag: "Push the price up in nudges — read their face, lock in before they snap",
+        gameHTML: `
+          <div class="meter"><div class="fill" id="fill"></div><div class="price" id="price"></div></div>
+          <div class="scale"><span id="lo"></span><span id="hi"></span></div>
+          <div class="row">
+            <button class="btn" id="push">Push ▲</button>
+            <button class="btn primary" id="deal">Deal 🤝</button>
+            <button class="btn danger" id="walk">Wave off</button>
+          </div>
+          <div class="hint">Each push raises the price. Their face hints how close you are —
+          but some folk bluff. Push past their limit and they get cross; three times and they storm out.</div>`,
+      });
+
+      const ui = setupUI();
+      const $ = (id) => document.getElementById(id);
+      const METER_MAX = 2.4; // meter spans 0 → 2.4× base value
+
+      let cust, price, strikes, over;
+
+      // Mood readout with archetype-flavoured noise: Cheapskates telegraph,
+      // Collectors keep a poker face — so the meter can't be read perfectly.
+      function moodFor(closeness) {
+        const bluff = { Cheapskate: 0.04, Regular: 0.08, Wealthy: 0.12, Collector: 0.2 }[cust.arch.name];
+        const c = closeness + (Math.random() * 2 - 1) * bluff;
+        if (c < 0.55) return [MOODS.eager, `"That's a steal!"`];
+        if (c < 0.78) return [MOODS.happy, `"Sounds reasonable..."`];
+        if (c < 0.92) return [MOODS.think, `"Hmm. Getting steep."`];
+        return [MOODS.confused, `"You're pushing it, friend."`];
+      }
+
+      function render() {
+        $("price").textContent = `${price}g`;
+        $("fill").style.width = `${Math.min(100, (price / (cust.item.base * METER_MAX)) * 100)}%`;
+        ui.strikes(strikes);
+      }
+
+      function start() {
+        cust = rollCustomer();
+        price = Math.round(cust.item.base * 0.5);
+        strikes = 0;
+        over = false;
+        ui.showCustomer(cust);
+        ui.say(pick([
+          `"How much for the ${cust.item.name}?"`,
+          `"Ohh, a ${cust.item.name}! Name your price."`,
+          `"I've been looking for one of these!"`,
+        ]));
+        $("lo").textContent = "0g";
+        $("hi").textContent = `${Math.round(cust.item.base * METER_MAX)}g`;
+        render();
+      }
+
+      $("push").onclick = () => {
+        if (over) return;
+        // push size shrinks as the meter fills, so late pushes are finer control
+        const step = Math.max(1, Math.round(cust.item.base * (0.04 + Math.random() * 0.06)));
+        const next = price + step;
+        if (next > cust.maxPay) {
+          strikes++;
+          price = Math.max(price - Math.round(step * 1.5), Math.round(cust.item.base * 0.4));
+          ui.mood(strikes >= 2 ? MOODS.angry : MOODS.huff);
+          ui.say(strikes >= 2 ? `"Don't test me!"` : `"Whoa whoa — too rich for me!"`);
+          if (strikes >= 3) {
+            over = true;
+            ui.mood(MOODS.angry);
+            setTimeout(() => ui.finish("fail", 0, `${cust.name} stormed out.`, cust.maxPay), 500);
+          }
+        } else {
+          price = next;
+          const [face, line] = moodFor(price / cust.maxPay);
+          ui.mood(face);
+          ui.say(line);
+        }
+        render();
+      };
+
+      $("deal").onclick = () => {
+        if (over) return;
+        over = true;
+        const grade = gradeSale(price, cust.maxPay);
+        ui.mood(grade === "perfect" ? MOODS.star : MOODS.happy);
+        ui.finish(grade, price, grade === "cheap" ? "They can't believe their luck." : "", cust.maxPay);
+      };
+
+      $("walk").onclick = () => {
+        if (over) return;
+        over = true;
+        ui.finish("fail", 0, "You waved them off.", cust.maxPay);
+      };
+
+      $("next").onclick = start;
+      start();
+    </script>
+  </body>
+</html>

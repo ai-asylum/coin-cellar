@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#1a1028" />
+    <title>Dialogue Duel — Coin Cellar bargaining prototype</title>
+    <link rel="icon" type="image/png" href="/logo.png" />
+    <link rel="stylesheet" href="./style.css" />
+    <style>
+      .offer { text-align: center; font-weight: 900; font-size: 24px; margin-bottom: 4px; }
+      .hearts { text-align: center; font-size: 18px; margin-bottom: 12px; min-height: 24px; }
+      .tactics { display: grid; gap: 8px; margin-bottom: 10px; }
+      .tactics .btn { text-align: left; font-size: 15px; }
+      .tactics .btn small { display: block; font-weight: 600; color: var(--ink-soft); font-size: 12px; }
+      .hint { text-align: center; font-size: 13px; color: var(--ink-soft); font-weight: 600; margin-top: 10px; }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      import { rollCustomer, gradeSale, setupUI, pageShell, MOODS, pick } from "./common.js";
+
+      pageShell({
+        title: "3 · Dialogue Duel",
+        tag: "Pick the right patter for the right customer — learn what each type falls for",
+        gameHTML: `
+          <div class="offer">Their offer: <span class="gold" id="offer"></span></div>
+          <div class="hearts" id="hearts"></div>
+          <div class="tactics">
+            <button class="btn" id="t-flatter">🪶 Flatter them<small>"A discerning eye like yours..."</small></button>
+            <button class="btn" id="t-lore">📜 Talk up the item<small>"Pulled from the third cellar level, this."</small></button>
+            <button class="btn" id="t-firm">🪨 Stand firm<small>"The price is the price."</small></button>
+          </div>
+          <div class="row">
+            <button class="btn primary" id="deal">Accept their offer 🤝</button>
+          </div>
+          <div class="hint">Each tactic lands differently per customer type — and wears thin if repeated.
+          A landed tactic pushes their offer up; a flop costs patience. Out of patience, they walk.
+          The matrix is hidden: learn it across customers.</div>`,
+      });
+
+      const ui = setupUI();
+      const $ = (id) => document.getElementById(id);
+
+      // Hidden effectiveness matrix — the thing the player is meant to learn.
+      // Cheapskates respect spine, Wealthy love flattery, Collectors eat lore up.
+      const MATRIX = {
+        Cheapskate: { flatter: 0.2, lore: 0.45, firm: 0.7 },
+        Regular: { flatter: 0.55, lore: 0.55, firm: 0.5 },
+        Wealthy: { flatter: 0.8, lore: 0.5, firm: 0.3 },
+        Collector: { flatter: 0.45, lore: 0.9, firm: 0.4 },
+      };
+      const LINES = {
+        flatter: { win: `"Well... I DO have excellent taste."`, lose: `"Save the honey, shopkeep."` },
+        lore: { win: `"The third level, you say?! Fascinating..."`, lose: `"A likely story."` },
+        firm: { win: `"Hmph. Fair enough, you know your stock."`, lose: `"Then I know a stubborn fool when I see one."` },
+      };
+
+      let cust, offer, hearts, used, over;
+
+      function render() {
+        $("offer").textContent = `${offer}g`;
+        $("hearts").textContent = "❤️".repeat(hearts) + "🖤".repeat(3 - hearts);
+      }
+
+      function start() {
+        cust = rollCustomer();
+        offer = Math.round(cust.maxPay * (0.5 + Math.random() * 0.12));
+        hearts = 3; over = false;
+        used = { flatter: 0, lore: 0, firm: 0 };
+        ui.showCustomer(cust);
+        ui.strikes(0);
+        ui.say(pick([
+          `"I'll give you ${offer}g for the ${cust.item.name}."`,
+          `"${offer}g for the ${cust.item.name}. I won't be swindled."`,
+          `"My offer? ${offer}g."`,
+        ]));
+        render();
+      }
+
+      function tactic(kind) {
+        if (over) return;
+        // each repeat of the same line is 20 points less convincing
+        const chance = Math.max(0.05, MATRIX[cust.arch.name][kind] - used[kind] * 0.2);
+        used[kind]++;
+        if (Math.random() < chance) {
+          const bump = Math.round(cust.maxPay * (0.1 + Math.random() * 0.08));
+          offer = Math.min(offer + bump, Math.round(cust.maxPay * 1.02));
+          ui.mood(pick([MOODS.happy, MOODS.think, MOODS.eager]));
+          ui.say(LINES[kind].win + ` (+${bump}g)`);
+        } else {
+          hearts--;
+          ui.mood(hearts <= 1 ? MOODS.angry : MOODS.huff);
+          ui.say(LINES[kind].lose);
+          if (hearts <= 0) {
+            over = true;
+            setTimeout(() => ui.finish("fail", 0, `${cust.name} ran out of patience.`, cust.maxPay), 500);
+          }
+        }
+        render();
+      }
+
+      $("t-flatter").onclick = () => tactic("flatter");
+      $("t-lore").onclick = () => tactic("lore");
+      $("t-firm").onclick = () => tactic("firm");
+
+      $("deal").onclick = () => {
+        if (over) return;
+        over = true;
+        const price = Math.min(offer, cust.maxPay);
+        const grade = gradeSale(price, cust.maxPay);
+        ui.mood(grade === "perfect" ? MOODS.star : MOODS.happy);
+        ui.finish(grade, price, "", cust.maxPay);
+      };
+
+      $("next").onclick = start;
+      start();
+    </script>
+  </body>
+</html>

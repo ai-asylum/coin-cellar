@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#1a1028" />
+    <title>Pour the Ale — Coin Cellar bargaining prototype</title>
+    <link rel="icon" type="image/png" href="/logo.png" />
+    <link rel="stylesheet" href="./style.css" />
+    <style>
+      .tavern { display: flex; justify-content: center; align-items: flex-end; gap: 26px; margin: 8px 0 6px; }
+      .mug {
+        position: relative; width: 110px; height: 150px;
+        background: linear-gradient(#d9c49a, #c4a878);
+        border: 4px solid var(--wood-dark); border-radius: 6px 6px 12px 12px;
+        overflow: hidden;
+      }
+      .mug::after {
+        content: ""; position: absolute; right: -26px; top: 34px; width: 30px; height: 60px;
+        border: 8px solid var(--wood-dark); border-left: none; border-radius: 0 20px 20px 0;
+      }
+      .ale {
+        position: absolute; left: 0; right: 0; bottom: 0; height: 0%;
+        background: linear-gradient(#e9a83c, #c07d18);
+        transition: height 0.08s linear;
+      }
+      .foam { position: absolute; left: 0; right: 0; height: 12px; margin-top: -12px; background: #fff6e2; border-radius: 50% 50% 0 0 / 80% 80% 0 0; }
+      .target {
+        position: absolute; left: -6px; right: -6px; border-top: 3px dashed var(--bad);
+        font-size: 10px; font-weight: 900; color: var(--bad); text-align: right; padding-right: 2px;
+      }
+      .spill { position: absolute; top: 148px; font-size: 30px; display: none; }
+      .mugs { text-align: center; font-size: 22px; min-height: 30px; }
+      .hint { text-align: center; font-size: 13px; color: var(--ink-soft); font-weight: 600; margin-top: 10px; }
+      #pourBtn { font-size: 18px; padding: 14px 26px; touch-action: none; }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      import { rollCustomer, gradeSale, setupUI, pageShell, MOODS, pick } from "./common.js";
+
+      pageShell({
+        title: "9 · Pour the Ale",
+        tag: "Deals are done over a drink — a generous, unspilled pour softens any price",
+        gameHTML: `
+          <div class="tavern">
+            <div class="mug">
+              <div class="target" id="target">FILL LINE</div>
+              <div class="ale" id="ale"><div class="foam"></div></div>
+              <div class="spill" id="spill">💦</div>
+            </div>
+            <button class="btn primary" id="pourBtn">HOLD to pour 🍺</button>
+          </div>
+          <div class="mugs" id="mugs"></div>
+          <div class="hint">Hold to pour — the stream speeds up the longer you hold, and the head
+          keeps rising a beat after you stop. Land it on the line and they'll sign at a fat price;
+          short pours read stingy. Overflow costs a mug — spill three and they leave dry.</div>`,
+      });
+
+      const ui = setupUI();
+      const $ = (id) => document.getElementById(id);
+      const TARGET = 78; // % fill line
+
+      let cust, fill, pending, rate, pouring, mugsLeft, over, raf, lastT, settled;
+
+      function render() {
+        $("ale").style.height = Math.min(fill, 104) + "%";
+        $("mugs").textContent = "🍺".repeat(mugsLeft) + "▫️".repeat(3 - mugsLeft);
+      }
+
+      function tick(t) {
+        if (!over) raf = requestAnimationFrame(tick);
+        const dt = Math.min((t - lastT) / 1000, 0.05);
+        lastT = t;
+        if (pouring) {
+          rate = Math.min(rate + dt * 55, 75); // stream accelerates while held
+          fill += rate * dt;
+          pending = rate * 0.22; // head still in the air when you stop
+        } else if (pending > 0) {
+          const drop = Math.min(pending, dt * 30);
+          fill += drop; pending -= drop;
+          if (pending <= 0.01 && !settled) { settled = true; judge(); }
+        }
+        if (fill > 100 && !over) return spill();
+        render();
+      }
+
+      function spill() {
+        pouring = false; pending = 0;
+        mugsLeft--;
+        $("spill").style.display = "block";
+        ui.mood(mugsLeft <= 1 ? MOODS.angry : MOODS.shocked);
+        ui.say(pick([`"MY BOOTS!"`, `"You're mopping that up."`, `"Steady on!!"`]));
+        ui.strikes(3 - mugsLeft);
+        if (mugsLeft <= 0) {
+          over = true;
+          setTimeout(() => ui.finish("fail", 0, `${cust.name} left soggy and thirsty.`, cust.maxPay), 700);
+          return;
+        }
+        setTimeout(() => { fill = 0; settled = false; $("spill").style.display = "none"; render(); }, 900);
+      }
+
+      function judge() {
+        over = true;
+        // pour quality 1 at the line, fading to 0 at 35 points short
+        const quality = Math.max(0, 1 - Math.abs(TARGET - fill) / 35);
+        const price = Math.round(cust.maxPay * (0.68 + 0.32 * quality));
+        const grade = gradeSale(price, cust.maxPay);
+        ui.mood(quality > 0.8 ? MOODS.star : quality > 0.4 ? MOODS.happy : MOODS.think);
+        setTimeout(() => ui.finish(grade, price,
+          quality > 0.8 ? `"Now THAT'S a pour. Where do I sign?"` :
+          quality > 0.4 ? `"Decent enough." They signed at ${price}g.` :
+          `A stingy pour makes a stingy deal.`, cust.maxPay), 600);
+      }
+
+      function start() {
+        cust = rollCustomer();
+        fill = 0; pending = 0; rate = 0; pouring = false; mugsLeft = 3; over = false; settled = false;
+        $("target").style.top = 100 - TARGET + "%";
+        $("spill").style.display = "none";
+        ui.showCustomer(cust);
+        ui.strikes(0);
+        ui.say(pick([
+          `"Let's talk ${cust.item.name} over a pint."`,
+          `"Pour me one and name your price."`,
+          `"My rule: no dry negotiations."`,
+        ]));
+        render();
+        cancelAnimationFrame(raf);
+        lastT = performance.now();
+        raf = requestAnimationFrame(tick);
+      }
+
+      const btn = $("pourBtn");
+      btn.addEventListener("pointerdown", (e) => { e.preventDefault(); if (!over && !settled) pouring = true; });
+      const stop = () => { if (pouring) { pouring = false; rate = 0; } };
+      window.addEventListener("pointerup", stop);
+      btn.addEventListener("pointerleave", stop);
+
+      $("next").onclick = start;
+      start();
+    </script>
+  </body>
+</html>

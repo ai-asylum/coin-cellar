@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#1a1028" />
+    <title>Timing Bar — Coin Cellar bargaining prototype</title>
+    <link rel="icon" type="image/png" href="/logo.png" />
+    <link rel="stylesheet" href="./style.css" />
+    <style>
+      .bar {
+        position: relative; height: 54px; border-radius: 12px; overflow: hidden;
+        background: linear-gradient(#e2c286, #d3ae6b);
+        border: 2px solid var(--wood); margin-bottom: 8px;
+      }
+      .zone { position: absolute; top: 0; bottom: 0; background: rgba(107, 160, 74, 0.55); }
+      .zone.perfect { background: rgba(200, 135, 31, 0.85); }
+      .cursor {
+        position: absolute; top: -2px; bottom: -2px; width: 5px;
+        background: var(--wood-dark); border-radius: 3px;
+        box-shadow: 0 0 8px rgba(0, 0, 0, 0.4);
+      }
+      .offer {
+        text-align: center; font-weight: 900; font-size: 24px; margin-bottom: 10px;
+      }
+      .offer small { font-size: 13px; color: var(--ink-soft); font-weight: 700; display: block; }
+      .hint { text-align: center; font-size: 13px; color: var(--ink-soft); font-weight: 600; margin-top: 10px; }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      import { rollCustomer, gradeSale, setupUI, pageShell, MOODS, pick } from "./common.js";
+
+      pageShell({
+        title: "2 · Timing Bar",
+        tag: "Push your luck — every hit squeezes the price higher, every miss is a strike",
+        gameHTML: `
+          <div class="offer"><span class="gold" id="offer"></span><small id="offerNote"></small></div>
+          <div class="bar" id="bar">
+            <div class="zone" id="zone"></div>
+            <div class="zone perfect" id="pzone"></div>
+            <div class="cursor" id="cursor"></div>
+          </div>
+          <div class="row">
+            <button class="btn primary" id="haggle">Haggle! (space)</button>
+            <button class="btn" id="bank">Shake on it 🤝</button>
+          </div>
+          <div class="hint">Stop the cursor in the green to push the price up ~12%
+          (gold sliver = +20%). Each push shrinks and speeds the zone. Miss = strike;
+          three strikes and they walk. Bank whenever your nerve runs out.</div>`,
+      });
+
+      const ui = setupUI();
+      const $ = (id) => document.getElementById(id);
+
+      let cust, offer, strikes, round, over;
+      let cursorX = 0, dir = 1, speed, zoneW, zoneX, raf;
+
+      function layoutZone() {
+        // zone shrinks and drifts each round; perfect sliver sits inside it
+        zoneW = Math.max(8, 26 - round * 4);
+        zoneX = 12 + Math.random() * (76 - zoneW);
+        speed = 55 + round * 22; // %/sec
+        $("zone").style.left = zoneX + "%";
+        $("zone").style.width = zoneW + "%";
+        const pw = Math.max(2.5, zoneW * 0.22);
+        $("pzone").style.left = zoneX + (zoneW - pw) / 2 + "%";
+        $("pzone").style.width = pw + "%";
+      }
+
+      function loop(t0) {
+        let last = t0;
+        const step = (t) => {
+          if (over) return;
+          cursorX += ((t - last) / 1000) * speed * dir;
+          last = t;
+          if (cursorX > 100) { cursorX = 100; dir = -1; }
+          if (cursorX < 0) { cursorX = 0; dir = 1; }
+          $("cursor").style.left = cursorX + "%";
+          raf = requestAnimationFrame(step);
+        };
+        raf = requestAnimationFrame(step);
+      }
+
+      function render() {
+        $("offer").textContent = `${offer}g`;
+        $("offerNote").textContent = round === 0 ? "their opening offer" : `after ${round} push${round > 1 ? "es" : ""}`;
+        ui.strikes(strikes);
+      }
+
+      function start() {
+        cust = rollCustomer();
+        // opening lowball: 55–70% of what they'd actually pay
+        offer = Math.round(cust.maxPay * (0.55 + Math.random() * 0.15));
+        strikes = 0; round = 0; over = false;
+        cursorX = 0; dir = 1;
+        ui.showCustomer(cust);
+        ui.say(pick([
+          `"I'll give you ${offer}g for the ${cust.item.name}. Final offer."`,
+          `"${offer}g, take it or leave it!"`,
+          `"How about ${offer}g?"`,
+        ]));
+        layoutZone();
+        render();
+        cancelAnimationFrame(raf);
+        loop(performance.now());
+      }
+
+      function hit() {
+        if (over) return;
+        const inZone = cursorX >= zoneX && cursorX <= zoneX + zoneW;
+        const p = $("pzone");
+        const px = parseFloat(p.style.left), pw = parseFloat(p.style.width);
+        const inPerfect = cursorX >= px && cursorX <= px + pw;
+        if (inZone) {
+          round++;
+          const mult = inPerfect ? 1.2 : 1.12;
+          offer = Math.min(Math.round(offer * mult), Math.round(cust.maxPay * 1.05));
+          ui.mood(inPerfect ? MOODS.shocked : MOODS.think);
+          ui.say(inPerfect ? `"...fine, FINE! You drive a hard bargain."` : `"Hmm... alright, a bit more."`);
+          layoutZone();
+        } else {
+          strikes++;
+          offer = Math.max(Math.round(offer * 0.92), 1);
+          ui.mood(strikes >= 2 ? MOODS.angry : MOODS.huff);
+          ui.say(`"Fumbling your words? The offer just went DOWN."`);
+          if (strikes >= 3) {
+            over = true;
+            cancelAnimationFrame(raf);
+            setTimeout(() => ui.finish("fail", 0, `${cust.name} lost patience.`, cust.maxPay), 500);
+          }
+        }
+        render();
+      }
+
+      function bank() {
+        if (over) return;
+        over = true;
+        cancelAnimationFrame(raf);
+        const price = Math.min(offer, cust.maxPay); // they never pay past their limit
+        const grade = gradeSale(price, cust.maxPay);
+        ui.mood(grade === "perfect" ? MOODS.star : MOODS.happy);
+        ui.finish(grade, price, round === 0 ? "You took the opening offer." : "", cust.maxPay);
+      }
+
+      $("haggle").onclick = hit;
+      $("bank").onclick = bank;
+      document.addEventListener("keydown", (e) => {
+        if (e.code === "Space") { e.preventDefault(); hit(); }
+      });
+      $("next").onclick = start;
+      start();
+    </script>
+  </body>
+</html>

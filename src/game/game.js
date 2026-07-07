@@ -234,9 +234,13 @@ export class Game {
     }
 
     // facing: mouse aim on desktop, movement direction on touch
+    const swinging = c.animator.attackT >= 0 && c.animator.attackT < 0.45;
     if (this._dashT >= 0) {
       // keep the roll facing its travel direction (don't fight the aim)
       c.heading = Math.atan2(this._dashDX, this._dashDZ);
+    } else if (swinging) {
+      // hold the committed swing direction (set by _attack's aim assist) until
+      // the blow lands, so the hit connects where the swoosh points
     } else if (this.input.aimActive) {
       const aim = this._aimPoint();
       if (aim) {
@@ -273,16 +277,35 @@ export class Game {
       }
     }
 
-    // context action
+    // context action — and, crucially, keep the swing and the "use this"
+    // press on separate inputs so the two never clash. In the cellar the main
+    // button always swings; portals / stairs / chests answer to E (a dedicated
+    // touch button). Up in the shop there's no combat, so the button just acts.
     const act = this._contextAction();
-    this.input.setActionLabel(act.label);
+    const inDungeon = this.playerArea === "dungeon";
+    const hasInteract = act.label !== "swords";
+    if (inDungeon) {
+      this.input.setActionLabel("swords");
+      this.input.setInteract(act.label, hasInteract);
+    } else {
+      this.input.setActionLabel(act.label);
+      this.input.setInteract(null, false);
+    }
     this._updateHighlight(act.focus, act.color, elapsed);
     // control hint under the highlight ring: keycap + verb on desktop, verb
-    // only on touch (the action button itself already pulses there)
+    // only on touch (the interact button itself already pulses there)
     if (act.focus && act.hint && !sheetBlocked && !this.gameOver)
       this.hud.interactHint(act.focus, act.hint, this.input.isTouch ? "" : "E");
     else this.hud.hideInteractHint();
-    if (this.input.actionEdge && !sheetBlocked && this._dashT < 0) act.fn();
+    if (!sheetBlocked && this._dashT < 0) {
+      // E / interact button: fire the context action (portal, stairs, …)
+      if (this.input.interactEdge && hasInteract) act.fn();
+      // Space / click / action button: swing in the cellar, act in the shop
+      if (this.input.actionEdge) {
+        if (inDungeon) this._attack();
+        else act.fn();
+      }
+    }
 
     c.update(dt, elapsed);
   }
@@ -341,11 +364,8 @@ export class Game {
       case "KeyI": return this._toggleBag();
       case "KeyC": return this._coopSheet();
       case "KeyM": return document.getElementById("mute-btn").click();
-      case "KeyE":
-      case "KeyF":
-        // context action (attack / haggle / delve / …), same as click / Space
-        if (!this.hud.sheetOpen) this._contextAction().fn();
-        return;
+      // NB: E / F (interact) are read as an input edge in _updatePlayer so they
+      // stay separate from the Space/click attack — see the action routing there.
     }
   }
 
@@ -372,17 +392,15 @@ export class Game {
       // already delved today (solo): the Guild will unseal the cellar for a fee
       if (!this.net.connected && this.delvedToday && p.distanceTo(this.shop.trapdoorPos) < 1.5)
         return { label: "hole", hint: "Unseal", fn: () => this._delve(), focus: _focus.copy(this.shop.trapdoorPos).setY(0.06).clone(), color: 0x9aa0aa };
-      // stocked table → swap the item or take it back
-      for (const slot of this.shop.slots) {
-        if (slot.item && _v.copy(slot.pos).setY(0).distanceTo(p) < 1.5)
+      // display tables: aim with the mouse rather than shuffling the character
+      // up to each slot. A stocked slot offers a swap / take-back; an empty one
+      // takes stock from the storeroom.
+      const slot = this._tableSlotTarget();
+      if (slot) {
+        if (slot.item)
           return { label: "box", hint: "Swap", fn: () => this._replaceMenu(slot), focus: _focus.copy(slot.pos).clone(), color: 0xff9d5c };
-      }
-      // empty table → place an item (only when the storeroom has something)
-      if (this.stash.length > 0) {
-        for (const slot of this.shop.slots) {
-          if (!slot.item && _v.copy(slot.pos).setY(0).distanceTo(p) < 1.5)
-            return { label: "box", hint: "Stock", fn: () => this._placeMenu(slot), focus: _focus.copy(slot.pos).clone(), color: 0x66ff9e };
-        }
+        if (this.stash.length > 0)
+          return { label: "box", hint: "Stock", fn: () => this._placeMenu(slot), focus: _focus.copy(slot.pos).clone(), color: 0x66ff9e };
       }
       return { label: "swords", fn: () => this._attack() };
     }
@@ -405,13 +423,43 @@ export class Game {
       }
       _v.copy(this.dungeon.stairsPos).add(DUNGEON_ORIGIN);
       if (_v.distanceTo(p) < 1.5) return { label: "arrowDown", hint: "Stairs", fn: () => this._descendPrompt(), focus: _v.clone().setY(0.06), color: 0xb98cff };
+      // chests aren't a button any more — you crack them open with the sword
+      // (handled in dungeon.meleeHit). We still ring the nearest one and prompt
+      // "Hit" so it reads as a target for the swing rather than a walk-up prompt.
       for (const chest of this.dungeon.chests) {
         if (chest.opened) continue;
         _v.copy(chest.mesh.position).add(DUNGEON_ORIGIN);
-        if (_v.distanceTo(p) < 1.7) return { label: "chest", hint: "Open", fn: () => this._openChest(chest), focus: _v.clone().setY(0.06), color: 0xffd34d };
+        if (_v.distanceTo(p) < 1.7) return { label: "swords", hint: "Hit", fn: () => this._attack(), focus: _v.clone().setY(0.06), color: 0xffd34d };
       }
     }
     return { label: "swords", fn: () => this._attack() };
+  }
+
+  // Which display slot the "Stock / Swap" action lands on. On desktop we pick
+  // whatever slot sits under the mouse cursor — you aim at a table instead of
+  // walking the character right up to it — as long as the shopkeeper is still
+  // within arm's reach of the tables area. On touch (no pointer) we fall back
+  // to the nearest slot the player is standing beside.
+  _tableSlotTarget() {
+    const p = this.player.position;
+    if (this.input.aimActive) {
+      const aim = this._aimPoint();
+      if (!aim) return null;
+      let best = null, bd = 0.9; // how near the cursor must hover to a slot
+      for (const slot of this.shop.slots) {
+        const d = Math.hypot(slot.pos.x - aim.x, slot.pos.z - aim.z);
+        if (d < bd) { bd = d; best = slot; }
+      }
+      // keep it grounded: only stockable while the shopkeeper is nearby
+      if (best && Math.hypot(best.pos.x - p.x, best.pos.z - p.z) < 3.6) return best;
+      return null;
+    }
+    let best = null, bd = 1.5;
+    for (const slot of this.shop.slots) {
+      const d = _v.copy(slot.pos).setY(0).distanceTo(p);
+      if (d < bd) { bd = d; best = slot; }
+    }
+    return best;
   }
 
   // Customers no longer wait to be approached: as soon as one has settled at
@@ -457,11 +505,17 @@ export class Game {
     this._pendingHit = finisher ? 0.2 : 0.14;
     this._pendingHitOpts = {
       dmg, crit, finisher,
-      range: finisher ? 2.3 : 1.75,
-      arc: finisher ? -0.2 : 0.35, // the finisher sweeps a much wider arc
+      range: finisher ? 2.8 : 2.1,
+      arc: finisher ? -0.2 : 0.3, // the finisher sweeps a much wider arc
       knock: finisher ? 1.7 : 1,
     };
 
+    // gentle aim assist: bend the swing toward the nearest foe in front so a
+    // hit lands without needing pixel-perfect aim (this is why melee used to
+    // only connect when an enemy was practically touching you). The committed
+    // heading is then held through the swing (see the facing block above) so
+    // the delayed hit lands where the swoosh points.
+    this.player.heading = this._assistedHeading(this.player.heading);
     const h = this.player.heading;
     // crescent swoosh — larger + warmer on the finisher
     _v.copy(this.player.position).setY(0.62);
@@ -471,6 +525,30 @@ export class Game {
     if (finisher) {
       this.audio.finisher();
     }
+  }
+
+  // Pick a swing heading with a bit of aim assist: if a live foe sits within
+  // reach and roughly in front, snap the swing onto it; otherwise keep the
+  // player's own facing. Favours whatever's closest to the current aim, then
+  // by distance, and ignores anything clearly behind you.
+  _assistedHeading(h) {
+    if (this.playerArea !== "dungeon" || !this.dungeon.active) return h;
+    const p = this.player.position;
+    const fwdX = Math.sin(h), fwdZ = Math.cos(h);
+    const ASSIST = 3.0;
+    let best = null, bestScore = -Infinity;
+    for (const e of this.dungeon.enemies) {
+      if (e.deadT >= 0) continue;
+      const dx = e.creature.position.x - p.x;
+      const dz = e.creature.position.z - p.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist < 0.001 || dist > ASSIST + e.creature.radius) continue;
+      const dot = (dx * fwdX + dz * fwdZ) / dist;
+      if (dot < -0.15) continue; // don't wheel around to hit something behind
+      const score = dot * 2 - dist * 0.15;
+      if (score > bestScore) { bestScore = score; best = { dx, dz }; }
+    }
+    return best ? Math.atan2(best.dx, best.dz) : h;
   }
 
   // A quick roll: brief i-frames + a burst of speed, on a short cooldown.
@@ -824,13 +902,12 @@ export class Game {
     if (!this.tutorial) return;
     const hints = {
       delve: `${icon("hole")} Your shelves are bare — step onto the trapdoor to delve for stock`,
-      loot: `${icon("swords")} Fight through and grab loot — it's tomorrow's merchandise`,
       return: `${icon("arrowDown")} Take the stairs to bring your loot back to the shop`,
       stock: `${icon("box")} Stand at a glowing table and place your loot to sell it`,
       open: `${icon("shop")} Now open the doors to let a customer in`,
       sell: `${icon("speak")} Haggle a good price to seal your first sale`,
     };
-    this.hud.toast(hints[this.tutorial]);
+    if (hints[this.tutorial]) this.hud.toast(hints[this.tutorial]);
   }
 
   // Called at each loop milestone with the step it completes; advances (and
@@ -892,7 +969,7 @@ export class Game {
         break;
       }
       case "open":
-        if (inShop) { pos = _v.copy(this.shop.doorInside); text = "Open the doors"; }
+        // no guide arrow on the doors — the interact prompt is enough here
         break;
       case "sell": {
         const cust = this.shop.customers.find((c) => c.ready && c.state === "want");
@@ -1508,7 +1585,7 @@ export class Game {
         <button class="btn" id="esc-coop">${icon("people")} Co-op</button>
         <button class="btn deny" id="esc-restart">${icon("recycle")} New shop</button>
       </div>
-      <div class="esc-hint"><b>WASD</b> move · <b>mouse</b> aim · <b>click/E</b> act · <b>Space</b> menu · <b>B</b> bag · <b>\`</b> admin</div>
+      <div class="esc-hint"><b>WASD</b> move · <b>mouse</b> aim · <b>click/Space</b> attack · <b>E</b> interact · <b>Shift</b> roll · <b>B</b> bag · <b>\`</b> admin</div>
     `, "sheet-card");
     el.querySelector("#esc-x").onclick = () => this._closeEscMenu();
     el.querySelector("#esc-resume").onclick = () => this._closeEscMenu();
@@ -1876,7 +1953,7 @@ export class Game {
         <button data-a="debt">${icon("scroll")} Skip debt</button>
         <button data-a="reset" class="danger">${icon("recycle")} Wipe save</button>
       </div>
-      <div class="admin-hints">keys: <b>WASD</b> move · <b>mouse</b> aim · <b>click/E</b> act · <b>B</b> bag · <b>C</b> co-op · <b>M</b> mute</div>
+      <div class="admin-hints">keys: <b>WASD</b> move · <b>mouse</b> aim · <b>click/Space</b> attack · <b>E</b> interact · <b>B</b> bag · <b>C</b> co-op · <b>M</b> mute</div>
     `;
     this.hud.root.appendChild(el);
     this.adminEl = el;

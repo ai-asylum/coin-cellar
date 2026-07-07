@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#1a1028" />
+    <title>Coin Flick — Coin Cellar bargaining prototype</title>
+    <link rel="icon" type="image/png" href="/logo.png" />
+    <link rel="stylesheet" href="./style.css" />
+    <style>
+      #table { display: block; width: 100%; border: 2px solid var(--wood); border-radius: 12px; touch-action: none; }
+      .total { text-align: center; font-weight: 900; font-size: 20px; margin: 8px 0 10px; }
+      .total .lost { color: var(--bad); font-size: 14px; }
+      .hint { text-align: center; font-size: 13px; color: var(--ink-soft); font-weight: 600; margin-top: 10px; }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      import { rollCustomer, setupUI, pageShell, MOODS, pick } from "./common.js";
+
+      pageShell({
+        title: "7 · Coin Flick",
+        tag: "Pay by flicking coins into their purse — misses roll into the gutter, gone",
+        gameHTML: `
+          <canvas id="table" width="520" height="300"></canvas>
+          <div class="total">In the purse: <span class="gold" id="total">0g</span>
+            <span class="lost" id="lost"></span></div>
+          <div class="row">
+            <button class="btn" id="spawn">Place a coin (25g)</button>
+            <button class="btn primary" id="offerBtn">That's my offer 🤝</button>
+            <button class="btn danger" id="walk">Not interested</button>
+          </div>
+          <div class="hint">Reverse haggle: they're selling, you're paying. Place a 25g coin,
+          then drag back and release to flick it toward the purse. Coins that stop on the felt
+          can be re-flicked; coins that fly off the table are lost from the deal. They have a
+          hidden floor — three lowball offers and they keep the item.</div>`,
+      });
+
+      const ui = setupUI();
+      const $ = (id) => document.getElementById(id);
+      const canvas = $("table"), ctx = canvas.getContext("2d");
+      const COIN = { val: 25, r: 15 };
+      const PURSE = { x: 430, y: 110, r: 52 };
+      const FRICTION = 1.6; // exponential decel per second
+
+      let cust, minSell, strikes, over, coins, aim = null, lost, raf, lastBand;
+
+      const inPurse = (c) => (c.x - PURSE.x) ** 2 + (c.y - PURSE.y) ** 2 < (PURSE.r - 6) ** 2;
+      const total = () => coins.reduce((s, c) => s + (inPurse(c) && c.still ? c.val : 0), 0);
+
+      function draw() {
+        const w = canvas.width, h = canvas.height;
+        ctx.clearRect(0, 0, w, h);
+        ctx.fillStyle = "#7a9958"; ctx.fillRect(0, 0, w, h); // felt
+        // gutter shading at edges
+        ctx.strokeStyle = "rgba(0,0,0,0.25)"; ctx.lineWidth = 10; ctx.strokeRect(5, 5, w - 10, h - 10);
+        // purse
+        ctx.beginPath(); ctx.arc(PURSE.x, PURSE.y, PURSE.r, 0, Math.PI * 2);
+        ctx.fillStyle = "#8a5a2e"; ctx.fill();
+        ctx.strokeStyle = "#5a3410"; ctx.lineWidth = 4; ctx.stroke();
+        ctx.font = "26px serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText("👛", PURSE.x, PURSE.y - PURSE.r - 18);
+        ctx.fillStyle = "rgba(255,255,255,0.55)"; ctx.font = "700 12px Trebuchet MS";
+        ctx.fillText("THE PURSE", PURSE.x, PURSE.y + PURSE.r + 16);
+        // launch area hint
+        ctx.fillStyle = "rgba(255,255,255,0.4)";
+        ctx.fillText("flick from here →", 80, 265);
+        for (const c of coins) {
+          ctx.beginPath(); ctx.arc(c.x, c.y, COIN.r, 0, Math.PI * 2);
+          ctx.fillStyle = inPurse(c) && c.still ? "#ffe9a8" : "#e9b04e"; ctx.fill();
+          ctx.strokeStyle = "#b07a1f"; ctx.lineWidth = 3; ctx.stroke();
+          ctx.fillStyle = "#8a5a2e"; ctx.font = "700 12px Trebuchet MS";
+          ctx.fillText("25", c.x, c.y);
+        }
+        if (aim) {
+          ctx.strokeStyle = "rgba(255,255,255,0.7)"; ctx.lineWidth = 2;
+          ctx.setLineDash([5, 5]);
+          ctx.beginPath(); ctx.moveTo(aim.coin.x, aim.coin.y);
+          ctx.lineTo(aim.coin.x * 2 - aim.x, aim.coin.y * 2 - aim.y); ctx.stroke();
+          ctx.setLineDash([]);
+        }
+        ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+      }
+
+      function physics(t0) {
+        let last = t0;
+        const step = (t) => {
+          raf = requestAnimationFrame(step);
+          const dt = Math.min((t - last) / 1000, 0.05);
+          last = t;
+          let moving = false;
+          for (let i = coins.length - 1; i >= 0; i--) {
+            const c = coins[i];
+            if (c.still) continue;
+            moving = true;
+            c.x += c.vx * dt; c.y += c.vy * dt;
+            const f = Math.exp(-FRICTION * dt);
+            c.vx *= f; c.vy *= f;
+            if (Math.hypot(c.vx, c.vy) < 12) { c.vx = c.vy = 0; c.still = true; settle(); }
+            if (c.x < -10 || c.x > canvas.width + 10 || c.y < -10 || c.y > canvas.height + 10) {
+              coins.splice(i, 1);
+              lost += c.val;
+              ui.mood(MOODS.shocked);
+              ui.say(`"...it rolled under the floorboards."`);
+              settle();
+            }
+          }
+          if (moving || aim) draw();
+        };
+        raf = requestAnimationFrame(step);
+      }
+
+      // noisy face read on the purse total, same bands as the coin counter
+      function settle() {
+        $("total").textContent = total() + "g";
+        $("lost").textContent = lost ? ` (${lost}g in the gutter)` : "";
+        const c = total() / minSell + (Math.random() * 2 - 1) * 0.08;
+        const band = c < 0.5 ? 0 : c < 0.9 ? 1 : c < 1.15 ? 2 : 3;
+        if (band === lastBand) return;
+        lastBand = band;
+        ui.mood([MOODS.huff, MOODS.think, MOODS.happy, MOODS.eager][band]);
+        ui.say([
+          `"That purse is looking awfully light."`,
+          `"Keep 'em coming..."`,
+          `"Now that has a nice jingle to it."`,
+          `"Oh my. I mean — 'acceptable.'"`,
+        ][band]);
+      }
+
+      const pos = (e) => {
+        const r = canvas.getBoundingClientRect();
+        return { x: ((e.clientX - r.left) / r.width) * canvas.width, y: ((e.clientY - r.top) / r.height) * canvas.height };
+      };
+
+      canvas.addEventListener("pointerdown", (e) => {
+        if (over) return;
+        canvas.setPointerCapture(e.pointerId);
+        const p = pos(e);
+        const c = coins.find((c) => c.still && !inPurse(c) && (p.x - c.x) ** 2 + (p.y - c.y) ** 2 < (COIN.r + 10) ** 2);
+        if (c) aim = { coin: c, x: p.x, y: p.y };
+      });
+      canvas.addEventListener("pointermove", (e) => { if (aim) { const p = pos(e); aim.x = p.x; aim.y = p.y; draw(); } });
+      canvas.addEventListener("pointerup", () => {
+        if (!aim) return;
+        const dx = aim.coin.x - aim.x, dy = aim.coin.y - aim.y;
+        if (Math.hypot(dx, dy) > 8) {
+          aim.coin.vx = dx * 6; aim.coin.vy = dy * 6;
+          aim.coin.still = false;
+        }
+        aim = null;
+      });
+
+      function start() {
+        cust = rollCustomer();
+        minSell = Math.round(cust.item.base * (0.45 + Math.random() * 0.3));
+        strikes = 0; over = false; coins = []; lost = 0; lastBand = null;
+        ui.showCustomer(cust);
+        ui.strikes(0);
+        ui.say(pick([
+          `"Wanna buy this ${cust.item.name}? Fill the purse."`,
+          `"Flick your coin, shopkeep — this ${cust.item.name} won't wait."`,
+          `"Make it rain and the ${cust.item.name} is yours."`,
+        ]));
+        $("total").textContent = "0g"; $("lost").textContent = "";
+        cancelAnimationFrame(raf);
+        draw();
+        physics(performance.now());
+      }
+
+      $("spawn").onclick = () => {
+        if (over) return;
+        if (coins.some((c) => c.still && !inPurse(c))) { ui.say(`"Flick the one on the table first!"`); return; }
+        coins.push({ x: 70 + Math.random() * 30, y: 235 + Math.random() * 30, vx: 0, vy: 0, still: true, val: COIN.val });
+        draw();
+      };
+
+      $("offerBtn").onclick = () => {
+        if (over) return;
+        const t = total();
+        if (t >= minSell) {
+          over = true;
+          cancelAnimationFrame(raf);
+          const grade = t <= minSell * 1.1 ? "perfect" : t <= minSell * 1.35 ? "good" : "fair";
+          ui.mood(MOODS.happy);
+          ui.finish(grade, 0, `Bought the ${cust.item.name} for ${t}g` +
+            (lost ? ` (+${lost}g lost in the gutter)` : "") +
+            `\n(their floor was ${minSell}g — resale value ${cust.item.base}g)`);
+        } else {
+          strikes++;
+          ui.strikes(strikes);
+          ui.mood(strikes >= 2 ? MOODS.angry : MOODS.huff);
+          ui.say(`"Only ${t}g in there? Insulting."`);
+          if (strikes >= 3) {
+            over = true;
+            cancelAnimationFrame(raf);
+            setTimeout(() => ui.finish("fail", 0, `${cust.name} kept the ${cust.item.name}.\n(their floor was ${minSell}g)`), 600);
+          }
+        }
+      };
+      $("walk").onclick = () => {
+        if (over) return;
+        over = true;
+        cancelAnimationFrame(raf);
+        ui.finish("fail", 0, `You passed.\n(their floor was ${minSell}g)`);
+      };
+
+      $("next").onclick = start;
+      start();
+    </script>
+  </body>
+</html>
