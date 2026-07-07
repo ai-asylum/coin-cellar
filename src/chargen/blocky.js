@@ -127,11 +127,37 @@ export class BlockyCreature extends THREE.Group {
     return action;
   }
 
+  /**
+   * Show a floating name plate above the head (used for other players in the
+   * shared world / co-op). Pass a falsy value to remove it. Cheap to call every
+   * frame: it early-outs when the text is unchanged.
+   */
+  setNameLabel(text) {
+    text = String(text ?? "").trim();
+    if (!text) return this._clearNameLabel();
+    if (this._nameSprite && this._nameText === text) return;
+    this._clearNameLabel();
+    const spr = makeTextSprite(text);
+    spr.position.y = this.height + 0.32;
+    this.add(spr);
+    this._nameSprite = spr;
+    this._nameText = text;
+  }
+
+  _clearNameLabel() {
+    if (!this._nameSprite) return;
+    this._nameSprite.material.map?.dispose();
+    this._nameSprite.material.dispose();
+    this.remove(this._nameSprite);
+    this._nameSprite = null;
+    this._nameText = null;
+  }
+
   /** Attach a prop (sword) to the right hand. */
   holdItem(obj) {
     if (!this.armR) return;
-    obj.position.set(0, -1.05, 0.25);
-    obj.rotation.set(-0.3, 0, 0);
+    obj.position.set(0, -1.0, 0.32);
+    obj.rotation.set(-0.85, 0, 0.12);
     this.armR.add(obj);
     this.heldItem = obj;
   }
@@ -214,6 +240,7 @@ export class BlockyCreature extends THREE.Group {
   }
 
   dispose() {
+    this._clearNameLabel();
     this.mixer.stopAllAction();
     this.mixer.uncacheRoot(this.model);
     // geometry is shared with the cached template — only per-instance
@@ -225,3 +252,47 @@ export class BlockyCreature extends THREE.Group {
 }
 
 const _flashColor = new THREE.Color(1, 0.45, 0.45);
+
+// A billboard name plate: white text on a soft dark pill, baked to a canvas
+// texture and hung on a THREE.Sprite so it always faces the camera. depthTest
+// is off so the name stays legible even when the head clips scenery.
+function makeTextSprite(text) {
+  const font = 44, padX = 16, padY = 10;
+  const c = document.createElement("canvas");
+  const ctx = c.getContext("2d");
+  const fontSpec = `700 ${font}px system-ui, -apple-system, sans-serif`;
+  ctx.font = fontSpec;
+  const w = Math.ceil(ctx.measureText(text).width);
+  c.width = w + padX * 2;
+  c.height = font + padY * 2;
+  // resizing the canvas resets the 2d state, so re-apply everything
+  ctx.font = fontSpec;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const cx = c.width / 2, cy = c.height / 2;
+  ctx.fillStyle = "rgba(18,20,28,0.6)";
+  if (ctx.roundRect) {
+    ctx.beginPath();
+    ctx.roundRect(0, 0, c.width, c.height, 14);
+    ctx.fill();
+  } else {
+    ctx.fillRect(0, 0, c.width, c.height);
+  }
+  ctx.lineWidth = 6;
+  ctx.strokeStyle = "rgba(0,0,0,0.55)";
+  ctx.strokeText(text, cx, cy + 1);
+  ctx.fillStyle = "#fff";
+  ctx.fillText(text, cx, cy + 1);
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.minFilter = THREE.LinearFilter;
+  tex.anisotropy = 4;
+  const spr = new THREE.Sprite(
+    new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false })
+  );
+  const worldH = 0.24;
+  spr.scale.set(worldH * (c.width / c.height), worldH, 1);
+  spr.center.set(0.5, 0); // anchor bottom edge at the sprite's position
+  spr.renderOrder = 999;
+  return spr;
+}

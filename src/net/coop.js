@@ -25,6 +25,7 @@ export class Coop {
     this.isGuest = false;
     this.connected = false;
     this.name = null; // our display name
+    this.partnerName = null; // the friend we're currently in a session with
     this._slug = null;
     this._incoming = null; // a friend's pending tp invite: { conn, from }
     this._outName = null; // who we last reached out to invite
@@ -92,7 +93,8 @@ export class Coop {
     this.isGuest = true;
     this.isHost = false;
     this.connected = true;
-    try { inc.conn.send({ t: "tpAccept" }); } catch {}
+    this.partnerName = inc.from; // the invite carried the host's name
+    try { inc.conn.send({ t: "tpAccept", name: this.name }); } catch {}
     this.game.onJoinedHost();
     return true;
   }
@@ -135,25 +137,27 @@ export class Coop {
       this._incoming = { conn, from: d.from || "A friend" };
       this.game.onTpInvite(this._incoming.from);
     } else if (role === "out" && d.t === "tpAccept") {
-      this._finishHost(conn);
+      this._finishHost(conn, d.name);
     } else if (role === "out" && d.t === "tpDecline") {
       this.onStatus(`${this._outName || "Your friend"} declined.`);
       if (conn !== this.conn) { try { conn.close(); } catch {} }
     }
   }
 
-  _finishHost(conn) {
+  _finishHost(conn, partnerName) {
     if (this.connected) return;
     this.conn = conn;
     this.isHost = true;
     this.isGuest = false;
     this.connected = true;
+    this.partnerName = partnerName || null; // the guest sent it back on accept
     this.game.onPeerJoined();
   }
 
   _onClose() {
     this.connected = false;
     this.conn = null;
+    this.partnerName = null;
     this.onStatus("Your friend left.");
     this.game.onPeerLeft();
     this.isHost = false;

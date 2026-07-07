@@ -203,9 +203,9 @@ function starGeometry(outer, inner, points = 5, depth = 0.05) {
 export function swordMesh(bladeColor, gripColor, len = 0.6) {
   // authored pointing -Y so it extends naturally from a hand bone
   const g = group(
-    mesh(new THREE.BoxGeometry(0.05, len, 0.016), M(bladeColor), 0, -len / 2 - 0.1),
-    mesh(new THREE.BoxGeometry(0.16, 0.04, 0.04), M(gripColor), 0, -0.1),
-    mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.12), M(gripColor), 0, -0.03)
+    mesh(new THREE.BoxGeometry(0.11, len, 0.04), M(bladeColor), 0, -len / 2 - 0.1),
+    mesh(new THREE.BoxGeometry(0.26, 0.06, 0.06), M(gripColor), 0, -0.1),
+    mesh(new THREE.CylinderGeometry(0.034, 0.034, 0.18), M(gripColor), 0, -0.02)
   );
   return g;
 }

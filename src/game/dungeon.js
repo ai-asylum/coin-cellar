@@ -476,6 +476,15 @@ export class Dungeon {
       }
     }
 
+    // --- rolling spawns (Minecraft-style): the floor keeps repopulating on a
+    // timer, but only away from every player, and never past a per-depth cap.
+    // Disabled on the peaceful tutorial and inside the sealed boss arena so the
+    // arena stays a controlled fight. Host-only (guests mirror via eSnap).
+    this._spawnTier = Math.min(floorN, 5) - 1;
+    this._spawnMix = FLOOR_MIX[Math.min(this._spawnTier, FLOOR_MIX.length - 1)];
+    this.spawnCap = isBoss || tutorial ? 0 : 6 + floorN * 2;
+    this._spawnT = 4 + r() * 4; // first top-up a few seconds in
+
     // --- chests. The tutorial floor gets exactly one, dead centre between the
     // arrival spot and the stairs, so a new player can't miss it.
     if (tutorial) {
@@ -636,6 +645,11 @@ export class Dungeon {
     this.game.net.send({ t: "proj", x, z, vx, vz, color: opts.color, dmg: opts.dmg, radius: opts.radius, life: opts.life });
   }
 
+  /** Fractional grid cell → group-local position (inverse of worldToCell). */
+  cellCenter(x, y) {
+    return new THREE.Vector3((x - this.GW / 2 + 0.5) * CELL, 0, (y - this.GH / 2 + 0.5) * CELL);
+  }
+
   /** World x/z → fractional grid cell coords (for the minimap). */
   worldToCell(worldX, worldZ) {
     return {
@@ -704,6 +718,8 @@ export class Dungeon {
     }
 
     const players = this.game.playersInDungeon();
+    // host tops the floor back up on a timer (guests receive the spawns via net)
+    if (!this.game.net.isGuest && this.spawnCap > 0) this._tickSpawner(dt, players);
     for (const e of [...this.enemies]) {
       if (this.game.net.isGuest) {
         e.creature.update(dt, elapsed); // guest: positions come from the host
@@ -722,6 +738,38 @@ export class Dungeon {
     // projectiles: move everywhere (visuals); the host resolves player hits
     this.projectiles.update(dt, elapsed);
     if (!this.game.net.isGuest) this._resolveProjectiles(players);
+  }
+
+  // Rolling repopulation: every few seconds, if the floor is under its cap,
+  // slip one fresh wanderer into a random room that no player can see (well
+  // outside every hero's bubble) — so the cellar stays alive as you clear it
+  // without monsters ever popping in on top of you. Guests get it via eSnap.
+  _tickSpawner(dt, players) {
+    this._spawnT -= dt;
+    if (this._spawnT > 0) return;
+    this._spawnT = 4 + Math.random() * 3; // next attempt in ~4–7s
+    // count only living rank-and-file against the cap (the boss doesn't count)
+    let live = 0;
+    for (const e of this.enemies) if (e.deadT < 0 && !e.isBoss) live++;
+    if (live >= this.spawnCap) return;
+    if (this.rooms.length < 2) return;
+
+    const MIN_DIST = 9; // world units the spawn must clear every player by
+    for (let tries = 0; tries < 12; tries++) {
+      const room = this.rooms[1 + Math.floor(Math.random() * (this.rooms.length - 1))];
+      const p = this.cellCenter(room.x + Math.random() * room.w - 0.5, room.y + Math.random() * room.h - 0.5);
+      if (p.distanceTo(this.entrancePos) < 4) continue; // never at the arrival spot
+      const wx = p.x + DUNGEON_ORIGIN.x, wz = p.z + DUNGEON_ORIGIN.z;
+      let clear = true;
+      for (const pl of players) {
+        const dx = pl.creature.position.x - wx, dz = pl.creature.position.z - wz;
+        if (dx * dx + dz * dz < MIN_DIST * MIN_DIST) { clear = false; break; }
+      }
+      if (!clear) continue;
+      const kind = this._spawnMix[Math.floor(Math.random() * this._spawnMix.length)];
+      this.spawnEnemy(kind, Math.floor(Math.random() * 1e6), this._spawnTier, wx, wz);
+      return;
+    }
   }
 
   // touching an enemy's body hurts, attacking or not — a slime that drifts

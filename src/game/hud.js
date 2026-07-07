@@ -502,12 +502,36 @@ export class HUD {
       base.height = h * dpr;
       const bx = base.getContext("2d");
       bx.scale(dpr, dpr);
-      // fill discovered cells as one merged shape (full cells → no inner seams)
+      // A "frontier" cell is discovered ground whose neighbour is open floor that
+      // hasn't been discovered yet — i.e. an opening into an unexplored room, not a
+      // wall. Those cells are drawn dotted so it reads as "more to explore here".
+      const inb = (x, y) => x >= 0 && y >= 0 && x < GW && y < GH;
+      const openUndisc = (x, y) => inb(x, y) && open[y][x] && !disc[y][x];
+      const frontier = (x, y) =>
+        seen(x, y) &&
+        (openUndisc(x, y - 1) || openUndisc(x, y + 1) ||
+         openUndisc(x - 1, y) || openUndisc(x + 1, y));
+      // fill fully-discovered cells as one merged shape (full cells → no inner seams)
       bx.fillStyle = "#e6d3a1";
       for (let y = 0; y < GH; y++)
         for (let x = 0; x < GW; x++)
-          if (seen(x, y)) bx.fillRect(x * cell, y * cell, cell, cell);
-      // black outline only where a discovered cell meets undiscovered ground
+          if (seen(x, y) && !frontier(x, y)) bx.fillRect(x * cell, y * cell, cell, cell);
+      // dotted (semi-transparent) fill for frontier cells opening onto the unknown
+      const dotR = cell * 0.11, step = cell / 3;
+      for (let y = 0; y < GH; y++)
+        for (let x = 0; x < GW; x++) {
+          if (!frontier(x, y)) continue;
+          for (let i = 0; i < 3; i++)
+            for (let j = 0; j < 3; j++) {
+              bx.beginPath();
+              bx.arc(x * cell + step * (i + 0.5), y * cell + step * (j + 0.5), dotR, 0, Math.PI * 2);
+              bx.fill();
+            }
+        }
+      // black outline only where discovered ground meets an actual wall (or the map
+      // edge) — open frontier edges are left unlined so unexplored rooms don't look
+      // walled off.
+      const wall = (x, y) => !seen(x, y) && !openUndisc(x, y);
       bx.strokeStyle = "#000";
       bx.lineWidth = 1.4;
       bx.lineCap = "square";
@@ -516,10 +540,10 @@ export class HUD {
         for (let x = 0; x < GW; x++) {
           if (!seen(x, y)) continue;
           const l = x * cell, t = y * cell, r = l + cell, b = t + cell;
-          if (!seen(x, y - 1)) { bx.moveTo(l, t); bx.lineTo(r, t); }
-          if (!seen(x, y + 1)) { bx.moveTo(l, b); bx.lineTo(r, b); }
-          if (!seen(x - 1, y)) { bx.moveTo(l, t); bx.lineTo(l, b); }
-          if (!seen(x + 1, y)) { bx.moveTo(r, t); bx.lineTo(r, b); }
+          if (wall(x, y - 1)) { bx.moveTo(l, t); bx.lineTo(r, t); }
+          if (wall(x, y + 1)) { bx.moveTo(l, b); bx.lineTo(r, b); }
+          if (wall(x - 1, y)) { bx.moveTo(l, t); bx.lineTo(l, b); }
+          if (wall(x + 1, y)) { bx.moveTo(r, t); bx.lineTo(r, b); }
         }
       bx.stroke();
       this._miniBase = base;

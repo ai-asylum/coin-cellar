@@ -128,6 +128,10 @@ export class Game {
     this._landlordDue = false;
     this._landlord = null; // { creature, state, leg } while he's on stage
     this._landlordWaitT = 0;
+    // The top-bar rent chip stays hidden until the landlord scene introduces
+    // the Guild's ledger. Only the fresh solo tutorial hides it (_tutStart);
+    // returning/connected players skip that beat and already know the score.
+    this._rentSeen = true;
 
     this._load();
 
@@ -154,7 +158,7 @@ export class Game {
     // --- player
     this.player = new BlockyCreature("a", { height: 1.3 });
     this.player.position.set(0, 0, 2.5);
-    this.player.holdItem(swordMesh(0xd7dde6, 0x6e4526, 0.55));
+    this.player.holdItem(swordMesh(0xd7dde6, 0x6e4526, 0.75));
     engine.scene.add(this.player);
     this.player.animator.onFootstep = (pos, k) => {
       this.audio.step();
@@ -265,6 +269,12 @@ export class Game {
 
   _updatePlayer(dt, elapsed) {
     const c = this.player;
+    if (this._holeDive) {
+      this.highlight.visible = false;
+      this.hud.hideInteractHint();
+      this._updateHoleDive(dt, elapsed);
+      return;
+    }
     if (this._respawnT >= 0) {
       this._respawnT -= dt;
       this.highlight.visible = false;
@@ -344,25 +354,32 @@ export class Game {
     const act = this._contextAction();
     const inDungeon = this.playerArea === "dungeon";
     const hasInteract = act.label !== "swords";
+    // On touch there's no separate interact button in the dungeon: the main
+    // action button doubles as the interact (stairs / gate / portal) when you're
+    // standing on one — so changing floors is the same tap as hitting — and
+    // swings otherwise. Desktop still fires those off E.
+    const foldInteract = inDungeon && hasInteract && this.input.isTouch;
     if (inDungeon) {
-      this.input.setActionLabel("swords");
-      this.input.setInteract(act.label, hasInteract);
+      this.input.setActionLabel(foldInteract ? act.label : "swords", foldInteract);
+      this.input.setInteract(act.label, hasInteract && !this.input.isTouch);
     } else {
       this.input.setActionLabel(act.label);
       this.input.setInteract(null, false);
     }
     this._updateHighlight(act.focus, act.color, elapsed);
     // control hint under the highlight ring: keycap + verb on desktop, verb
-    // only on touch (the interact button itself already pulses there)
+    // only on touch (the action button itself already pulses there)
     if (act.focus && act.hint && !sheetBlocked && !this.gameOver)
       this.hud.interactHint(act.focus, act.hint, this.input.isTouch ? "" : "E");
     else this.hud.hideInteractHint();
     if (!sheetBlocked && this._dashT < 0) {
-      // E / interact button: fire the context action (portal, stairs, …)
+      // E / interact button (desktop): fire the context action (portal, stairs, …)
       if (this.input.interactEdge && hasInteract) act.fn();
-      // Space / click / action button: swing in the cellar, act in the shop
+      // Space / click / action button: interact when folded (touch, standing on
+      // a stairs / gate / portal), otherwise swing in the cellar, act in the shop
       if (this.input.actionEdge) {
-        if (inDungeon) this._attack();
+        if (foldInteract) act.fn();
+        else if (inDungeon) this._attack();
         else act.fn();
       }
     }
@@ -715,7 +732,7 @@ export class Game {
     this.player.dispose();
     this.player = new BlockyCreature("a", { height: 1.3 });
     this.player.position.set(0, 0, 2.5);
-    this.player.holdItem(swordMesh(0xd7dde6, 0x6e4526, 0.55));
+    this.player.holdItem(swordMesh(0xd7dde6, 0x6e4526, 0.75));
     this.engine.scene.add(this.player);
     this.player.animator.onFootstep = (pos, k) => this.audio.step();
     this.playerArea = "shop";
@@ -724,7 +741,7 @@ export class Game {
     this.hud.showBag(false);
     this.hud.showGold(true);
     this.hud.setGoldCorner(false);
-    this.hud.showDebt(true);
+    this.hud.showDebt(this._rentSeen);
     this.input.setDodgeVisible(false);
     this._save();
   }
@@ -1010,6 +1027,8 @@ export class Game {
   // player straight at the trapdoor. Runs once, on a fresh save, solo only.
   _tutStart() {
     this.tutorial = "delve";
+    this._rentSeen = false; // the landlord scene reveals the rent chip later
+    this.hud.showDebt(false); // _wireHud already ran — pull the chip back down
     // FTUE beat: you wake with the morning already half gone — one errand's
     // worth of sun is spent, so the first day funnels straight through the
     // guided loop (delve + open = the two AP left) and ends on the first sale.
@@ -1237,6 +1256,9 @@ export class Game {
     ];
     if (i >= lines.length) {
       this.hud.hideSheet();
+      // the collector's laid out the terms — the ledger chip goes live now
+      this._rentSeen = true;
+      this.hud.showDebt(true);
       return this._showRentSheet({ intro: true });
     }
     if (this._landlord) this._landlord.line = i;
@@ -1552,10 +1574,12 @@ export class Game {
       this.sewerHole = -1;
       if (!this.dungeon.active)
         this.dungeon.generate(1, this.day * 1000 + Math.floor(Math.random() * 999), true);
-      this._enterDungeon();
+      // plunge down the cellar trapdoor into the private tutorial floor
+      this._beginHoleDive(this.shop.trapdoorPos, () => this._enterDungeon());
       return;
     }
-    this._enterSewer();
+    // drop down the cellar trapdoor into the shared sewer — dive in first
+    this._beginHoleDive(this.shop.trapdoorPos, () => this._enterSewer());
   }
 
   _enterSewer() {
@@ -1766,7 +1790,78 @@ export class Game {
     this._save();
   }
 
+  // A short "jump into the hole" cutscene before the next area loads: the
+  // player springs up over the mouth, then plunges down the dark shaft,
+  // spinning and shrinking away into the black. Purely cosmetic and local —
+  // used both for the shop's cellar trapdoor and each sewer hole. `center` is
+  // the mouth to dive into; `after` runs the real transition once it wraps up.
+  _beginHoleDive(center, after) {
+    const c = this.player;
+    center = center.clone().setY(0);
+    this._holeDive = { t: 0, dur: 1.0, from: c.position.clone().setY(0), center, after };
+    c.animator.attackT = -1; // drop any half-swung strike
+    this.highlight.visible = false;
+    this.hud.hideInteractHint();
+    // face the mouth as you leap in
+    const dx = center.x - c.position.x, dz = center.z - c.position.z;
+    if (dx || dz) c.heading = Math.atan2(dx, dz);
+    this.audio.hop();
+  }
+
+  _updateHoleDive(dt, elapsed) {
+    const d = this._holeDive;
+    const c = this.player;
+    d.t += dt;
+    const p = Math.min(1, d.t / d.dur);
+    const HOP = 0.3; // fraction of the dive spent springing up before the plunge
+    if (p < HOP) {
+      // anticipation hop: glide onto the mouth and arc upward
+      const k = p / HOP;
+      const e = k * k * (3 - 2 * k);
+      c.position.x = lerp(d.from.x, d.center.x, e);
+      c.position.z = lerp(d.from.z, d.center.z, e);
+      c.position.y = Math.sin(k * Math.PI) * 0.7;
+      c.scale.setScalar(1);
+    } else {
+      // the plunge: drop down the shaft, accelerating, spinning and shrinking
+      const k = (p - HOP) / (1 - HOP);
+      c.position.x = d.center.x;
+      c.position.z = d.center.z;
+      c.position.y = lerp(0.7, -3.0, k * k);
+      c.scale.setScalar(Math.max(0.03, 1 - k * 0.95));
+      c.model.rotation.y += dt * 10;
+      c.shadow.visible = false;
+      if (!d.dusted) {
+        d.dusted = true;
+        this.audio.dive();
+        this.particles.burst(_v.copy(d.center).setY(0.1),
+          { color: 0x6a5a48, n: 14, speed: 2.2, up: 1.6, gravity: 4, life: 0.5, size: 0.9 });
+      }
+    }
+    c.update(dt, elapsed);
+    if (d.t >= d.dur) {
+      this._holeDive = null;
+      c.scale.setScalar(1);
+      c.position.y = 0;
+      c.model.rotation.y = 0;
+      c.shadow.visible = true;
+      d.after();
+    }
+  }
+
   _enterDungeon() {
+    // dropping in from a sewer hole: play the plunge animation first, then land
+    // in the dungeon once it finishes (the dive re-calls us with the flag set).
+    // Descending stairs mid-run starts in the dungeon, so it skips this.
+    if (this.playerArea === "sewer" && this.sewerHole >= 0 && !this._diveDone) {
+      const hole = this.sewer.holes[this.sewerHole];
+      this._beginHoleDive(hole ? hole.pos : this.player.position, () => {
+        this._diveDone = true;
+        this._enterDungeon();
+      });
+      return;
+    }
+    this._diveDone = false;
     // dropping down (not each floor) burns an errand — guarded by delvedToday
     // so descending stairs mid-run doesn't charge again
     if (!this.net.isGuest && !this.delvedToday) this._spendAP();
@@ -1807,7 +1902,7 @@ export class Game {
     this.hud.showBag(false);
     this.hud.showGold(true);
     this.hud.setGoldCorner(false);
-    this.hud.showDebt(true);
+    this.hud.showDebt(this._rentSeen);
     this.input.setDodgeVisible(false);
     if (this.hud.sheetOpen) this.hud.hideSheet();
     this.player.position.copy(this.shop.trapdoorPos).add(_v.set(1.2, 0, 0.5));
@@ -2028,7 +2123,7 @@ export class Game {
     this.hud.showBag(this.playerArea === "dungeon");
     this.hud.showGold(true);
     this.hud.setGoldCorner(this.playerArea === "dungeon");
-    this.hud.showDebt(this.playerArea !== "dungeon");
+    this.hud.showDebt(this.playerArea !== "dungeon" && this._rentSeen);
     this.input.setDodgeVisible(this.playerArea === "dungeon");
     // the debt chip doubles as the door to the Guild's rent ledger
     this.hud.debtChip.onclick = () => {
@@ -2792,7 +2887,8 @@ export class Game {
     if (this.remote) this.remote.creature.dispose();
     const c = new BlockyCreature("j", { height: 1.3 });
     c.position.set(1.5, 0, 3);
-    c.holdItem(swordMesh(0xd7dde6, 0x3f5f9e, 0.55));
+    c.holdItem(swordMesh(0xd7dde6, 0x3f5f9e, 0.75));
+    c.setNameLabel(this.net.partnerName || "friend");
     this.engine.scene.add(c);
     this.remote = {
       creature: c,
@@ -2831,6 +2927,29 @@ export class Game {
     c.update(dt, elapsed);
   }
 
+  // The partner swung: play their arm animation + crescent swoosh + spark
+  // burst as one unit. Fired from BOTH the reliable ~11 Hz "p" snapshot (rising
+  // edge of their attack flag) and the discrete "atk" event, so the VFX always
+  // rides along with the animation even if one signal is missed. A short debounce
+  // collapses the two triggers for the same swing into a single play; real
+  // consecutive swings are always >~0.35 s apart (a swing can't restart until the
+  // previous one finishes), so this never eats a genuine follow-up swing.
+  _remoteSwing(r, h, finisher) {
+    const c = r.creature;
+    c.attack(); // no-op if already mid-swing, so it's safe to call from both paths
+    const now = performance.now();
+    if (now - (r.lastSwingFx ?? -1e9) < 160) return; // fx already played this swing
+    r.lastSwingFx = now;
+    _v.copy(c.position).setY(0.62);
+    this.remoteSlash.play(_v, h, finisher ? 1.5 : 1);
+    _v.set(c.position.x + Math.sin(h) * 1.4, 0.8, c.position.z + Math.cos(h) * 1.4);
+    this.particles.burst(_v, { color: finisher ? 0xffe0a0 : 0xdfe8ff, n: finisher ? 12 : 7, speed: finisher ? 3 : 2.1, up: 1.4, gravity: 3, life: 0.3, size: 0.85 });
+    if (r.area === this.playerArea) {
+      this.audio.swingCombo(finisher ? 2 : 0);
+      if (finisher) this.audio.finisher();
+    }
+  }
+
   // Avatars for the lobby crowd (Supabase Realtime): everyone sharing our
   // current zone — the sewer, or the same hole's dungeon. Purely visual;
   // they use the same snapshot-interpolation trick as the co-op remote.
@@ -2848,7 +2967,7 @@ export class Game {
       let a = av.get(id);
       if (!a) {
         const c = new BlockyCreature(variantForSeed(hashStr(id)), { height: 1.3 });
-        c.holdItem(swordMesh(0xd7dde6, 0x3f5f9e, 0.55));
+        c.holdItem(swordMesh(0xd7dde6, 0x3f5f9e, 0.75));
         const last = pl.buf[pl.buf.length - 1];
         c.position.set(last.x, 0, last.z);
         this.engine.scene.add(c);
@@ -2856,6 +2975,7 @@ export class Game {
         av.set(id, a);
       }
       const c = a.creature;
+      c.setNameLabel(pl.name || "a wanderer");
       // hide delvers on other floors of the same hole (identical world coords)
       c.visible = pl.floor === myFloor && !pl.dead;
       if (!c.visible) continue;
@@ -2899,20 +3019,20 @@ export class Game {
         r.area = m.area;
         if (typeof m.fl === "number") r.floor = m.fl;
         r.dead = !!m.dead;
-        if (m.atk && !r.wasAtk) r.creature.attack();
+        // rising edge of their swing flag: play the whole swing (anim + vfx) as
+        // a fallback in case the precise "atk" event slipped between packets
+        if (m.atk && !r.wasAtk) this._remoteSwing(r, r.creature.heading, false);
         r.wasAtk = !!m.atk;
         break;
       }
       case "atk": {
-        // partner swung: play their arm animation + the crescent swoosh at
-        // their feet, sized up for a finisher just like the local swing
+        // partner swung: the precise, immediate trigger — carries the committed
+        // swing heading + finisher flag, so it wins over the snapshot fallback.
+        // Mark wasAtk so the imminent "p" snapshot doesn't re-fire the same swing.
         const r = this.remote;
         if (!r) return;
-        r.creature.attack();
-        const h = typeof m.h === "number" ? m.h : r.creature.heading;
-        _v.copy(r.creature.position).setY(0.62);
-        this.remoteSlash.play(_v, h, m.finisher ? 1.5 : 1);
-        if (r.area === this.playerArea) this.audio.swingCombo(m.finisher ? 2 : 0);
+        this._remoteSwing(r, typeof m.h === "number" ? m.h : r.creature.heading, !!m.finisher);
+        r.wasAtk = true;
         break;
       }
       case "welcome": {
