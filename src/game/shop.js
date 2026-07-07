@@ -37,6 +37,7 @@ export class Shop {
     this.customers = [];
     this.passersby = []; // ambient pedestrians strolling the street outside
     this.shafts = []; // god-ray light shafts (animated each frame)
+    this.lampLights = []; // interior lamp point-lights, lit after dusk
     this._shaftCol = new THREE.Color(0xffe0a2); // eased tint shared by the shafts
     this._litInit = false; // snap the daylight to the current hour on first tick
     this.colliders = []; // {x, z, hw, hd} AABBs (walls & furniture)
@@ -152,6 +153,7 @@ export class Shop {
     mkLeaf(doorL, 1); // left leaf, hinged on the left jamb
     mkLeaf(doorR, -1); // right leaf, hinged on the right jamb
     this.doorsOpen = false;
+    this.doorHeld = false; // scene override: someone (the landlord) is holding the doors open
     this._doorAngle = 0; // 0 = shut, 1 = fully swung open (eased each frame)
     // toggled in/out of `colliders` so a shut door blocks the player (kept out
     // of the baked nav grid, so open doors let customers path straight through)
@@ -182,6 +184,11 @@ export class Shop {
     );
     this.portalGlow.position.copy(trap.position).setY(0.04);
     g.add(this.portalGlow);
+    // pulsing "you can act here" ring, matching the delve interact colour —
+    // pulses in update() and only shows while the cellar's actually open
+    this.trapHint = makeFloorHint();
+    this.trapHint.position.copy(trap.position).setY(0.06);
+    g.add(this.trapHint);
 
     // hinged trapdoor lid: a heavy wooden flap that lies shut over the hole
     // while the shopfront is open for trade, and creaks open once the doors are
@@ -236,13 +243,31 @@ export class Shop {
       }
     }
 
-    // vitrine slots: goods perched on the window sill, browsed from inside
-    for (const vx of [winCx - 1.15, winCx, winCx + 1.15]) {
+    // the fancy vitrine table: a velvet-topped, gold-trimmed display set in
+    // front of the window. Prized goods go here for a proper haggle (the plain
+    // tables ring up automatically at full price). Three slots, and whatever's
+    // placed on it glows (see stockItem). Replaces the old window-sill slots.
+    const velvetMat = makeToonMaterial({ color: 0x6a1f2e, rim: 0 });
+    const goldMat = makeToonMaterial({ color: 0xe6c26a, rim: 0 });
+    const fancyCx = winCx, fancyZ = backZ + 1.7;
+    const fancy = new THREE.Group();
+    const fLegs = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.74, 0.9), wood2);
+    fLegs.position.y = 0.37;
+    const fTrim = new THREE.Mesh(new THREE.BoxGeometry(3.5, 0.12, 1.32), goldMat);
+    fTrim.position.y = 0.76;
+    const fTop = new THREE.Mesh(new THREE.BoxGeometry(3.34, 0.14, 1.16), velvetMat);
+    fTop.position.y = 0.84;
+    fancy.add(fLegs, fTrim, fTop);
+    fancy.position.set(fancyCx, 0, fancyZ);
+    g.add(fancy);
+    this.colliders.push({ x: fancyCx, z: fancyZ, hw: 1.75, hd: 0.66 });
+    for (const dx of [-1.05, 0, 1.05]) {
       this.slots.push({
-        pos: new THREE.Vector3(vx, sillH + 0.08, backZ + 0.28),
-        browsePos: new THREE.Vector3(vx, 0, backZ + 1.5),
+        pos: new THREE.Vector3(fancyCx + dx, 0.92, fancyZ),
+        browsePos: new THREE.Vector3(fancyCx + dx, 0, fancyZ + 1.15),
         item: null,
         mesh: null,
+        fancy: true,
       });
     }
 
@@ -255,9 +280,14 @@ export class Shop {
       shade.position.y = 2.2;
       const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.14, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffe6a8 }));
       bulb.position.y = 2.0;
-      lamp.add(pole, shade, bulb);
+      // a real warm point light in the bulb — off by day, kindled at night by
+      // _updateLighting so the shop actually glows once the sun's gone down
+      const glow = new THREE.PointLight(0xffca7a, 0, 9, 1.6);
+      glow.position.y = 2.0;
+      lamp.add(pole, shade, bulb, glow);
       lamp.position.set(sx * (W / 2 - 1), 0, 2.8);
       g.add(lamp);
+      this.lampLights.push(glow);
     }
 
     // warm afternoon sun pouring in through the doorway + a high window,
@@ -334,6 +364,10 @@ export class Shop {
 
     this.doorPos = new THREE.Vector3(doorCx, 0, backZ - 1.3); // outside: door step
     this.doorInside = new THREE.Vector3(doorCx, 0, backZ + 1.2); // threshold just inside
+    // pulsing affordance ring on the threshold so the doors read as interactive
+    this.doorHint = makeFloorHint();
+    this.doorHint.position.copy(this.doorInside).setY(0.03);
+    g.add(this.doorHint);
 
     // billboard scenery lining the street outside (seeded so co-op peers match)
     populateStreet(g, rng(0xC0FFEE), { W, backZ, streetHalfX: this.streetHalfX });
@@ -375,11 +409,18 @@ export class Shop {
     slot.mesh.position.copy(slot.pos);
     slot.mesh.scale.setScalar(1.4);
     this.group.add(slot.mesh);
+    // the velvet table makes its wares shimmer with a shader glow
+    if (slot.fancy) {
+      slot.glow = makeGlow();
+      slot.glow.position.copy(slot.pos).setY(slot.pos.y + 0.3);
+      this.group.add(slot.glow);
+    }
     return true;
   }
 
   unstockSlot(slot) {
     if (slot.mesh) slot.mesh.removeFromParent();
+    if (slot.glow) { slot.glow.removeFromParent(); slot.glow = null; }
     const id = slot.item;
     slot.item = null;
     slot.mesh = null;
@@ -397,9 +438,21 @@ export class Shop {
     for (const s of this.shafts) s.userData.update(dt, elapsed);
     this._updateLighting(dt);
 
+    // shimmer the fancy-table glows: advance their shader clock and keep each
+    // billboarded at the camera so the halo always faces the player
+    const cam = this.game.engine.camera;
+    for (const slot of this.slots) {
+      if (!slot.glow) continue;
+      slot.glow.userData.mat.uniforms.uTime.value = elapsed;
+      if (cam) slot.glow.quaternion.copy(cam.quaternion);
+    }
+
     // Hold the doorway open while anyone's still inside so closing up lets
-    // every customer run out before the leaves swing shut behind them.
-    const wantOpen = this.doorsOpen || this.customers.length > 0;
+    // every customer run out before the leaves swing shut behind them. Once a
+    // shopper has crossed the threshold onto the street they no longer hold it —
+    // the doors shut right behind the last one instead of waiting for the whole
+    // crowd to stroll off down the block.
+    const wantOpen = this.doorsOpen || this.customers.some((c) => !c._outside) || this.doorHeld;
 
     // ease the shopfront doors toward their open/shut pose
     const doorTgt = wantOpen ? 1 : 0;
@@ -421,6 +474,27 @@ export class Shop {
     this.trapdoorOpen = this._trapAngle > 0.5;
     // the glowing shaft below only shows once the lid's cracked open
     this.portalGlow.visible = this._trapAngle > 0.06;
+
+    // pulse the interact-affordance rings and gate them on whether that spot is
+    // actually usable right now: the trapdoor while the cellar's open, the doors
+    // while they're shut (an open, customer-filled doorway needs no prompt).
+    const pulse = Math.sin(elapsed * 3);
+    // once the player's close enough to trigger the interact ring on this spot,
+    // hide our faint hint donut so the two rings don't stack.
+    const hl = this.game.highlight;
+    const hlOn = (p) => hl && hl.visible && hl.position.distanceTo(p) < 1.2;
+    if (this.trapHint) {
+      this.trapHint.visible = this.trapdoorOpen && !hlOn(this.trapdoorPos);
+      this.trapHint.material.opacity = 0.16 + pulse * 0.08;
+      const s = 1 + pulse * 0.08;
+      this.trapHint.scale.set(s, 1, s);
+    }
+    if (this.doorHint) {
+      this.doorHint.visible = this._doorAngle < 0.5 && !hlOn(this.doorInside);
+      this.doorHint.material.opacity = 0.16 + pulse * 0.08;
+      const s = 1 + pulse * 0.08;
+      this.doorHint.scale.set(s, 1, s);
+    }
 
     // the doorway only blocks the player once it's actually shut (no customers
     // left to path out through it)
@@ -494,13 +568,22 @@ export class Shop {
     }
     this._shaftCol.lerp(_tShaft, k);
     for (const s of this.shafts) s.userData.setColor(this._shaftCol);
+
+    // interior lamps: dark by day (the sun does the work), kindled once night
+    // falls so the shop stays warm and readable after dusk
+    const lampTgt = game.phase === "night" ? 2.4 : 0;
+    for (const l of this.lampLights) l.intensity += (lampTgt - l.intensity) * k;
   }
 
   // Kick off the day's rush: the whole crowd piles in the moment the doors
-  // open. Called by the host when the shopfront opens with stock on display.
+  // open. Called by the host when the shopfront opens. Even bare tables draw a
+  // lone browser who peeks in, finds nothing to buy, and files straight back
+  // out — so the doors always close behind the wave (an empty opening must
+  // never leave them stuck open now that there's no manual "close up").
   beginWave() {
-    if (this.stockedCount() === 0) return;
-    this._waveLeft = Math.min(MAX_CUSTOMERS, this.stockedCount() + 2);
+    this._waveLeft = this.stockedCount() === 0
+      ? 1
+      : Math.min(MAX_CUSTOMERS, this.stockedCount() + 2);
     this._waveActive = true;
     this._spawnT = 0;
   }
@@ -656,16 +739,29 @@ export class Shop {
   // Done browsing: maybe make an offer on their favourite, maybe just wander off.
   _decide(cust) {
     const fav = cust.favorite;
-    if (fav && fav.item && Math.random() < cust.arch.buy) {
+    // FTUE: on the tutorial's sell step every shopper must actually commit, so a
+    // brand-new player is always handed a haggle to win instead of watching the
+    // rush browse and wander off — skip the usual "maybe they just leave" roll.
+    const mustBuy = this.game.tutorial === "sell";
+    if (fav && fav.item && (mustBuy || Math.random() < cust.arch.buy)) {
       cust.slot = fav;
       const base = ITEMS[fav.item].base;
       cust.maxPay = Math.round(base * (cust.arch.lo + Math.random() * (cust.arch.hi - cust.arch.lo)));
-      cust.state = "want";
-      cust.ready = true; // decided — haggle can pop immediately, no walk-up wait
       cust.t = 0;
-      cust.emote = this.game.hud.emote(cust.creature, "alert", 999);
-      this.game.audio.haggle();
       this.game.net.send({ t: "custWant", id: cust.id, slotIdx: this.slots.indexOf(fav), maxPay: cust.maxPay });
+      if (fav.fancy) {
+        // the velvet table: a proper haggle for the best price
+        cust.state = "want";
+        cust.ready = true; // decided — haggle can pop immediately, no walk-up wait
+        cust.emote = this.game.hud.emote(cust.creature, "alert", 999);
+        this.game.audio.haggle();
+      } else {
+        // a plain table: they'll amble over and pay full sticker price, no haggle
+        cust.state = "autobuy";
+        cust.ready = false;
+        cust._payT = 0.5;
+        cust.emote = this.game.hud.emote(cust.creature, "moneyfly", 999);
+      }
     } else {
       // browsed but not sold on anything — shrug and head out
       if (fav) this.game.hud.emote(cust.creature, pick(rng(cust.seed + cust.visited), ["faceThink", "faceNeutral", "faceRoll", "thought"]), 1.4);
@@ -884,6 +980,26 @@ export class Shop {
             game.hud.emote(c, "anger", 1.5);
             cust.state = "leave";
             cust._atDoor = false;
+          }
+        }
+        break;
+      }
+      case "autobuy": {
+        // a plain-table buyer: stroll to their pick, then it rings up on its
+        // own at full sticker price (100%) — no haggling, no player input.
+        const slot = cust.slot;
+        if (!slot || !slot.item) {
+          this._clearEmote(cust);
+          cust.state = "leave";
+          cust._atDoor = false;
+          break;
+        }
+        if (walkTo(slot.browsePos, 2.6)) {
+          faceSlot(slot);
+          cust._payT -= dt;
+          if (cust._payT <= 0) {
+            this._clearEmote(cust);
+            this.game._autoSell(cust, slot);
           }
         }
         break;
@@ -1250,6 +1366,58 @@ export class Shop {
 }
 
 const _d = new THREE.Vector3();
+
+// A slim white donut that lies on the floor to flag an interaction spot —
+// same footprint and additive glow as the interact highlight ring, just a thin
+// band instead of a filled disc. The caller pulses its opacity/scale each frame.
+function makeFloorHint() {
+  return new THREE.Mesh(
+    new THREE.RingGeometry(0.44, 0.5, 40).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({
+      color: 0xffffff, transparent: true, opacity: 0.5,
+      blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false,
+    })
+  );
+}
+
+// A soft, pulsing radial halo behind a prized item — a billboarded quad driven
+// by a tiny shader so the fancy-table wares shimmer. The caller advances uTime
+// and keeps it turned to face the camera each frame (see update()).
+function makeGlow(color = 0xffd67a) {
+  const mat = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    uniforms: {
+      uTime: { value: 0 },
+      uColor: { value: new THREE.Color(color) },
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      varying vec2 vUv;
+      uniform float uTime;
+      uniform vec3 uColor;
+      void main() {
+        float d = distance(vUv, vec2(0.5));
+        float glow = smoothstep(0.5, 0.0, d);        // soft falloff to the edge
+        glow = pow(glow, 1.7);
+        float pulse = 0.6 + 0.4 * sin(uTime * 3.0);  // gentle throb
+        // a brighter core so the item reads as lit from behind
+        float core = smoothstep(0.22, 0.0, d) * 0.5;
+        gl_FragColor = vec4(uColor, (glow * pulse) + core * pulse);
+      }
+    `,
+  });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 1.2), mat);
+  mesh.userData.mat = mat;
+  return mesh;
+}
 
 // ---- time-of-day light palettes --------------------------------------------
 // `sky`/`ground` tint the hemisphere (ambient) fill, `sun` the warm key light

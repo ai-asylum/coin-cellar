@@ -14,7 +14,7 @@ export const SEWER_ORIGIN = new THREE.Vector3(-200, 0, 0);
 // half-extents of the walkable chamber (local coords, origin at the centre)
 const HW = 16, HD = 10;
 
-const HOLE_DEFS = [
+export const HOLE_DEFS = [
   { name: "Rat Warren", x: -12, z: -6, color: 0x9a6dff },
   { name: "Flooded Deep", x: -4, z: -6, color: 0x5dd0ff },
   { name: "Bone Hollow", x: 4, z: -6, color: 0xff9a5d },
@@ -92,6 +92,8 @@ export class Sewer {
     );
 
     // --- the dungeon holes: a dark mouth, a glowing rim, a rising light shaft
+    const lidMat = makeToonMaterial({ color: 0x53433a, rim: 0 });
+    const lidTrim = makeToonMaterial({ color: 0x2f2621, rim: 0 });
     for (const hole of this.holes) {
       const local = new THREE.Vector3().copy(hole.pos).sub(O);
       const mouth = new THREE.Mesh(
@@ -109,6 +111,29 @@ export class Sewer {
       shaft.position.set(local.x, 3.2, local.z);
       this.group.add(shaft);
       this.shafts.push(shaft);
+
+      // a heavy grated trapdoor barring the mouth — it hinges on its back edge
+      // and swings up once the player's paid to unseal this hole.
+      const lidR = 1.4;
+      const lidPivot = new THREE.Group();
+      lidPivot.position.set(local.x, 0.06, local.z - lidR); // hinge on the far edge
+      const lid = new THREE.Mesh(new THREE.BoxGeometry(lidR * 2, 0.12, lidR * 2), lidMat);
+      lid.position.set(0, 0, lidR);
+      lidPivot.add(lid);
+      for (const bx of [-0.7, 0, 0.7]) {
+        const bar = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.16, lidR * 2 - 0.2), lidTrim);
+        bar.position.set(bx, 0.06, lidR);
+        lidPivot.add(bar);
+      }
+      const rng2 = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.04, 6, 14), lidTrim);
+      rng2.rotation.x = Math.PI / 2;
+      rng2.position.set(0, 0.14, lidR * 1.7);
+      lidPivot.add(rng2);
+      this.group.add(lidPivot);
+      hole.lid = lidPivot;
+      // the first mouth is always open (free); the rest start barred
+      hole.open = hole.id === 0;
+      hole._lidAngle = hole.open ? 1 : 0; // 0 = shut over the mouth, 1 = flung open
     }
 
     // --- the ladder home: rungs against the south wall under a warm shaft
@@ -144,10 +169,29 @@ export class Sewer {
     }
   }
 
+  // Bar every mouth again — called each time the player drops into the sewer so
+  // reaching a dungeon always costs a fresh toll. The first hole stays open, so
+  // there's always one free dungeon to dive into.
+  resetHoles() {
+    for (const hole of this.holes) hole.open = hole.id === 0;
+  }
+
+  // Unseal a hole's trapdoor (after the toll's been paid) so it can be entered.
+  openHole(id) {
+    const hole = this.holes[id];
+    if (hole) hole.open = true;
+  }
+
   update(dt, elapsed) {
     if (this.game.playerArea !== "sewer") return;
     for (const s of this.shafts) s.userData.update(dt, elapsed);
     // lazy water shimmer
     this._waterMat.opacity = 0.5 + Math.sin(elapsed * 0.9) * 0.06;
+    // ease each grated lid toward its open/shut pose
+    for (const hole of this.holes) {
+      const tgt = hole.open ? 1 : 0;
+      hole._lidAngle += (tgt - hole._lidAngle) * Math.min(1, dt * 6);
+      if (hole.lid) hole.lid.rotation.x = -hole._lidAngle * 1.9; // swings up & back
+    }
   }
 }

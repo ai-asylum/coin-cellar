@@ -69,5 +69,3 @@ the docs call it out explicitly.
   pipeline. In the current build, **humans** (player, partner, customers, street
   passersby) are Kenney "Blocky Characters" GLB models, while **dungeon monsters**
   are the SDF blob-bake pipeline. See [Character Generation](technical/02-character-generation.md).
-- **Admin monster metadata is incomplete.** `ENEMY_KINDS` has 6 kinds; the admin
-  catalogue's `ENEMY_META` describes 5 (missing `archer`). See [Tooling](technical/06-tooling-lab-and-admin.md).

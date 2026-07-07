@@ -33,7 +33,7 @@ Tabs:
 | Tab | Source | Shows |
 | --- | --- | --- |
 | Merchandise | `ITEMS` (`items.js`) | Every item + live procedural prop preview |
-| Monsters | `ENEMY_KINDS` (`dungeon.js`) | Each enemy + live SDF creature preview |
+| Monsters | `ENEMY_KINDS` + `BOSSES` (`dungeon.js`) | Each enemy + live SDF creature preview, plus a **Bosses** category with one card per sewer hole's arena boss |
 | Shoppers | `ARCHETYPES` (`shop.js`) | Customer archetypes + blocky previews |
 | Cast | `CHAR_VARIANTS` (`assets.js`) | All 18 Kenney variants + the hero |
 | Dungeon | `FLOOR_MIX` (`dungeon.js`) | Floor enemy mixes + tile color swatches |
@@ -43,13 +43,6 @@ scissor-test rectangles, instead of one WebGL context per card — this avoids t
 browser's per-page context limit.
 
 Dev URL: `http://localhost:5173/admin/`.
-
-### Known gap
-
-`ENEMY_META` in `admin.js` documents **5** enemy kinds, but `ENEMY_KINDS` has **6**
-(`archer` was added later). The archer still renders (it iterates `ENEMY_KINDS`),
-but falls back to placeholder metadata (name/icon/description). Fixing means adding
-an `archer` entry to `ENEMY_META`.
 
 ## In-game admin / cheat panel
 

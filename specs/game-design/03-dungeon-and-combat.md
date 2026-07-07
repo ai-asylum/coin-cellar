@@ -67,6 +67,37 @@ Which kinds can spawn is set by the floor's tier (`FLOOR_MIX`):
 | 4 | goblin, wisp, archer, brute |
 | 5+ | goblin, archer, wisp, brute, brute (brute weighted) |
 
+## Bosses (one per sewer hole)
+
+The final floor of every run is a sealed arena whose gate opens with a Brass
+Key. Each sewer hole crowns its dungeon with its **own boss** (`BOSSES` in
+`dungeon.js`, indexed by hole). All four share the boss behavior machine — a
+wide **slam** when you hug them, plus an **enrage** at half HP (faster
+patterns + a summoned minion pack) — but each fights its own ranged rotation,
+and three have a **signature attack** that locks a glowing ground mark at
+windup start (standing off the mark is the dodge):
+
+- **Pounce** *(Broodmother)* — marks a ring at your feet, then leaps exactly
+  onto it; contact during the flight hurts, stepping off makes her sail past.
+- **Deluge** *(Drowned Maw)* — marks five splash zones (one under you) that
+  all erupt at once; one hit max per player.
+- **Blink** *(Sovereign)* — marks a ripple at your side, teleports onto it and
+  spits a tight 6-orb ring on arrival; roll through the gaps.
+
+| Hole | Boss | HP | Speed | Ranged rotation | Enrage pack | Look |
+| --- | --- | --- | --- | --- | --- | --- |
+| Rat Warren | **Broodmother of the Warren** | 58 | 2.25 | pounce, charge, pounce, burst | skitters | giant rust skitter |
+| Flooded Deep | **The Drowned Maw** | 92 | 1.25 | deluge, burst, deluge, charge (10-orb bursts) | slimes | mountain of blue ooze |
+| Bone Hollow | **Ogre King of the Hollow** | 70 | 1.7 | charge, burst | skitters + slime | the classic ashen ogre |
+| Gloom Drain | **Sovereign of the Gloom** | 62 | 2.0 | blink, burst, blink, charge (fast orbs) | wisp, skitter, slime | swollen marsh-light |
+
+(+1 HP from the boss-floor tier bonus in play.) Per-attack windups scale off
+each boss's base windup, so the quick bosses telegraph quicker. Boss name
+drives the HP bar, the "seal breaks" awakening banner, the enrage banner and
+the defeat fanfare. The tutorial's private cellar has no boss floor; its
+fallback def is the Ogre King of the Cellar. Beating a boss spawns the return
+portal home.
+
 ## Loot
 
 - **Enemy drops:** killing an enemy can drop **merchandise** appropriate to the

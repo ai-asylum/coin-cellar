@@ -10,14 +10,32 @@ keyboard+mouse on desktop. Input lives in `src/core/input.js`; the HUD in
 | Intent | Touch | Desktop |
 | --- | --- | --- |
 | Move | Left-drag anywhere (virtual joystick appears where you press) | `WASD` / arrow keys |
-| Context action | Big round button | `E` / `F` / `Space` / left-click |
+| Context action | Big round button | `E` / `F` / `Space` / `J` / left-click |
 | Dodge roll (dungeon) | Dodge button | `Shift` / `K` / `L` / right-click |
 | Bag | Bag button | `B` / `I` |
-| Co-op | Co-op button | `C` |
+| Friends | Friends button | `C` |
 | Aim (attack) | Movement direction | Mouse position |
+| Menu / dialog | Tap a button | `J` / `K` move focus · `Enter` confirm · `Esc` back out |
 | Mute | — | `M` |
 | Pause / menu | — | `Escape` |
 | Admin / cheat panel | — | `` ` `` (backquote) |
+
+## Menus & dialogs on the keyboard
+
+Every modal sheet — the door prompt, the delve / descend / "go deeper or head
+home" prompts, the storeroom pack list, the pause menu — is fully keyboard
+drivable so desktop players never reach for the mouse mid-flow:
+
+- `J` / `K` (or the arrow keys) move a gold highlight across the sheet's
+  buttons; it starts on the primary (green) action so a single `Enter` confirms
+  the common case.
+- `Enter` fires the focused button.
+- `Esc` backs out via the sheet's cancel — its close (✕) button if it has one,
+  otherwise the secondary "deny" choice, so paused prompts always un-pause.
+
+The **haggle sheet** (selling *and* buying) remaps the same keys to the deal
+itself: `J` nudges the price down, `K` nudges it up, `Enter` makes the
+offer / seals the sale, and `Esc` walks away from the table.
 
 The virtual joystick is dynamic — it materializes wherever the player first
 touches the left ~60% of the screen, so there's no fixed thumb position to reach
@@ -54,7 +72,7 @@ The HUD is a DOM overlay (`#hud`) on top of the WebGL canvas (`#app`), styled in
   mood faces.
 - **Banners & floaties** — floor announcements, floating gold numbers on sales,
   perfect-deal flourishes.
-- **Co-op sheet** — host/join room code.
+- **Friends sheet** — set your name, add friends, invite one to teleport in.
 - **Pause / escape menu.**
 
 ## Accessibility & platform notes
@@ -70,5 +88,32 @@ The HUD is a DOM overlay (`#hud`) on top of the WebGL canvas (`#app`), styled in
 
 There's a lightweight loading screen while character models preload. The
 first-time flow relies on the pulsing context button and readable icons rather
-than a heavy tutorial. The recap sheet at sleep reinforces the day's outcomes
-(gold earned, deals made, deepest floor).
+than a heavy tutorial: a guide arrow (`hud.guide`) walks the new player through
+**delve → loot → return → stock → open → sell** on day one. The recap sheet at
+sleep reinforces the day's outcomes (gold earned, deals made, deepest floor).
+
+### FTUE: the landlord scene
+
+The first day is scripted to end on a stakes-setting beat that introduces the
+rent (debt) system diegetically instead of via a banner:
+
+1. **Day one starts with 1 AP already spent.** The player wakes with the day
+   already underway — the shorter first day funnels them straight through the
+   guided tutorial loop without time to wander.
+2. **First sale closes the day.** After the player seals their first sale and
+   the shop doors close, night sets in immediately.
+3. **The landlord barges in.** The **LANDLORD** character throws the doors open
+   himself and marches in, demanding the rent.
+4. **Scripted exchange:**
+   - *Landlord:* demands the rent, now.
+   - *Player:* can't pay right now — asks for until the end of the week.
+   - *Landlord:* **"You have three days!"**
+5. **Rent UI.** The Guild's rent ledger sheet then opens — the full payment
+   schedule, with a "pay now" for settling the current installment early. It
+   stays reachable all campaign by tapping the **debt chip** in the top bar
+   (dawn auto-collection remains the enforcement backstop).
+
+The landlord's "three days" is literal: it points at the first installment of
+the [debt schedule](04-economy-and-progression.md#the-debt-schedule-the-campaign-spine),
+due on day 3. The landlord is a **Guild collector** — the creditor is still the
+Guild (as in existing HUD copy); he's the character face that comes to collect.

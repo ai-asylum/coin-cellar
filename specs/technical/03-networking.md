@@ -12,18 +12,27 @@ the protocol/implementation view.
 
 - **Signaling:** PeerJS public broker.
 - **Transport:** a single reliable `DataConnection` (WebRTC data channel).
-- **Room codes:** 4-character codes from a confusables-free alphabet
-  (`ABCDEFGHJKLMNPQRSTUVWXYZ23456789`), namespaced with the peer-id prefix
-  `coincellar-`.
-  - Host: `new Peer("coincellar-" + code.toLowerCase())`.
-  - Guest: `peer.connect("coincellar-" + code.toLowerCase(), { reliable: true })`.
-- **Capacity:** exactly one guest — a second incoming connection is closed.
+- **Named presence:** each player registers a persistent peer under their own
+  display name, slugged to bare alphanumerics and namespaced with the peer-id
+  prefix `coincellar-friend-`.
+  - `goOnline(name)`: `new Peer("coincellar-friend-" + slugName(name))`, then
+    listens for incoming connections.
+  - Two players sharing a slug collide on the broker (names should be unique).
+- **Teleport invites:** the **host invites** a friend from the shop; the friend
+  accepts to become the guest.
+  - Host: `peer.connect("coincellar-friend-" + slugName(friend))`, then sends
+    `{ t: "tpInvite", from }`.
+  - Guest replies `{ t: "tpAccept" }` (only allowed above ground) or
+    `{ t: "tpDecline" }`.
+  - After the handshake, the active connection carries the normal game traffic.
+- **Capacity:** exactly one guest — an invite while already in a session is
+  auto-declined.
 
 ```
-Host                              Guest
- │  host() → code "ABCD"          │
- │◀──────── connect("abcd") ──────│
- │  conn "open"                   │  conn "open"
+Host (in shop)                    Friend (must be above ground to accept)
+ │  invite(name) → connect        │
+ │──────── tpInvite ─────────────▶│  onTpInvite() → prompt
+ │◀──────── tpAccept ─────────────│  acceptInvite()
  │  onPeerJoined()  ──welcome──▶  │  onJoinedHost()
  │  ◀── intents ── / ── snapshots ─▶
 ```
@@ -104,8 +113,9 @@ same world locally from the same seeds. See
 
 ## Lifecycle & failure
 
-- On `conn.close`, both sides reset (`_onClose()` → `onPeerLeft()`), clearing
-  host/guest flags and the connection.
+- On `conn.close` (or `leave()`), both sides reset (`_onClose()` →
+  `onPeerLeft()`), clearing host/guest flags and the game connection — but the
+  named presence peer stays online, so you remain reachable for future invites.
 - Because authority and the save both live on the **host**, a host disconnect ends
   the authoritative session; a guest disconnect leaves the host able to continue
   solo.

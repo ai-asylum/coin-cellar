@@ -207,6 +207,25 @@ body {
   gap: 16px;
 }
 
+/* full-width category divider inside a tab's grid (e.g. Monsters → Bosses) */
+.grid-section {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  font-size: 17px;
+  font-weight: 900;
+  letter-spacing: 0.4px;
+}
+.grid-section .ic { width: 1.1em; height: 1.1em; }
+.grid-section::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--edge);
+}
+
 .card {
   background: linear-gradient(180deg, var(--panel) 0%, var(--bg-2) 100%);
   border: 1px solid var(--edge);

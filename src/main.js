@@ -2,7 +2,7 @@ import { Engine } from "./core/engine.js";
 import { Input } from "./core/input.js";
 import { AudioBus } from "./core/audio.js";
 import { HUD } from "./game/hud.js";
-import { Game } from "./game/game.js";
+import { Game, requestFullscreen } from "./game/game.js";
 import { loadCharacters } from "./chargen/assets.js";
 import { icon } from "./core/icons.js";
 
@@ -30,7 +30,12 @@ function startMenu() {
           <button class="btn deal start-play" id="start-play">${icon("play")} Play</button>
         </div>
       </div>`;
-    document.getElementById("start-play").onclick = () => resolve();
+    document.getElementById("start-play").onclick = () => {
+      // First tap: on touch, go fullscreen straight away (must run inside the
+      // gesture). Desktop stays windowed.
+      if (matchMedia("(pointer: coarse)").matches) requestFullscreen();
+      resolve();
+    };
   });
 }
 

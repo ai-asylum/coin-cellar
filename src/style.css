@@ -54,7 +54,7 @@ button { font-family: inherit; cursor: pointer; }
 .ic-coin, .ic-moneyfly, .ic-crown { color: #dca62f; }
 .ic--empty { opacity: 0.3; }
 .chip .ic, .btn .ic { vertical-align: -0.16em; }
-#hearts .ic { width: 2.4em; height: 2.4em; margin: 0 0.2px; vertical-align: -0.28em; }
+#hearts .ic { width: 1.5em; height: 1.5em; margin: 0 0.2px; vertical-align: -0.28em; }
 .icon-btn .ic { width: 1.15em; height: 1.15em; vertical-align: -0.05em; }
 .big-emoji .ic, .mood .ic, .bag-emoji .ic, .bag-face .ic, .inv-item > .ic, .coin-fly .ic, .floaty.emote .ic { width: 1em; height: 1em; vertical-align: middle; }
 
@@ -69,6 +69,12 @@ button { font-family: inherit; cursor: pointer; }
 .btn.small { padding: 8px 10px; font-size: 14px; }
 .btn.deal { background: linear-gradient(#bfe39a, #8ec86a); border-color: #4f8a37; box-shadow: 0 3px 0 #3a6626, inset 0 1px 0 #eafbd7; }
 .btn.deny { background: linear-gradient(#eeb59a, #d98c6c); border-color: #a8552f; box-shadow: 0 3px 0 #7a3a1e, inset 0 1px 0 #ffe6d7; }
+/* keyboard-focused sheet button (J/K to move, Enter to pick) */
+.btn.kb-focus {
+  outline: 3px solid #ffe08a;
+  outline-offset: 2px;
+  filter: brightness(1.06);
+}
 .hidden { display: none !important; }
 
 /* ============================================================ start menu */
@@ -96,6 +102,7 @@ button { font-family: inherit; cursor: pointer; }
   position: absolute; top: env(safe-area-inset-top); left: 0; right: 0;
   display: flex; gap: 6px; padding: 8px 10px; align-items: center;
   flex-wrap: wrap;
+  z-index: 20;
 }
 .chip {
   background: linear-gradient(rgba(255, 246, 226, 0.95), rgba(236, 211, 160, 0.95));
@@ -125,9 +132,10 @@ button { font-family: inherit; cursor: pointer; }
 @keyframes chipbounce { 30% { transform: scale(1.18); } }
 #hearts {
   position: absolute;
-  left: calc(env(safe-area-inset-left) + 12px);
-  bottom: calc(env(safe-area-inset-bottom) + 12px);
-  letter-spacing: -2px; line-height: 1;
+  top: calc(env(safe-area-inset-top) + 6px);
+  left: 50%; transform: translateX(-50%);
+  z-index: 20;
+  letter-spacing: -1px; line-height: 1;
   filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.45));
 }
 .chip-btns { margin-left: auto; display: flex; gap: 6px; }
@@ -151,6 +159,14 @@ button { font-family: inherit; cursor: pointer; }
   filter: drop-shadow(0 3px 5px rgba(30, 16, 4, 0.5));
   /* No z-index: sits below the sheets, joystick and action button, which are
      appended to #hud after this element, so gameplay UI always wins. */
+}
+/* On touch the dial hogs the bottom third — shrink it and drop it flush to the
+   screen edge (the SVG has ~13% empty space below the arc baseline). */
+@media (pointer: coarse) {
+  #dayclock {
+    width: 150px;
+    bottom: calc(env(safe-area-inset-bottom) - 11px);
+  }
 }
 #dayclock svg { display: block; width: 100%; height: auto; overflow: visible; }
 .clk-face { stroke: var(--wood-dark); stroke-width: 4; stroke-linejoin: round; }
@@ -188,6 +204,14 @@ button { font-family: inherit; cursor: pointer; }
   transform-origin: bottom left;
   pointer-events: none;
   opacity: 0.95;
+}
+/* On touch the map is oversized — pull it down into the lower-left corner and
+   shrink it so it stops eating the play area. */
+@media (pointer: coarse) {
+  #minimap {
+    bottom: calc(env(safe-area-inset-bottom) + 92px);
+    transform: scale(0.9);
+  }
 }
 
 /* ============================================================ banner / toast */
@@ -286,6 +310,13 @@ button { font-family: inherit; cursor: pointer; }
   font-size: 22px; pointer-events: none; will-change: transform, opacity;
   filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.45));
 }
+.item-fly {
+  position: absolute; transform: translate(-50%, -50%);
+  font-size: 30px; pointer-events: none; z-index: 21;
+  will-change: transform, opacity;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
+}
+.item-fly .ic { width: 1em; height: 1em; vertical-align: middle; }
 @keyframes floatup { 20% { opacity: 1; } 100% { transform: translate(-50%, -220%); opacity: 0; } }
 @keyframes floatcrit {
   0% { transform: translate(-50%, -100%) scale(0.5); opacity: 0; }
@@ -355,7 +386,7 @@ button { font-family: inherit; cursor: pointer; }
   background: rgba(255, 233, 196, 0.55); border: none;
 }
 #action-btn {
-  pointer-events: auto;
+  pointer-events: auto; z-index: 20;
   position: absolute; right: calc(18px + env(safe-area-inset-right));
   bottom: calc(26px + env(safe-area-inset-bottom));
   width: 84px; height: 84px; border-radius: 50%; font-size: 36px;
@@ -370,7 +401,7 @@ button { font-family: inherit; cursor: pointer; }
 
 /* dodge / roll button sits just inboard of the action button */
 #dodge-btn {
-  pointer-events: auto;
+  pointer-events: auto; z-index: 20;
   position: absolute; right: calc(112px + env(safe-area-inset-right));
   bottom: calc(30px + env(safe-area-inset-bottom));
   width: 62px; height: 62px; border-radius: 50%; font-size: 26px;
@@ -387,7 +418,7 @@ button { font-family: inherit; cursor: pointer; }
    button so the swing and the "use this" press never share a target. Shown
    only while something's in reach (toggled from input.setInteract). */
 #interact-btn {
-  pointer-events: auto;
+  pointer-events: auto; z-index: 20;
   position: absolute; right: calc(24px + env(safe-area-inset-right));
   bottom: calc(120px + env(safe-area-inset-bottom));
   width: 66px; height: 66px; border-radius: 50%; font-size: 28px;
@@ -402,10 +433,17 @@ button { font-family: inherit; cursor: pointer; }
 @keyframes interactpulse { 50% { box-shadow: 0 4px 0 #1f5236, 0 0 30px rgba(140, 255, 190, 0.85); border-color: #7bf0aa; } }
 @media (pointer: fine) { #interact-btn { display: none !important; } }
 
+/* clear the touch controls out of the way during a cutscene dialogue so the
+   portraits + spoken line have the stage to themselves */
+#hud.dlg-open #joystick,
+#hud.dlg-open #action-btn,
+#hud.dlg-open #dodge-btn,
+#hud.dlg-open #interact-btn { display: none !important; }
+
 /* backpack button — big bag sprite parked on the bottom edge, just inboard of
    the action/dodge cluster (dungeon-only; the bag panel grows out of this icon) */
 #bag-btn {
-  pointer-events: auto;
+  pointer-events: auto; z-index: 20;
   position: absolute; right: calc(186px + env(safe-area-inset-right));
   bottom: env(safe-area-inset-bottom);
   width: 66px; height: 66px; border-radius: 18px;
@@ -425,6 +463,24 @@ button { font-family: inherit; cursor: pointer; }
   box-shadow: 0 2px 0 #4a2c14;
 }
 #bag-btn:active { transform: scale(0.93); }
+#bag-btn.pop { animation: bagpop 0.34s ease-out; }
+@keyframes bagpop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.22); }
+  100% { transform: scale(1); }
+}
+/* On touch the backpack joins the top-right button stack, tucked under the
+   coop / mute / pause row — and the desktop "B" keycap is dropped. */
+@media (pointer: coarse) {
+  #bag-btn {
+    right: calc(10px + env(safe-area-inset-right));
+    bottom: auto;
+    top: calc(env(safe-area-inset-top) + 54px);
+    width: 52px; height: 52px; border-radius: 14px;
+  }
+  #bag-btn .bag-btn-ic .ic { width: 32px; height: 32px; }
+  #bag-btn .bag-btn-key { display: none; }
+}
 
 /* ============================================================ sheets */
 #sheet {
@@ -497,6 +553,33 @@ button { font-family: inherit; cursor: pointer; }
 }
 .recap-guild.urgent { color: #c0392b; }
 .recap-guild .ic { width: 1.1em; height: 1.1em; vertical-align: -0.2em; }
+
+/* staggered entrance so the day's tally tots up with a bit of life: the hero
+   number pops, each row slides in behind it, then the footer fades up */
+.recap-sheet .recap-hero { animation: recaphero 0.4s both; }
+@keyframes recaphero { from { transform: scale(0.7); opacity: 0; } 65% { transform: scale(1.07); } }
+.recap-sheet .recap-row {
+  animation: recaprowin 0.34s both;
+  animation-delay: calc(0.14s + var(--i, 0) * 0.07s);
+}
+@keyframes recaprowin { from { transform: translateY(10px); opacity: 0; } }
+.recap-sheet .recap-quiet,
+.recap-sheet .recap-guild { animation: recapfade 0.5s both 0.3s; }
+
+/* ---- landlord cutscene dialogue + the Guild's rent ledger ---- */
+.dlg-card { min-width: min(320px, 78vw); text-align: center; }
+.dlg-name {
+  font-size: 12px; font-weight: 900; letter-spacing: 1.2px;
+  text-transform: uppercase; color: var(--wood-dark);
+}
+.dlg-text { font-size: 17px; font-weight: 700; color: var(--ink); margin: 6px 2px 12px; }
+.rent-row.paid { opacity: 0.62; }
+.rent-row.paid .recap-val { color: var(--ink-soft); }
+.rent-row.due { border-color: #c0392b; }
+.rent-row.due .recap-val { color: #a11; }
+#debt-chip { pointer-events: auto; cursor: pointer; }
+/* a sheet button you can't afford reads as such (rent-pay, unseal-yes, …) */
+.sheet-btns .btn:disabled { opacity: 0.5; cursor: default; }
 
 /* ---- Recettear "Capitalism, ho!" haggle panel ---- */
 .hg-card { text-align: center; }
@@ -578,6 +661,25 @@ button { font-family: inherit; cursor: pointer; }
   border-radius: 12px; border: 2px solid var(--wood); background: #fff6e0; color: var(--ink);
   text-transform: uppercase; padding: 8px 4px;
 }
+
+/* ---- friends menu ---- */
+.fr-input {
+  pointer-events: auto; flex: 1; min-width: 0; text-align: center; font-size: 15px; font-weight: 700;
+  border-radius: 12px; border: 2px solid var(--wood); background: #fff6e0; color: var(--ink);
+  padding: 8px 10px;
+}
+.fr-you { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-soft); margin-top: 6px; }
+.fr-you b { color: var(--ink); }
+.fr-you .btn { margin-left: auto; }
+.fr-list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.fr-row {
+  display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 10px;
+  border-radius: 12px; background: rgba(0, 0, 0, 0.06);
+}
+.fr-name { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fr-name svg { flex: none; }
+.fr-row-btns { display: flex; align-items: center; gap: 4px; flex: none; }
+.fr-invite:disabled { opacity: 0.45; }
 
 /* ---- backpack panel: parked on the lower-right, grows out of the bag icon ---- */
 #sheet.bag-sheet {
@@ -676,6 +778,41 @@ button { font-family: inherit; cursor: pointer; }
 .bag-act.drop { background: #d98c6c; }
 .bag-act:active { transform: scale(0.94); }
 .bag-act.ghost { background: transparent; color: var(--ink-soft); font-weight: 600; cursor: default; }
+
+/* ============================================================ fullscreen gate */
+#fs-gate {
+  position: absolute; inset: 0; z-index: 90;
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: auto;
+  background: radial-gradient(ellipse at center, rgba(47, 32, 19, 0.92) 0%, rgba(20, 12, 6, 0.96) 100%);
+  animation: recapfade 0.2s;
+}
+.fs-gate-card { text-align: center; color: var(--parch-hi); }
+.fs-gate-ic {
+  font-size: 64px; color: var(--gold);
+  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.5));
+  animation: btnpulse 1.4s infinite;
+}
+.fs-gate-ic .ic { width: 1em; height: 1em; }
+.fs-gate-txt {
+  margin-top: 14px; font-size: 18px; font-weight: 800; letter-spacing: 0.4px;
+  text-shadow: 0 2px 0 var(--wood-dark);
+}
+
+/* ============================================================ forced landscape */
+/* Touch phones only play in landscape. When the browser won't honour a Screen
+   Orientation lock (e.g. iOS Safari) we render landscape anyway by rotating the
+   whole game 90° into a box the size of the (portrait) viewport with its axes
+   swapped. Game._initLandscapeLock toggles this class and flips `viewport` so
+   every screen-space calculation follows the rotated layout. */
+html.force-landscape #app,
+html.force-landscape #hud {
+  inset: 0 auto auto 0;
+  width: 100vh;
+  height: 100vw;
+  transform-origin: 0 0;
+  transform: translateX(100vw) rotate(90deg);
+}
 
 /* ============================================================ admin panel */
 #admin-panel {

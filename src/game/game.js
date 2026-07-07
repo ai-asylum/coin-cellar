@@ -8,7 +8,7 @@ import * as THREE from "three";
 import { rng, pick, clamp, lerp } from "../core/engine.js";
 import { BlockyCreature, variantForSeed } from "../chargen/blocky.js";
 import { Shop, SHOP } from "./shop.js";
-import { Dungeon, DUNGEON_ORIGIN, MAX_FLOORS } from "./dungeon.js";
+import { Dungeon, DUNGEON_ORIGIN, MAX_FLOORS, bossDefFor, BOSS_ATK_GLOW } from "./dungeon.js";
 import { Sewer } from "./sewer.js";
 import { ITEMS, itemSprite, swordMesh } from "./items.js";
 import { Particles } from "./particles.js";
@@ -16,6 +16,7 @@ import { SlashArc } from "./slash.js";
 import { Coop } from "../net/coop.js";
 import { Lobby } from "../net/lobby.js";
 import { icon, itemIcon } from "../core/icons.js";
+import { viewport } from "../core/viewport.js";
 
 // Cross-browser fullscreen helpers (touch play runs fullscreen).
 export function isFullscreen() {
@@ -33,11 +34,15 @@ export function requestFullscreen() {
 
 const DAY_LEN = 160;
 const UNSEAL_FEE = 100; // what the Guild charges to unseal the cellar for a second delve
+const HOLE_FEE = 25; // toll to unseal a sewer hole's grate before delving in
 // The day runs on action points, not a wall clock: each errand (opening the
 // doors for a rush, heading down the cellar) burns one AP and slides the sun
 // a third of the way across the dial. Out of AP = dusk.
 const AP_PER_DAY = 3;
 const AP_DRAIN_SECS = 4; // how long the sun takes to glide through one AP's arc
+// The Guild's collector who barges in at the end of the FTUE day (see
+// _updateLandlord). A fixed variant so he's the same face every campaign.
+const LANDLORD_VARIANT = "r";
 const DEBT = [
   { day: 3, amt: 180 },
   { day: 6, amt: 450 },
@@ -62,6 +67,7 @@ export class Game {
     this.net = new Coop(this);
     this.particles = new Particles(engine.scene);
     this.slash = new SlashArc(engine.scene);
+    this.remoteSlash = new SlashArc(engine.scene); // co-op partner's swoosh
 
     // --- state
     this.day = 1;
@@ -72,6 +78,7 @@ export class Game {
     this.debtIdx = 0;
     // one cellar run a day: set the moment you drop down, sealed till morning
     this.delvedToday = false;
+    this._holesToday = 0; // dungeons unsealed today — each costs more than the last
     this.inventory = [...START_INV];
     this.invCap = 10;
     // the shop storeroom: loot hauled up from the cellar lands here, and the
@@ -100,6 +107,14 @@ export class Game {
     this._respawnT = -1;
     this._pickupSuppressT = 0;
     this._useFx = []; // in-flight "used an item" flourishes over the player's head
+    this._remoteUseFx = []; // same flourish, mirrored over the co-op partner
+    // Co-op floors aren't lock-stepped: the host's floor is always the "live"
+    // (simulated) one, and a partner can lag a floor behind or push a floor
+    // ahead onto a quiet floor. These track our view of the host's live floor
+    // and whether we've chosen not to follow a partner deeper yet.
+    this._hostDungeonFloor = 0;
+    this._floorDesync = false;
+    this._pendingLead = null; // { n, seed, hole } — where to catch up to
     this.godMode = false;
     this._adminOpen = false;
     this.paused = false;
@@ -108,6 +123,11 @@ export class Game {
     this._autoDealCd = 0; // brief breather between auto-opened haggles
     this.tutorial = null; // first-run onboarding step (see _tutStart); null once done
     this._hadSave = false; // set by _load — suppresses the tutorial for returning players
+    // FTUE landlord scene: armed when the tutorial's first sale lands, played
+    // out by _updateLandlord once night falls and the doors have swung shut
+    this._landlordDue = false;
+    this._landlord = null; // { creature, state, leg } while he's on stage
+    this._landlordWaitT = 0;
 
     this._load();
 
@@ -146,6 +166,7 @@ export class Game {
 
     this._wireHud();
     this._initFullscreenGate();
+    this._initLandscapeLock();
     this.input.onKey = (code) => this._handleKey(code);
     this._morning(true);
     engine.onTick((dt, t) => this.update(dt, t));
@@ -173,12 +194,15 @@ export class Game {
     this._updateRemote(dt, elapsed);
     this._updateLobbyPlayers(dt, elapsed);
     this.shop.update(dt, elapsed);
+    this._updateLandlord(dt, elapsed);
     this._autoDeal(dt);
     this.dungeon.update(dt, elapsed);
     this.sewer.update(dt, elapsed);
     this.particles.update(dt);
     this.slash.update(dt);
+    this.remoteSlash.update(dt);
     this._updateUseFx(dt);
+    this._updateRemoteUseFx(dt);
     this._updateTutGuide();
     this.hud.update();
     this.net.update(dt);
@@ -190,10 +214,13 @@ export class Game {
       const target = (DAY_LEN * this.ap) / AP_PER_DAY;
       const rate = DAY_LEN / AP_PER_DAY / AP_DRAIN_SECS;
       if (this.dayT > target) this.dayT = Math.max(target, this.dayT - rate * dt);
-      // last AP spent: dusk falls once the final errand wraps up (rush served
-      // and doors shut, player back up from the cellar)
-      if (this.dayT <= 0 && this.playerArea === "shop" && !this.shop.doorsOpen && this.shop.customers.length === 0)
+      // out of AP: the day ends the moment the final errand wraps up (rush
+      // served and doors shut, player back up from the cellar) — no waiting for
+      // the sun to finish its glide
+      if (this.ap <= 0 && this.playerArea === "shop" && !this.shop.doorsOpen && this.shop.customers.length === 0) {
+        this.dayT = 0;
         this._nightfall();
+      }
     }
     if (this.phase === "day" && !this.gameOver) {
       this.hud.setDayProgress(1 - Math.max(0, this.dayT) / DAY_LEN, "day");
@@ -214,7 +241,8 @@ export class Game {
     // boss health bar: pinned up while the boss lives and you're in the cellar
     const boss = this.dungeon.boss;
     if (inDungeon && boss && boss.deadT < 0) {
-      this.hud.showBossBar(boss.enraged ? "Ogre King — Enraged" : "Ogre King of the Cellar", boss.enraged);
+      const bossName = boss.def?.name ?? "Ogre King of the Cellar";
+      this.hud.showBossBar(boss.enraged ? `${bossName} — Enraged` : bossName, boss.enraged);
       this.hud.setBossBar(boss.hp / boss.maxHp);
       // incoming-attack warning while the boss winds up (guests run telT,
       // mirrored from the host; the host reads its own attack clock)
@@ -254,8 +282,8 @@ export class Game {
     const mv = this.input.move;
     const sheetBlocked = this.hud.sheetOpen;
 
-    // dodge / roll (dungeon only) — grabbed before movement so it can override it
-    if (this.input.dodgeEdge && !sheetBlocked && this.playerArea === "dungeon") this._dodge();
+    // dodge / roll (underground only) — grabbed before movement so it can override it
+    if (this.input.dodgeEdge && !sheetBlocked && (this.playerArea === "dungeon" || this.playerArea === "sewer")) this._dodge();
 
     if (this._dashT >= 0) {
       // committed roll: ease-out burst along the dash direction
@@ -414,16 +442,27 @@ export class Game {
         return { label: "speak", hint: "Haggle", fn: () => this._haggle(cust), focus: _focus.copy(cust.creature.position).setY(0.06).clone(), color: 0xffd34d };
       if (seller)
         return { label: "moneyfly", hint: "Buy", fn: () => this._buyFrom(seller), focus: _focus.copy(seller.creature.position).setY(0.06).clone(), color: 0x8fe0ff };
-      // the shopfront doors: open up for customers by day, head home by night
+      // the shopfront doors: open up for customers by day, head home by night.
+      // There's no manual "close up" — the doors shut themselves once the rush
+      // is over, so only offer the door when there's actually something to do.
       if (p.distanceTo(this.shop.doorInside) < 1.5) {
+        const doorFocus = _focus.copy(this.shop.doorInside).setY(0.06).clone();
+        if (this.phase === "night")
+          return { label: "home", hint: "Go home", fn: () => this._doorPrompt(), focus: doorFocus, color: 0x8fd0ff };
         // day, but sold out with the cellar spent → the doors offer an early night
-        const spent = this.phase === "day" && this._daySpent();
-        return { label: this.phase === "night" ? "home" : spent ? "bed" : "shop", hint: this.phase === "night" ? "Go home" : spent ? "Turn in" : this.shop.doorsOpen ? "Close up" : "Open up", fn: () => this._doorPrompt(), focus: _focus.copy(this.shop.doorInside).setY(0.06).clone(), color: this.phase === "night" || spent ? 0x8fd0ff : 0x66ff9e };
+        if (this._daySpent())
+          return { label: "bed", hint: "Turn in", fn: () => this._doorPrompt(), focus: doorFocus, color: 0x8fd0ff };
+        if (!this.shop.doorsOpen)
+          return { label: "shop", hint: "Open up", fn: () => this._doorPrompt(), focus: doorFocus, color: 0x66ff9e };
+        // doors already open for the day's rush — nothing to do at the door
       }
-      if (this.shop.trapdoorOpen && p.distanceTo(this.shop.trapdoorPos) < 1.5)
+      // the guided first day only offers the cellar on its delve step — no
+      // re-delving until the FTUE's walked you through stocking and selling
+      const tutBlocksCellar = this.tutorial && this.tutorial !== "delve";
+      if (!tutBlocksCellar && this.shop.trapdoorOpen && p.distanceTo(this.shop.trapdoorPos) < 1.5)
         return { label: "hole", hint: "Delve", fn: () => this._delve(), focus: _focus.copy(this.shop.trapdoorPos).setY(0.06).clone(), color: 0xb98cff };
       // already delved today (solo): the Guild will unseal the cellar for a fee
-      if (!this.net.connected && this.delvedToday && p.distanceTo(this.shop.trapdoorPos) < 1.5)
+      if (!tutBlocksCellar && !this.net.connected && this.delvedToday && p.distanceTo(this.shop.trapdoorPos) < 1.5)
         return { label: "hole", hint: "Unseal", fn: () => this._delve(), focus: _focus.copy(this.shop.trapdoorPos).setY(0.06).clone(), color: 0x9aa0aa };
       // display tables: walk up to a slot to stock it. A stocked slot offers a
       // swap / take-back; an empty one takes stock from the storeroom.
@@ -443,8 +482,11 @@ export class Game {
         return { label: "home", hint: "Back to shop", fn: () => this._returnHome(), focus: _v.clone().setY(0.06), color: 0x8fd0ff };
       for (const hole of this.sewer.holes) {
         _v.copy(hole.pos);
-        if (_v.distanceTo(p) < 1.8)
+        if (_v.distanceTo(p) < 1.8) {
+          if (!hole.open)
+            return { label: "coin", hint: `Unseal ${this._holeFee()}g`, fn: () => this._holePrompt(hole.id), focus: _v.clone().setY(0.06), color: 0x9aa0aa };
           return { label: "hole", hint: hole.name, fn: () => this._holePrompt(hole.id), focus: _v.clone().setY(0.06), color: hole.color };
+        }
       }
       return { label: "swords", fn: () => this._attack() };
     }
@@ -554,6 +596,10 @@ export class Game {
     if (finisher) {
       this.audio.finisher();
     }
+    // Tell the partner to swing right now. The periodic "p" snapshot only
+    // samples at ~11 Hz, so a quick swing can slip between packets — an explicit
+    // event guarantees the swoosh (and its committed heading) always land.
+    this.net.send({ t: "atk", h, finisher: finisher ? 1 : 0 });
   }
 
   // Pick a swing heading with a bit of aim assist: if a live foe sits within
@@ -686,7 +732,10 @@ export class Game {
   playersInDungeon() {
     const list = [];
     if (this.playerArea === "dungeon" && this._respawnT < 0) list.push({ creature: this.player, local: true });
-    if (this.remote && this.remote.area === "dungeon" && !this.remote.dead)
+    // only count the partner as a target while they share our floor — the host
+    // simulates one floor, so a partner off on another floor isn't in the fight
+    if (this.remote && this.remote.area === "dungeon" && !this.remote.dead &&
+        (this.remote.floor < 0 || this.remote.floor === this.dungeon.floor))
       list.push({ creature: this.remote.creature, local: false });
     return list;
   }
@@ -733,8 +782,20 @@ export class Game {
     }
     const it = ITEMS[drop.item];
     this.hud.float(_v.copy(drop.mesh.position).setY(1.2), `${itemIcon(it.icon)} ${it.name}`, "loot");
+    // the loot flies across the screen into the backpack
+    this.hud.flyToBag(_v.copy(drop.mesh.position).setY(0.8), itemIcon(it.icon));
     this._tutAdvance("loot");
     this._save();
+  }
+
+  // Floating "picked up X" label at a drop's spot — used to surface the co-op
+  // partner's grabs on the local screen (the picker sees their own via
+  // _pickupDrop). Skipped if the drop is in a different area than us.
+  _floatPickup(drop) {
+    if (this.playerArea !== "dungeon") return;
+    const it = ITEMS[drop.item];
+    if (!it) return;
+    this.hud.float(_v.copy(drop.mesh.position).setY(1.2), `${itemIcon(it.icon)} ${it.name}`, "loot");
   }
 
   _openChest(chest) {
@@ -814,6 +875,27 @@ export class Game {
     }
   }
 
+  // A plain-table sale: no haggle, the shopper pays full sticker price (100% of
+  // the item's value) and leaves happy. Driven by the host's shop sim, so the
+  // wallet + stock stay authoritative; the combo streak is a haggle-only reward.
+  _autoSell(cust, slot) {
+    const item = ITEMS[slot.item];
+    if (!item) return;
+    const price = item.base;
+    this.shop.unstockSlot(slot);
+    cust.state = "happy";
+    cust.t = 0;
+    cust.creature.animator.squash.kick(6);
+    this.hud.emote(cust.creature, "faceSmile", 1.4);
+    this.today.sold++;
+    this.today.earned += price;
+    this.gainGold(price, cust.creature.position);
+    this._saleJuice(price, "good", cust.creature.position);
+    this._tutAdvance("sell");
+    this._syncStock();
+    this._save();
+  }
+
   _saleJuice(price, grade, pos) {
     // coins arc up to the gold counter, ticking a coin sound as each lands
     const coins = 5 + Math.min(11, Math.floor(price / 12));
@@ -882,6 +964,7 @@ export class Game {
     this.dayT = DAY_LEN;
     this.ap = AP_PER_DAY; // a fresh day's worth of errands
     this.delvedToday = false; // a fresh morning re-opens the cellar for one run
+    this._holesToday = 0; // dungeon tolls reset to the base price each dawn
     this.shop.setDoorsOpen(false); // start each day shut — open up when ready
     this.hp = this.maxHp;
     this.hud.setHearts(this.hp, this.maxHp);
@@ -927,6 +1010,10 @@ export class Game {
   // player straight at the trapdoor. Runs once, on a fresh save, solo only.
   _tutStart() {
     this.tutorial = "delve";
+    // FTUE beat: you wake with the morning already half gone — one errand's
+    // worth of sun is spent, so the first day funnels straight through the
+    // guided loop (delve + open = the two AP left) and ends on the first sale.
+    this.ap = AP_PER_DAY - 1;
     setTimeout(() => this._tutHint(), 3200); // let the intro banner clear first
   }
 
@@ -949,7 +1036,9 @@ export class Game {
     const order = ["delve", "loot", "return", "stock", "open", "sell"];
     this.tutorial = order[order.indexOf(step) + 1] || null;
     if (this.tutorial) setTimeout(() => this._tutHint(), 700);
-    else this.hud.toast(`${icon("crown")} That's the loop — delve, stock, deal. Now pay off the Guild!`);
+    // tutorial done — the landlord scene delivers the "now pay the Guild"
+    // payoff in person once the doors shut on this first sale
+    else this._landlordDue = true;
   }
 
   // Where the FTUE guide arrow should point right now. Re-resolved every frame
@@ -980,6 +1069,14 @@ export class Game {
           const d = e.creature.position.distanceToSquared(p);
           if (d < bestD) { bestD = d; best = e.creature.position; text = "Slay it for loot"; }
         }
+        // nothing to fight (e.g. the monster-free tutorial room) — point at the
+        // nearest unopened chest so the player knows to crack it for stock
+        if (!best) for (const chest of this.dungeon.chests) {
+          if (chest.opened) continue;
+          _v2.copy(chest.mesh.position).add(DUNGEON_ORIGIN);
+          const d = _v2.distanceToSquared(p);
+          if (d < bestD) { bestD = d; best = _v2.clone(); text = "Smash the chest for loot"; }
+        }
         if (best) pos = _v.copy(best);
         else { pos = _v.copy(this.dungeon.stairsPos).add(DUNGEON_ORIGIN); text = "To the stairs"; }
         break;
@@ -1001,7 +1098,7 @@ export class Game {
         break;
       }
       case "open":
-        // no guide arrow on the doors — the interact prompt is enough here
+        if (inShop) { pos = _v.copy(this.shop.doorInside); text = "Open the doors"; }
         break;
       case "sell": {
         const cust = this.shop.customers.find((c) => c.ready && c.state === "want");
@@ -1026,11 +1123,180 @@ export class Game {
     this.hud.setDay(this.day, "night");
     this.shop.setDoorsOpen(false); // shutters roll down at dusk
     const spent = !this.net.connected && this.delvedToday; // cellar already delved today
-    this.hud.banner(`${icon("moon")} Closing time`, spent ? `the cellar's sealed — sleep, or pay the Guild ${UNSEAL_FEE}g to unseal it` : "delve the cellar, or sleep to open again", 2.6);
+    // keep the closing banner terse when the landlord's about to barge in
+    if (this._landlordDue) this.hud.banner(`${icon("moon")} Closing time`, "", 1.6);
+    else this.hud.banner(`${icon("moon")} Closing time`, spent ? `the cellar's sealed — sleep, or pay the Guild ${UNSEAL_FEE}g to unseal it` : "delve the cellar, or sleep to open again", 2.6);
     for (const cust of [...this.shop.customers]) {
       if (cust.state !== "haggling") cust.state = "leave";
     }
     this._syncState();
+  }
+
+  // ---- the FTUE landlord scene ---------------------------------------------
+  // Night falls on the first sale, the doors swing shut… and the Guild's
+  // collector throws them open again, marches in, demands the rent, and leaves
+  // the new shopkeep staring at the ledger. Runs once, at the end of the
+  // tutorial day (armed by _tutAdvance, so solo + fresh save only).
+  _updateLandlord(dt, elapsed) {
+    if (this._landlordDue && !this._landlord) {
+      // wait for the stage to clear: night, everyone out, doors fully shut,
+      // shopkeep home and no sheet up — then a beat of quiet before the BANG
+      const staged = this.phase === "night" && this.playerArea === "shop"
+        && this.shop.customers.length === 0 && this.shop._doorAngle < 0.08
+        && !this.hud.sheetOpen && !this.gameOver;
+      this._landlordWaitT = staged ? this._landlordWaitT + dt : 0;
+      if (this._landlordWaitT < 1.1) return;
+      this._landlordDue = false;
+      const creature = new BlockyCreature(LANDLORD_VARIANT, { height: 1.55 });
+      creature.position.copy(this.shop.doorPos);
+      creature.heading = 0; // facing into the shop
+      this.shop.group.add(creature);
+      this._landlord = { creature, state: "enter", leg: 0 };
+      this.shop.doorHeld = true; // he lets himself in
+      this.audio.doorbell();
+      this.engine.shake(0.22);
+      return;
+    }
+    const lord = this._landlord;
+    if (!lord) return;
+    lord.creature.update(dt, elapsed);
+    const walkTo = (tx, tz, speed = 2.4) => {
+      const c = lord.creature.position;
+      const dx = tx - c.x, dz = tz - c.z;
+      const d = Math.hypot(dx, dz);
+      if (d < 0.12) return true;
+      const step = Math.min(d, speed * dt);
+      c.x += (dx / d) * step;
+      c.z += (dz / d) * step;
+      lord.creature.heading = Math.atan2(dx, dz);
+      return false;
+    };
+    switch (lord.state) {
+      case "enter":
+        if (walkTo(this.shop.doorInside.x, this.shop.doorInside.z + 1.1)) {
+          lord.state = "talk";
+          this._landlordTalk();
+        }
+        break;
+      case "talk": {
+        // square up to the shopkeep while he growls
+        const dx = this.player.position.x - lord.creature.position.x;
+        const dz = this.player.position.z - lord.creature.position.z;
+        if (dx * dx + dz * dz > 0.01) lord.creature.heading = Math.atan2(dx, dz);
+        // Esc can force-hide a sheet without a cancel button — the landlord
+        // won't be brushed off: reshow the line he's on
+        if (!this.hud.sheetOpen) this._landlordSay(lord.line ?? 0);
+        break;
+      }
+      case "leave":
+        if (lord.leg === 0) {
+          if (walkTo(this.shop.doorPos.x, this.shop.doorPos.z)) {
+            lord.leg = 1;
+            this.shop.doorHeld = false; // the doors bang shut behind him
+          }
+        } else if (walkTo(this.shop.streetHalfX, this.shop.streetWalkZ, 2.0)) {
+          lord.creature.removeFromParent();
+          this._landlord = null;
+          this._landlordFarewell();
+        }
+        break;
+    }
+  }
+
+  _landlordTalk() {
+    this._landlordSay(0);
+  }
+
+  // Once the collector's slammed the door behind him, the shopkeep sighs and
+  // resolves to turn in — closing the FTUE on a beat that nudges them home.
+  _landlordFarewell() {
+    this.hud.showDialogue({
+      name: "YOU", variant: this.player?.variant ?? "a", side: "left",
+      text: `“I better go back home.”`, btn: "…",
+      onNext: () => {
+        this.hud.hideSheet();
+        this.hud.toast(`${icon("crown")} That's the loop — delve, stock, deal. Keep the Guild paid!`);
+        // turn in for the night, same as tapping "Go home" at the door
+        this._showDayRecap();
+      },
+    });
+    this.audio.haggle();
+  }
+
+  // Show line `i` of the landlord exchange (re-entrant so the talk-state
+  // watchdog can reshow the current line if the sheet gets dismissed).
+  _landlordSay(i) {
+    const due = DEBT[this.debtIdx];
+    const lines = [
+      { name: "LANDLORD", variant: LANDLORD_VARIANT, side: "right",
+        text: `“Rent, shopkeep. The Guild collects.”` },
+      { name: "YOU", variant: this.player?.variant ?? "a", side: "left",
+        text: `“I can't pay yet — give me a few days.”` },
+      { name: "LANDLORD", variant: LANDLORD_VARIANT, side: "right",
+        text: `“<b>THREE DAYS</b>${due ? ` — ${due.amt}g by day ${due.day}` : ""}, or the shop is ours.”`, btn: "…" },
+    ];
+    if (i >= lines.length) {
+      this.hud.hideSheet();
+      return this._showRentSheet({ intro: true });
+    }
+    if (this._landlord) this._landlord.line = i;
+    this.hud.showDialogue({ ...lines[i], onNext: () => this._landlordSay(i + 1) });
+    if (lines[i].name === "LANDLORD") this.audio.deny();
+    else this.audio.haggle();
+  }
+
+  // The Guild's rent ledger: the whole payment schedule, what's been paid, and
+  // a "pay now" for settling the current installment early. Introduced by the
+  // landlord scene, then reachable all campaign by tapping the debt chip.
+  _showRentSheet({ intro = false } = {}) {
+    const due = DEBT[this.debtIdx];
+    const rows = DEBT.map((d, i) => {
+      const cls = i < this.debtIdx ? " paid" : i === this.debtIdx ? " due" : "";
+      return `<div class="recap-row rent-row${cls}">${icon(i < this.debtIdx ? "crown" : "scroll")}
+        <span class="recap-label">Day ${d.day}</span>
+        <span class="recap-val">${d.amt}g${i < this.debtIdx ? " — paid" : ""}</span></div>`;
+    }).join("");
+    const canPay = due && this.gold >= due.amt && !this.net.isGuest;
+    const el = this.hud.showSheet(`
+      <div class="sheet-title"><span class="big-emoji">${icon("scroll")}</span>
+        <div><b>The Guild's rent ledger</b><br/><small>${due ? `next: ${due.amt}g due day ${due.day} · you have ${this.gold}g` : "all paid — the shop is yours!"}</small></div></div>
+      <div class="recap-rows rent-rows">${rows}</div>
+      <div class="sheet-btns">
+        <button class="btn deny" id="rent-close">${intro ? `${icon("moon")} Three days…` : `${icon("close")} Close`}</button>
+        ${due ? `<button class="btn deal" id="rent-pay" ${canPay ? "" : "disabled"}>${icon("coin")} Pay ${due.amt}g now</button>` : ""}
+      </div>
+    `, "sheet-card rent-sheet");
+    const close = () => {
+      this.hud.hideSheet();
+      // scene wrap-up: the landlord's said his piece — see himself out
+      if (intro && this._landlord?.state === "talk") this._landlord.state = "leave";
+    };
+    el.querySelector("#rent-close").onclick = close;
+    const pay = el.querySelector("#rent-pay");
+    if (pay) pay.onclick = () => {
+      if (!this._payRent()) return;
+      close();
+    };
+  }
+
+  // Settle the current installment from the ledger (early or on the day).
+  // The dawn auto-collection in _morning stays as the enforcement backstop.
+  _payRent() {
+    const due = DEBT[this.debtIdx];
+    if (!due || this.gold < due.amt || this.net.isGuest) return false;
+    this.gold -= due.amt;
+    this.debtIdx++;
+    this.hud.setGold(this.gold);
+    this.audio.victory();
+    this.hud.banner(`${icon("scroll")} Paid ${due.amt}g to the Guild!`, this.debtIdx >= DEBT.length ? "The shop is YOURS!" : `next payment: day ${DEBT[this.debtIdx].day}`, 3);
+    if (this.debtIdx >= DEBT.length && !this.victory) {
+      this.victory = true;
+      setTimeout(() => this._victoryScreen(), 2600);
+    }
+    this._updateDebtChip();
+    this._syncState();
+    this._save();
+    return true;
   }
 
   // Nothing left to do today: cellar spent, bag banked, storeroom bare,
@@ -1043,6 +1309,9 @@ export class Game {
 
   _sleep() {
     if (this.net.isGuest) return this.hud.toast("Only the host can end the day.");
+    // no sleeping through the landlord's visit
+    if (this._landlord || (this._landlordDue && this.phase === "night"))
+      return this.hud.toast(`${icon("alert")} Someone's at the door…`);
     if (this.phase === "day") {
       if (!this._daySpent()) {
         this.hud.toast("There's still daylight left! (turn in at night)");
@@ -1069,11 +1338,10 @@ export class Game {
       { ic: "shopping", label: "Stock bought", val: `${t.bought} · −${t.spent}g`, show: t.bought > 0 },
       { ic: "skull", label: "Monsters slain", val: `${t.slain}`, show: t.slain > 0 },
       { ic: "box", label: "Loot gathered", val: `${t.looted}`, show: t.looted > 0 },
-      { ic: "hole", label: "Deepest floor", val: `B${t.deepest}`, show: t.deepest > 0 },
     ].filter((r) => r.show);
 
     const rowsHtml = rows
-      .map((r) => `<div class="recap-row">${icon(r.ic)}<span class="recap-label">${r.label}</span><span class="recap-val">${r.val}</span></div>`)
+      .map((r, i) => `<div class="recap-row" style="--i:${i}">${icon(r.ic)}<span class="recap-label">${r.label}</span><span class="recap-val">${r.val}</span></div>`)
       .join("");
     const quiet = rows.length <= 1 && t.sold === 0
       ? `<div class="recap-quiet">A quiet day at the shop. Tomorrow, then.</div>` : "";
@@ -1142,11 +1410,30 @@ export class Game {
       return;
     }
 
-    // daytime — toggle the shopfront open or closed
-    const opening = !this.shop.doorsOpen;
+    // daytime. The shopfront shuts itself once the rush is over, so there's no
+    // manual "close up" — the door only opens up, or (once you've sold out)
+    // offers to turn in early.
+    if (this._daySpent()) {
+      const el = this.hud.showSheet(`
+        <div class="sheet-title"><span class="big-emoji">${icon("bed")}</span>
+          <div><b>Turn in early?</b><br/><small>nothing left to sell — call it a day</small></div></div>
+        <div class="sheet-btns">
+          <button class="btn deny" id="door-no">${icon("close")} Not yet</button>
+          <button class="btn deal" id="door-sleep">${icon("bed")} Turn in early</button>
+        </div>
+      `, "sheet-card");
+      el.querySelector("#door-sleep").onclick = () => {
+        this.hud.hideSheet();
+        this._sleep();
+      };
+      el.querySelector("#door-no").onclick = () => this.hud.hideSheet();
+      return;
+    }
+    // doors already open — they'll swing shut on their own when the rush ends
+    if (this.shop.doorsOpen) return;
     // tutorial: no opening up before there's something on the tables — the
     // FTUE walks delve → stock → open in that order, so hold the doors shut
-    if (opening && this.tutorial && this.tutorial !== "open" && this.tutorial !== "sell") {
+    if (this.tutorial && this.tutorial !== "open" && this.tutorial !== "sell") {
       this.hud.toast(this.tutorial === "stock"
         ? `${icon("box")} Put your loot on a table before opening up`
         : `${icon("hole")} Nothing to sell yet — delve the cellar for stock first`);
@@ -1154,66 +1441,59 @@ export class Game {
       return;
     }
     // opening up is one of the day's errands — no AP, no rush
-    if (opening && this.ap <= 0) {
+    if (this.ap <= 0) {
       this.hud.toast(`${icon("moon")} The day's spent — no time to open up again`);
       this.audio.deny();
       return;
     }
-    // sold out with the cellar spent: nothing left to trade, offer to turn in early
-    const spent = this._daySpent();
-    const earlyBtn = spent ? `<button class="btn deal" id="door-sleep">${icon("bed")} Turn in early</button>` : "";
-    const el = this.hud.showSheet(opening ? `
+    // FTUE: skip the confirm modal — the guide's already told them to open up,
+    // so a tap on the doors just swings them wide
+    if (this.tutorial === "open") return this._openShopDoors();
+    const el = this.hud.showSheet(`
       <div class="sheet-title"><span class="big-emoji">${icon("shop")}</span>
-        <div><b>Open the doors?</b><br/><small>${spent ? "nothing left to sell — you could turn in early" : `the rush takes a chunk of the day (${icon("sun")} 1 of ${this.ap} left)`}</small></div></div>
+        <div><b>Open the doors?</b><br/><small>the rush takes a chunk of the day (${icon("sun")} 1 of ${this.ap} left)</small></div></div>
       <div class="sheet-btns">
         <button class="btn deny" id="door-no">${icon("close")} Not yet</button>
         <button class="btn deal" id="door-yes">${icon("shop")} Open up</button>
-        ${earlyBtn}
-      </div>
-    ` : `
-      <div class="sheet-title"><span class="big-emoji">${icon("shop")}</span>
-        <div><b>Close the doors?</b><br/><small>${spent ? "nothing left to sell — you could turn in early" : "no new customers will come in"}</small></div></div>
-      <div class="sheet-btns">
-        <button class="btn deny" id="door-no">${icon("close")} Keep open</button>
-        <button class="btn deal" id="door-yes">${icon("shop")} Close up</button>
-        ${earlyBtn}
       </div>
     `, "sheet-card");
-    if (spent) el.querySelector("#door-sleep").onclick = () => {
-      this.hud.hideSheet();
-      this._sleep();
-    };
     el.querySelector("#door-yes").onclick = () => {
       this.hud.hideSheet();
-      this.shop.setDoorsOpen(opening);
-      // shooing folks out on close so the leaves can actually swing shut behind
-      // them (otherwise a lingering shopper holds the doorway open indefinitely)
-      if (!opening) {
-        for (const cust of [...this.shop.customers]) {
-          if (cust.state !== "haggling") cust.state = "leave";
-        }
-      }
-      if (opening) {
-        // opening up brings the whole crowd at once — no stock, no crowd (and
-        // a crowd-less opening costs nothing; only a real rush burns the AP)
-        this.shop.beginWave();
-        if (this.shop.stockedCount() > 0) {
-          this._spendAP();
-          this.hud.toast(`${icon("shop")} Doors open — here comes the crowd!`);
-        } else {
-          this.hud.toast(`${icon("box")} Doors open… but bare tables draw no crowd`);
-        }
-      } else {
-        this.hud.toast(`${icon("shop")} Doors closed`);
-      }
-      if (opening) this._tutAdvance("open");
-      this._syncState();
+      this._openShopDoors();
     };
     el.querySelector("#door-no").onclick = () => this.hud.hideSheet();
   }
 
+  // Swing the shopfront open for the day's rush. The whole crowd arrives at
+  // once — but a crowd-less opening (bare tables) costs nothing; only a real
+  // rush burns an AP.
+  _openShopDoors() {
+    this.shop.setDoorsOpen(true);
+    this.shop.beginWave();
+    if (this.shop.stockedCount() > 0) {
+      this._spendAP();
+      this.hud.toast(`${icon("shop")} Doors open — here comes the crowd!`);
+    } else {
+      this.hud.toast(`${icon("box")} Doors open… but bare tables send folks right back out`);
+    }
+    this._tutAdvance("open");
+    this._syncState();
+  }
+
   // ================================================================ dungeon
   _delve() {
+    // the landlord's on his way in (or mid-tirade) — the cellar can wait
+    if (this._landlord || (this._landlordDue && this.phase === "night")) {
+      this.hud.toast(`${icon("alert")} Someone's at the door…`);
+      return;
+    }
+    // the guided first day is a one-way trip: once you've hauled up your first
+    // stock, the cellar stays shut so the FTUE can walk you through stocking and
+    // selling before you delve again
+    if (this.tutorial && this.tutorial !== "delve") {
+      this.hud.toast(`${icon("box")} Finish setting up shop before delving again`);
+      return;
+    }
     // the cellar's sealed while the shop's open for trade — close up first
     if (this.playerArea === "shop" && !this.shop.trapdoorOpen && !this.dungeon.active) {
       this.hud.toast(`${icon("shop")} Close the shop doors to open the cellar`);
@@ -1271,7 +1551,7 @@ export class Game {
     if (this.tutorial) {
       this.sewerHole = -1;
       if (!this.dungeon.active)
-        this.dungeon.generate(1, this.day * 1000 + Math.floor(Math.random() * 999));
+        this.dungeon.generate(1, this.day * 1000 + Math.floor(Math.random() * 999), true);
       this._enterDungeon();
       return;
     }
@@ -1280,10 +1560,11 @@ export class Game {
 
   _enterSewer() {
     this.playerArea = "sewer";
+    this.sewer.resetHoles(); // every visit, the mouths are barred again
     this.hud.showHearts(false);
     this.hud.showBag(true);
     this.hud.showGold(true);
-    this.hud.setGoldCorner(true);
+    this.hud.setGoldCorner(false); // the sewer's a safe hub — keep gold up top
     this.hud.showDebt(false);
     this.input.setDodgeVisible(false);
     if (this.hud.sheetOpen) this.hud.hideSheet();
@@ -1295,10 +1576,13 @@ export class Game {
     this.hud.banner(`${icon("hole")} The Sewers`, "shared tunnels — every hole hides its own dungeon", 2.4);
   }
 
-  // Confirm sheet at a sewer hole's lip, mirroring the stairs prompt.
+  // Confirm sheet at a sewer hole's lip, mirroring the stairs prompt. A barred
+  // hole first asks for the toll to unseal its grate; an open one offers the dive.
   _holePrompt(id) {
     if (this.hud.sheetOpen) return;
     const hole = this.sewer.holes[id];
+    if (!hole) return;
+    if (!hole.open) return this._unsealHolePrompt(id);
     this.paused = !this.net.connected;
     const el = this.hud.showSheet(`
       <div class="sheet-title"><span class="big-emoji">${icon("hole")}</span>
@@ -1317,6 +1601,51 @@ export class Game {
       this.paused = false;
       this.hud.hideSheet();
     };
+  }
+
+  // The Guild's toll to unseal a dungeon climbs with every one you crack open
+  // today — the first is cheap, each dive after that costs more.
+  _holeFee() {
+    return HOLE_FEE * (this._holesToday + 1);
+  }
+
+  // The grate over a hole is sealed — pay the Guild's toll to crank it open.
+  _unsealHolePrompt(id) {
+    const hole = this.sewer.holes[id];
+    const fee = this._holeFee();
+    const broke = this.gold < fee;
+    this.paused = !this.net.connected;
+    const el = this.hud.showSheet(`
+      <div class="sheet-title"><span class="big-emoji">${icon("hole")}</span>
+        <div><b>${hole.name}</b><br/><small>a grate bars the way — pay the Guild ${fee}g to unseal it</small></div></div>
+      <div class="sheet-btns">
+        <button class="btn deny" id="hole-no">${icon("close")} Not this one</button>
+        <button class="btn deal" id="hole-pay" ${broke ? "disabled" : ""}>${icon("coin")} Pay ${fee}g${broke ? ` (you have ${this.gold}g)` : ""}</button>
+      </div>
+    `, "sheet-card");
+    el.querySelector("#hole-pay").onclick = () => {
+      this.paused = false;
+      this.hud.hideSheet();
+      this._openHole(id);
+    };
+    el.querySelector("#hole-no").onclick = () => {
+      this.paused = false;
+      this.hud.hideSheet();
+    };
+  }
+
+  // Pay the toll and crank a hole's grate open. Host-authoritative wallet: a
+  // guest asks the host to spend, then everyone's lid swings up via "holeOpen".
+  _openHole(id) {
+    if (this.sewer.holes[id]?.open) return;
+    if (this.net.isGuest) return this.net.send({ t: "holeReq", id });
+    const fee = this._holeFee();
+    if (this.gold < fee) return this.hud.toast(`${icon("coin")} Not enough gold`);
+    this._spendGold(fee, this.player.position);
+    this._holesToday++;
+    this.sewer.openHole(id);
+    this.audio.stairs();
+    this.net.send({ t: "holeOpen", id });
   }
 
   // Jump into hole `id`. Its dungeon seed is derived from the hole and the UTC
@@ -1470,6 +1799,8 @@ export class Game {
 
   _returnHome() {
     this.playerArea = "shop";
+    this._floorDesync = false;
+    this._pendingLead = null;
     this.lobby.leave();
     this._depositBag();
     this.hud.showHearts(false);
@@ -1552,13 +1883,34 @@ export class Game {
     if (this.tutorial) return; // tutorial cellar is a single floor
     if (this.dungeon.floor >= MAX_FLOORS) return; // no deeper than the boss floor
     if (this.net.isGuest) {
-      this.net.send({ t: "stairsReq" });
+      // A floor behind the party? Take the stairs to catch up to where the
+      // host already went, rather than asking to open a fresh floor.
+      if (this._floorDesync && this._pendingLead) {
+        this._followLead();
+        return;
+      }
+      this.net.send({ t: "stairsReq", from: this.dungeon.floor });
       return;
     }
+    // host: advance our own floor and drop down. The partner isn't dragged with
+    // us — we flag this as a "lead" so a delving partner can follow at will.
     const n = this.dungeon.floor + 1;
     const seed = this.dungeon.seed;
     this.dungeon.generate(n, seed);
-    this.net.send({ t: "floor", n, seed });
+    this._hostDungeonFloor = n;
+    this.net.send({ t: "floor", n, seed, hole: this.sewerHole, lead: 1 });
+    this._enterDungeon();
+    this.engine.shake(0.2);
+  }
+
+  // Guest: catch up to the floor the host has already advanced to.
+  _followLead() {
+    const { n, seed, hole } = this._pendingLead;
+    if (hole != null) this.sewerHole = hole;
+    this.dungeon.generate(n, seed);
+    this._hostDungeonFloor = n;
+    this._floorDesync = false;
+    this._pendingLead = null;
     this._enterDungeon();
     this.engine.shake(0.2);
   }
@@ -1596,8 +1948,13 @@ export class Game {
     this.net.send({ t: "gateOpen" });
     this.audio.stairs();
     this.engine.shake(0.3);
-    this.hud.banner(`${icon("skull")} The seal breaks…`, "the Ogre King awakens", 2.6);
+    this._bossAwakenBanner();
     this._enterBossRoom();
+  }
+
+  // "The seal breaks…" with this hole's boss in the subtitle (host + guests)
+  _bossAwakenBanner() {
+    this.hud.banner(`${icon("skull")} The seal breaks…`, bossDefFor(this.sewerHole).awaken, 2.6);
   }
 
   // Unlocking the gate pulls whoever's delving straight into the arena — the
@@ -1615,14 +1972,16 @@ export class Game {
 
   // The boss hit half health: phase two (minions + faster patterns, see dungeon)
   onBossEnraged() {
-    this.hud.banner(`${icon("warning")} The Ogre King is enraged!`, "faster, angrier — and it brought friends", 2.4);
+    const name = this.dungeon.boss?.def?.name ?? bossDefFor(this.sewerHole).name;
+    this.hud.banner(`${icon("warning")} ${name} is enraged!`, "faster, angrier — and it brought friends", 2.4);
   }
 
   // The boss is down: fanfare, a shower of sparks, and the treasure it guarded.
   onBossDefeated(pos = null) {
     this.audio.victory();
     this.engine.shake(0.45);
-    this.hud.banner(`${icon("crown")} The Cellar Boss falls!`, "grab the spoils, then take the portal home", 3.4);
+    const name = this.dungeon.boss?.def?.name ?? bossDefFor(this.sewerHole).name;
+    this.hud.banner(`${icon("crown")} ${name} falls!`, "grab the spoils, then take the portal home", 3.4);
     if (pos) {
       this.particles.burst(_v.copy(pos).setY(1), { color: 0xffe08a, n: 30, speed: 5, up: 2.2, life: 1.1, size: 1.3 });
       // a way out opens where the boss fell — step in to head straight home
@@ -1671,6 +2030,11 @@ export class Game {
     this.hud.setGoldCorner(this.playerArea === "dungeon");
     this.hud.showDebt(this.playerArea !== "dungeon");
     this.input.setDodgeVisible(this.playerArea === "dungeon");
+    // the debt chip doubles as the door to the Guild's rent ledger
+    this.hud.debtChip.onclick = () => {
+      if (this.hud.sheetOpen || this.gameOver || this.playerArea === "dungeon") return;
+      this._showRentSheet();
+    };
     document.getElementById("coop-btn").onclick = () => this._friendSheet();
     document.getElementById("pause-btn").onclick = () => this._toggleEscMenu();
     // set the mute button to match saved preference
@@ -1696,6 +2060,41 @@ export class Game {
     document.addEventListener("fullscreenchange", sync);
     document.addEventListener("webkitfullscreenchange", sync);
     this.fsGate.addEventListener("click", () => requestFullscreen());
+    sync();
+  }
+
+  // ------------------------------------------------------------ landscape lock
+  // On touch the game only plays in landscape, and we never ask the player to
+  // tilt: we just render landscape directly. First choice is the real Screen
+  // Orientation lock (Android/Chrome, once fullscreen) — the browser rotates and
+  // all coordinate math stays native. Where that isn't available (notably iOS
+  // Safari) we fall back to CSS-rotating #app / #hud 90°, flipping `viewport`
+  // into its swapped-dimension mode so the renderer, HUD projection and joystick
+  // all follow the rotated layout. Desktop (mouse) is never touched.
+  _initLandscapeLock() {
+    if (!this.input.isTouch) return;
+    const so = screen.orientation;
+    const tryLock = () => {
+      if (so && so.lock) so.lock("landscape").catch(() => {});
+    };
+    // A native lock only takes once we're fullscreen, so retry on entry too.
+    document.addEventListener("fullscreenchange", tryLock);
+    document.addEventListener("webkitfullscreenchange", tryLock);
+    tryLock();
+
+    const mq = matchMedia("(orientation: portrait)");
+    const sync = () => {
+      const portrait = mq.matches; // still portrait ⇒ the lock didn't take
+      document.documentElement.classList.toggle("force-landscape", portrait);
+      viewport.rotated = portrait;
+      this.engine.resize();
+    };
+    // matchMedia change fires on rotation; the extras catch mobile browsers that
+    // only settle the viewport a beat after the orientation event lands.
+    if (mq.addEventListener) mq.addEventListener("change", sync);
+    else mq.addListener(sync);
+    window.addEventListener("orientationchange", () => setTimeout(sync, 120));
+    window.addEventListener("resize", sync);
     sync();
   }
 
@@ -1827,6 +2226,9 @@ export class Game {
     if (!it?.heal) return;
     // stagger so several heals in one burst pop one after another, not on top
     this._spawnUseFx(itemId, it.heal, this._useFx.length * 0.28);
+    // mirror the over-head flourish on the partner's screen (visual only —
+    // the heal itself is local to whoever quaffed it)
+    this.net.send({ t: "useFx", item: itemId });
     if (this.net.isGuest) {
       this.net.send({ t: "useReq", idx });
       // optimistic local removal so the list stays in sync until the host echoes
@@ -1929,6 +2331,41 @@ export class Game {
     }
   }
 
+  // The partner's over-head "used an item" flourish. Purely cosmetic: it rides
+  // the remote creature the same way _updateUseFx rides the local player, but
+  // never touches HP (each player heals their own hearts).
+  _spawnRemoteUseFx(itemId) {
+    if (!this.remote) return;
+    const mesh = itemSprite(itemId, USE_FX_SIZE);
+    mesh.scale.setScalar(0.0001);
+    mesh.visible = false;
+    this.engine.scene.add(mesh);
+    this._remoteUseFx.push({ mesh, t: -this._remoteUseFx.length * 0.28 });
+  }
+
+  _updateRemoteUseFx(dt) {
+    if (!this._remoteUseFx.length) return;
+    const c = this.remote?.creature;
+    for (const fx of [...this._remoteUseFx]) {
+      if (!c) { fx.mesh.removeFromParent(); this._remoteUseFx.splice(this._remoteUseFx.indexOf(fx), 1); continue; }
+      fx.t += dt;
+      if (fx.t < 0) continue;
+      fx.mesh.visible = true;
+      const k = fx.t / USE_FX_DUR;
+      const baseY = c.height + 0.35;
+      let scale, y;
+      if (k < 0.25) { scale = _easeOutBack(k / 0.25); y = baseY; }
+      else if (k < 0.6) { scale = 1; y = baseY + Math.sin((fx.t - 0.25 * USE_FX_DUR) * 14) * 0.05; }
+      else { const a = Math.min(1, (k - 0.6) / 0.4); scale = 1 - a; y = lerp(baseY, c.height * 0.5, a); }
+      fx.mesh.position.set(c.position.x, y, c.position.z);
+      fx.mesh.scale.setScalar(USE_FX_SIZE * Math.max(0.0001, scale));
+      if (k >= 1) {
+        fx.mesh.removeFromParent();
+        this._remoteUseFx.splice(this._remoteUseFx.indexOf(fx), 1);
+      }
+    }
+  }
+
   _dropItem(idx) {
     const itemId = this.inventory[idx];
     if (itemId == null) return;
@@ -1962,7 +2399,7 @@ export class Game {
     const slotIdx = this.shop.slots.indexOf(slot);
     const el = this.hud.showSheet(`
       <div class="sheet-title"><span class="big-emoji">${icon("box")}</span>
-        <div><b>Place on this table</b><br/><small>tap a storeroom item to put it up for sale</small></div>
+        <div><b>Place on this table</b></div>
         <button class="icon-btn" id="bag-close">${icon("close")}</button></div>
       <div class="inv-grid">${this._stashRows()}</div>
     `, "sheet-card");
@@ -2340,6 +2777,15 @@ export class Game {
       this.remote.creature.dispose();
       this.remote = null;
     }
+    // with the last client gone, shut up shop right away — no lingering rush to
+    // keep the doors open for a partner who's no longer here. Existing shoppers
+    // are sent packing so the doors can swing shut behind them.
+    if (this.net.isHost && this.shop.doorsOpen) {
+      this.shop.setDoorsOpen(false);
+      for (const cust of [...this.shop.customers]) {
+        if (cust.state !== "haggling") cust.state = "leave";
+      }
+    }
   }
 
   _spawnRemote() {
@@ -2352,6 +2798,7 @@ export class Game {
       creature: c,
       buf: [{ t: performance.now() / 1000, x: 1.5, z: 3, h: 0 }],
       area: "shop",
+      floor: -1,
       dead: false,
       wasAtk: false,
     };
@@ -2361,6 +2808,9 @@ export class Game {
     const r = this.remote;
     if (!r) return;
     const c = r.creature;
+    // hide the partner while they're off on a different dungeon floor — their
+    // world coords would otherwise overlap ours (floors share a footprint)
+    c.visible = !(r.area === "dungeon" && this.playerArea === "dungeon" && r.floor >= 0 && r.floor !== this.dungeon.floor);
     // Positions arrive as ~11 Hz snapshots; render 150 ms in the past so we
     // always sit between two snapshots and glide instead of chasing the
     // newest one (which reads as move-stop-move jitter).
@@ -2429,6 +2879,14 @@ export class Game {
     }
   }
 
+  // Guest-side: are we standing on the host's live/simulated floor? When we've
+  // lagged a floor behind or pushed ahead onto a quiet solo floor, the host's
+  // enemy/drop/projectile broadcasts are for a floor we're not on, so we ignore
+  // them rather than injecting phantom content into our floor.
+  _onLiveFloor() {
+    return !this.net.isGuest || this.dungeon.floor === this._hostDungeonFloor;
+  }
+
   onNetMessage(m) {
     const D = this.dungeon;
     switch (m.t) {
@@ -2439,9 +2897,22 @@ export class Game {
         r.buf.push({ t: performance.now() / 1000, x: m.x, z: m.z, h: m.h });
         if (r.buf.length > 12) r.buf.shift();
         r.area = m.area;
+        if (typeof m.fl === "number") r.floor = m.fl;
         r.dead = !!m.dead;
         if (m.atk && !r.wasAtk) r.creature.attack();
         r.wasAtk = !!m.atk;
+        break;
+      }
+      case "atk": {
+        // partner swung: play their arm animation + the crescent swoosh at
+        // their feet, sized up for a finisher just like the local swing
+        const r = this.remote;
+        if (!r) return;
+        r.creature.attack();
+        const h = typeof m.h === "number" ? m.h : r.creature.heading;
+        _v.copy(r.creature.position).setY(0.62);
+        this.remoteSlash.play(_v, h, m.finisher ? 1.5 : 1);
+        if (r.area === this.playerArea) this.audio.swingCombo(m.finisher ? 2 : 0);
         break;
       }
       case "welcome": {
@@ -2456,6 +2927,7 @@ export class Game {
         if (m.floor > 0) {
           if (m.hole != null) this.sewerHole = m.hole;
           D.generate(m.floor, m.seed);
+          this._hostDungeonFloor = m.floor;
           if (m.gateOpen) D.openGate();
         }
         break;
@@ -2518,11 +2990,20 @@ export class Game {
       }
       case "stairsReq": {
         if (this.net.isGuest) return;
-        if (D.floor >= MAX_FLOORS) return; // boss floor is the deepest
+        const from = typeof m.from === "number" ? m.from : D.floor;
+        if (from >= MAX_FLOORS) return; // boss floor is the deepest
+        // If we're delving too, we can't advance the live dungeon without
+        // yanking ourselves along — so we send the guest on ahead to a quiet
+        // solo floor while we hold our ground.
+        if (this.playerArea === "dungeon") {
+          this.net.send({ t: "floor", n: from + 1, seed: D.seed, hole: this.sewerHole, solo: 1 });
+          break;
+        }
+        // minding the shop: the live floor advances and the guest rides along
         const n = D.floor + 1;
         D.generate(n, D.seed);
+        this._hostDungeonFloor = n;
         this.net.send({ t: "floor", n, seed: D.seed, hole: this.sewerHole });
-        if (this.playerArea === "dungeon") this._enterDungeon();
         break;
       }
       case "gateReq": {
@@ -2534,7 +3015,7 @@ export class Game {
           this.net.send({ t: "gateOpen" });
           this.audio.stairs();
           this.engine.shake(0.3);
-          this.hud.banner(`${icon("skull")} The seal breaks…`, "the Ogre King awakens", 2.6);
+          this._bossAwakenBanner();
           this._enterBossRoom();
         }
         break;
@@ -2545,8 +3026,26 @@ export class Game {
         D.openGate();
         this.audio.stairs();
         this.engine.shake(0.25);
-        this.hud.banner(`${icon("skull")} The seal breaks…`, "the Ogre King awakens", 2.6);
+        this._bossAwakenBanner();
         this._enterBossRoom();
+        break;
+      }
+      case "holeReq": {
+        // guest paid to unseal a sewer hole — host owns the wallet
+        if (this.net.isGuest) return;
+        const fee = this._holeFee();
+        if (this.gold >= fee && !this.sewer.holes[m.id]?.open) {
+          this._spendGold(fee, this.player.position);
+          this._holesToday++;
+          this.sewer.openHole(m.id);
+          this.net.send({ t: "holeOpen", id: m.id });
+        }
+        break;
+      }
+      case "holeOpen": {
+        // a hole's grate is open now — swing our copy of the lid up too
+        this.sewer.openHole(m.id);
+        this.audio.stairs();
         break;
       }
       case "hit": {
@@ -2559,6 +3058,7 @@ export class Game {
         if (this.net.isGuest) return;
         const drop = D.drops.find((d) => d.id === m.id);
         if (drop && this.inventory.length < this.invCap) {
+          this._floatPickup(drop); // show what the partner just grabbed
           D.takeDrop(drop);
           this.inventory.push(drop.item);
           this._syncInv();
@@ -2690,7 +3190,32 @@ export class Game {
         if (!this.net.isGuest) return;
         const wasIn = this.playerArea === "dungeon";
         if (m.hole != null) this.sewerHole = m.hole;
+
+        // "solo": the host stayed put and waved us on ahead. We lead into a
+        // quiet floor the host isn't simulating; the live floor is unchanged.
+        if (m.solo) {
+          D.generate(m.n, m.seed);
+          this._floorDesync = false;
+          this._pendingLead = null;
+          this._enterDungeon();
+          break;
+        }
+
+        // any non-solo floor message is the host's live/simulated floor
+        this._hostDungeonFloor = m.n;
+
+        // "lead": the partner descended mid-run. Don't rip us off our floor —
+        // stay put on our (now quiet) floor and offer to follow via the stairs.
+        if (m.lead && wasIn && !this._wantDelve) {
+          this._floorDesync = true;
+          this._pendingLead = { n: m.n, seed: m.seed, hole: this.sewerHole };
+          this.hud.banner(`${icon("arrowDown")} Your friend went deeper`, "take the stairs to follow", 2.2);
+          break;
+        }
+
         D.generate(m.n, m.seed);
+        this._floorDesync = false;
+        this._pendingLead = null;
         if (wasIn || this._wantDelve) this._enterDungeon();
         this._wantDelve = false;
         break;
@@ -2698,10 +3223,12 @@ export class Game {
       case "dungeonReset":
         D.dispose();
         this.sewerHole = -1;
+        this._floorDesync = false;
+        this._pendingLead = null;
         if (this.playerArea === "dungeon") this._returnHome();
         break;
       case "eSnap": {
-        if (!this.net.isGuest) return;
+        if (!this.net.isGuest || !this._onLiveFloor()) return;
         for (const [id, kind, seed, tier, x, z, h, hp] of m.list) {
           let e = D.enemies.find((v) => v.id === id);
           if (!e && D.active) e = D.spawnEnemy(kind, seed, tier, x, z, id, hp);
@@ -2724,7 +3251,11 @@ export class Game {
         e.ringRadius = m.r;
         e.chargeX = m.dx;
         e.chargeZ = m.dz;
-        e.creature.setGlow(m.atk === "charge" ? [0.9, 0.45, 0.05] : m.atk === "burst" ? [0.55, 0.15, 0.8] : [0.95, 0.08, 0.05]);
+        // signature-attack ground marks (pounce landing / blink ripple / deluge zones)
+        e.markX = m.px || null;
+        e.markZ = m.pz || null;
+        e.delugePts = m.pts ?? null;
+        e.creature.setGlow(BOSS_ATK_GLOW[m.atk] ?? [0.95, 0.08, 0.05]);
         break;
       }
       case "eHurt": {
@@ -2760,17 +3291,22 @@ export class Game {
         break;
       }
       case "drop":
-        if (this.net.isGuest && D.active) D.spawnDrop(m.item, m.x, m.z, m.id);
+        if (this.net.isGuest && D.active && this._onLiveFloor()) D.spawnDrop(m.item, m.x, m.z, m.id);
         break;
       case "proj":
         // guests spawn a visual-only orb; the host owns the damage collision
-        if (this.net.isGuest && D.active)
+        if (this.net.isGuest && D.active && this._onLiveFloor())
           D.projectiles.spawn(m.x, m.z, m.vx, m.vz, { color: m.color, dmg: m.dmg, radius: m.radius, life: m.life });
         break;
       case "dropTake": {
         if (!this.net.isGuest) return;
         const drop = D.drops.find((d) => d.id === m.id);
-        if (drop) D.takeDrop(drop);
+        // a drop still present here means the host grabbed it (our own pickups
+        // are removed optimistically) — surface what the partner took
+        if (drop) {
+          this._floatPickup(drop);
+          D.takeDrop(drop);
+        }
         break;
       }
       case "chest": {
@@ -2789,6 +3325,19 @@ export class Game {
       case "pHurt":
         this.applyPlayerDamage(m.dmg, this.remote?.creature.position ?? null);
         break;
+      case "useFx": {
+        // partner quaffed a consumable: mirror the over-head flourish + sparkle
+        if (!this.remote || ITEMS[m.item] == null) return;
+        this._spawnRemoteUseFx(m.item);
+        if (this.remote.area === this.playerArea) {
+          this.audio.heal();
+          this.particles.burst(
+            _v.copy(this.remote.creature.position).setY(this.remote.creature.height * 0.6),
+            { color: 0x7be08a, n: 12, speed: 2.6, up: 1.6, life: 0.5, size: 1.0 }
+          );
+        }
+        break;
+      }
     }
   }
 
@@ -2796,13 +3345,8 @@ export class Game {
     const slot = this.shop.slots[i];
     if (!slot) return;
     if (slot.item) this.shop.unstockSlot(slot);
-    if (item) {
-      slot.item = item;
-      slot.mesh = itemSprite(item);
-      slot.mesh.position.copy(slot.pos);
-      slot.mesh.scale.setScalar(1.4);
-      this.shop.group.add(slot.mesh);
-    }
+    // stockItem handles the sprite + the fancy-table glow shader
+    if (item) this.shop.stockItem(item, slot);
   }
 
   _syncState() {

@@ -1,6 +1,7 @@
 // Renderer / scene / camera / main loop. Mobile-first: capped pixel ratio,
 // no shadow maps (blob shadows instead), single hemisphere + dir light.
 import * as THREE from "three";
+import { viewport } from "./viewport.js";
 
 export class Engine {
   constructor(mountEl) {
@@ -51,8 +52,8 @@ export class Engine {
   }
 
   resize() {
-    const w = window.innerWidth;
-    const h = window.innerHeight;
+    const w = viewport.w;
+    const h = viewport.h;
     this.renderer.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();

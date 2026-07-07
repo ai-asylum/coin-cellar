@@ -1,14 +1,13 @@
-// Unified input: WASD / arrows to move, MOUSE to aim + click to attack on
-// desktop; dynamic virtual joystick + context action button on touch.
+// Unified input: WASD / arrows to move (facing follows movement) + click to
+// attack on desktop; dynamic virtual joystick + context action button on touch.
 // The game reads:
 //   input.move        THREE.Vector2 (len <= 1)
 //   input.actionEdge  true for the frame the action was pressed
-//   input.pointer     THREE.Vector2 mouse in NDC (-1..1), for aim raycasts
-//   input.aimActive   true when the mouse is driving the aim (desktop)
 //   input.onKey       optional (code) => void callback for keyboard shortcuts
 //   input.setActionLabel("swords") to relabel the context button (icon name)
 import * as THREE from "three";
 import { icon } from "./icons.js";
+import { viewport } from "./viewport.js";
 
 export class Input {
   constructor(hudEl) {
@@ -23,9 +22,6 @@ export class Input {
     this.interactEdge = false; // true for the frame the interact key was pressed
     this.isTouch = matchMedia("(pointer: coarse)").matches;
 
-    // mouse aim (desktop): pointer in normalized device coords, aim on until touch
-    this.pointer = new THREE.Vector2(0, 0);
-    this.aimActive = !this.isTouch;
     this.onKey = null; // set by the game to receive shortcut keydowns
 
     window.addEventListener("keydown", (e) => {
@@ -114,15 +110,10 @@ export class Input {
     area.addEventListener("touchend", (e) => this._touchEnd(e));
     area.addEventListener("touchcancel", (e) => this._touchEnd(e));
 
-    // --- mouse aim + click-to-attack (desktop). The HUD sits above the
-    // canvas with pointer-events:none, so clicks on buttons never reach here.
-    window.addEventListener("mousemove", (e) => {
-      this.aimActive = true;
-      this.pointer.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
-    });
+    // --- click-to-attack (desktop). The HUD sits above the canvas with
+    // pointer-events:none, so clicks on buttons never reach here.
     area.addEventListener("mousedown", (e) => {
       if (e.button !== 0) return; // left click only
-      this.aimActive = true;
       this._actionQueued = true;
       this.actionHeld = true;
     });
@@ -131,14 +122,9 @@ export class Input {
     });
     // right mouse button = dodge / roll
     area.addEventListener("mousedown", (e) => {
-      if (e.button === 2) {
-        this.aimActive = true;
-        this._dodgeQueued = true;
-      }
+      if (e.button === 2) this._dodgeQueued = true;
     });
     area.addEventListener("contextmenu", (e) => e.preventDefault());
-    // first touch hands control back to the virtual stick / on-screen button
-    window.addEventListener("touchstart", () => (this.aimActive = false), { passive: true });
 
     if (!this.isTouch) {
       this.stick.style.display = "none";
@@ -152,6 +138,13 @@ export class Input {
       this.actionBtn.innerHTML = icon(name);
     }
     this.actionBtn.classList.toggle("pulse", show && name !== "swords");
+  }
+
+  // Show/hide the touch dodge/roll button. Rolling only exists in the dungeon,
+  // so the shop hides it entirely. Desktop never shows it.
+  setDodgeVisible(show) {
+    if (!this.isTouch) return;
+    this.dodgeBtn.style.display = show ? "flex" : "none";
   }
 
   // Show/hide the touch interact button and label it with the current context
@@ -169,12 +162,15 @@ export class Input {
     for (const t of e.changedTouches) {
       if (this._joyId === null) {
         e.preventDefault();
+        // The joystick lives inside #hud, which is CSS-rotated in forced
+        // landscape, so we place/measure it in the rotated layout's local space.
+        const p = viewport.toLocal(t.clientX, t.clientY);
         this._joyId = t.identifier;
-        this._joyOrigin = { x: t.clientX, y: t.clientY };
+        this._joyOrigin = { x: p.x, y: p.y };
         this._joyVec = { x: 0, y: 0 };
         this.stick.style.display = "block";
-        this._joyBase.style.transform = `translate(${t.clientX}px, ${t.clientY}px)`;
-        this._joyKnob.style.transform = `translate(${t.clientX}px, ${t.clientY}px)`;
+        this._joyBase.style.transform = `translate(${p.x}px, ${p.y}px)`;
+        this._joyKnob.style.transform = `translate(${p.x}px, ${p.y}px)`;
       }
     }
   }
@@ -183,8 +179,9 @@ export class Input {
     for (const t of e.changedTouches) {
       if (t.identifier === this._joyId) {
         e.preventDefault();
-        const dx = t.clientX - this._joyOrigin.x;
-        const dy = t.clientY - this._joyOrigin.y;
+        const p = viewport.toLocal(t.clientX, t.clientY);
+        const dx = p.x - this._joyOrigin.x;
+        const dy = p.y - this._joyOrigin.y;
         const len = Math.hypot(dx, dy);
         const max = 52;
         const k = len > max ? max / len : 1;

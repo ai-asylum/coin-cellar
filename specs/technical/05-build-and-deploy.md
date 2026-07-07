@@ -66,6 +66,29 @@ The `dist/` folder is a plain static site. Host it on anything:
   static file server.
 - No environment variables, no secrets, no build-time backend.
 
+### Current deployment — Vercel
+
+The game is deployed on **Vercel** and lives at:
+
+- **Production:** <https://coin-cellar.vercel.app/>
+
+Details:
+
+- **Project name:** `coin-cellar` (Vercel account/team scope). The local checkout
+  is linked to it via `.vercel/project.json` (holds the `projectId` / `orgId`).
+- **Production domain:** `coin-cellar.vercel.app` is the project's single
+  production domain, so every production deploy is auto-aliased to it. The legacy
+  `shop-slop.vercel.app` domain (from the project's former name) has been removed
+  and must **not** be re-added.
+- **Ship a release:**
+
+```bash
+vercel --prod
+```
+
+  Vercel runs `npm run build` and serves `dist/`. On success it aliases the new
+  deployment to `coin-cellar.vercel.app` automatically — no manual alias step.
+
 ### Testing on a phone locally
 
 Since the game is mobile-first, test touch controls on a real device:

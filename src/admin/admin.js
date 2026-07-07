@@ -7,7 +7,8 @@
 import * as THREE from "three";
 
 import { ITEMS, LOOT_BY_TIER, itemSprite } from "../game/items.js";
-import { ENEMY_KINDS, FLOOR_MIX } from "../game/dungeon.js";
+import { ENEMY_KINDS, FLOOR_MIX, BOSSES, bossDefFor } from "../game/dungeon.js";
+import { HOLE_DEFS } from "../game/sewer.js";
 import { ARCHETYPES } from "../game/shop.js";
 import { Creature } from "../chargen/creature.js";
 import { BlockyCreature, variantForSeed } from "../chargen/blocky.js";
@@ -61,8 +62,12 @@ function card(entry) {
   return `<article class="card">${head}${visual}${desc}${stats}${sw}</article>`;
 }
 
+// Entries are cards, except `{ section, icon? }` markers which render as a
+// full-width divider so a tab can group its cards into categories.
 function grid(entries) {
-  return `<div class="grid">${entries.map(card).join("")}</div>`;
+  return `<div class="grid">${entries
+    .map((e) => (e.section ? `<div class="grid-section">${e.icon || ""}<span>${esc(e.section)}</span></div>` : card(e)))
+    .join("")}</div>`;
 }
 
 // --- shared WebGL renderer -------------------------------------------------
@@ -109,7 +114,9 @@ class View {
     this.scene.add(this.pivot);
     this.pivot.add(model);
 
-    // center on the pivot and frame the camera to the model's bounds
+    // center on the pivot and frame the camera to the model's bounds — after
+    // one anim tick, so floaters (wisps) are framed at hover height, not rest
+    if (animate && typeof model.update === "function") model.update(0.016, 0);
     const box = new THREE.Box3().setFromObject(model);
     const size = box.getSize(new THREE.Vector3());
     const center = box.getCenter(new THREE.Vector3());
@@ -217,11 +224,20 @@ const ENEMY_META = {
   slime: { name: "Slime", icon: icon("jelly"), desc: "A wobbling gel blob that hops toward intruders. Slow, but they come in numbers." },
   goblin: { name: "Goblin", icon: icon("goblin"), desc: "A pointy-eared humanoid raider; grows horns and toughens as the floors deepen." },
   wisp: { name: "Wisp", icon: icon("ghost"), desc: "A darting arcane mote — fast and twitchy, floating just off the floor." },
+  archer: { name: "Archer", icon: icon("goblin"), desc: "A hooded, robed kiter — hangs back at range and looses fast straight bolts." },
   brute: { name: "Brute", icon: icon("ogre"), desc: "A hulking horned bruiser. Slow but hits twice as hard and soaks up a beating." },
 };
 
 // Deterministic seed per kind so the preview looks the same on every reload.
-const ENEMY_SEED = { skitter: 7, slime: 12, goblin: 3, wisp: 9, brute: 5 };
+const ENEMY_SEED = { skitter: 7, slime: 12, goblin: 3, wisp: 9, archer: 4, brute: 5 };
+
+// Card copy for the per-hole bosses (index matches BOSSES / Sewer.holes).
+const BOSS_META = [
+  { icon: icon("spider"), desc: "The Rat Warren's matriarch — a giant rust skitter that leads with room-crossing charges and calls her brood when enraged." },
+  { icon: icon("jelly"), desc: "A mountain of waterlogged ooze in the Flooded Deep — ponderous, hugely tough, and drowns the arena in radial orb bursts." },
+  { icon: icon("ogre"), desc: "The classic ashen ogre, throned in the Bone Hollow ossuary — the original arena boss, wide slams and heavy charges." },
+  { icon: icon("ghost"), desc: "A swollen marsh-light ruling the Gloom Drain — nimble, quick to telegraph, spitting fast dense orb rings." },
+];
 
 function enemyFloors(kind) {
   const floors = [];
@@ -232,28 +248,58 @@ function enemyFloors(kind) {
 }
 
 function buildEnemies() {
-  return Object.entries(ENEMY_KINDS).map(([kind, def]) => {
-    const meta = ENEMY_META[kind] || { name: kind, icon: icon("unknown"), desc: "" };
-    const badges = [];
-    if (kind === "brute") badges.push({ text: "BRUISER", kind: "boss" });
-    if (kind === "wisp") badges.push({ text: "FAST", kind: "ranged" });
-    return {
-      title: meta.name,
-      id: kind,
+  // regular floor monsters (the base `boss` kind is covered by the Bosses
+  // category below — one card per sewer hole's arena keeper)
+  const cards = Object.entries(ENEMY_KINDS)
+    .filter(([kind]) => kind !== "boss")
+    .map(([kind, def]) => {
+      const meta = ENEMY_META[kind] || { name: kind, icon: icon("unknown"), desc: "" };
+      const badges = [];
+      if (kind === "brute") badges.push({ text: "BRUISER", kind: "boss" });
+      if (kind === "wisp") badges.push({ text: "FAST", kind: "ranged" });
+      return {
+        title: meta.name,
+        id: kind,
+        icon: meta.icon,
+        desc: meta.desc,
+        badges,
+        visual: `<div class="model3d" data-kind="enemy" data-enemy="${kind}"></div>`,
+        stats: [
+          ["HP", def.hp],
+          ["Damage", def.dmg],
+          ["Speed", def.speed + " m/s"],
+          ["Aggro range", def.aggro + " m"],
+          ["Drops loot", `${def.gold[0]}–${def.gold[1]}g worth`],
+          ["Floors", enemyFloors(kind).join(", ")],
+        ],
+      };
+    });
+
+  cards.push({ section: "Bosses — one per sewer hole", icon: icon("crown") });
+  BOSSES.forEach((_, i) => {
+    const def = bossDefFor(i);
+    const meta = BOSS_META[i] ?? { icon: icon("unknown"), desc: "" };
+    const hole = HOLE_DEFS[i]?.name ?? `Hole ${i}`;
+    cards.push({
+      title: def.name,
+      id: `boss · ${hole.toLowerCase()}`,
       icon: meta.icon,
       desc: meta.desc,
-      badges,
-      visual: `<div class="model3d" data-kind="enemy" data-enemy="${kind}"></div>`,
+      badges: [{ text: "BOSS", kind: "boss" }],
+      visual: `<div class="model3d" data-kind="boss" data-hole="${i}"></div>`,
       stats: [
         ["HP", def.hp],
         ["Damage", def.dmg],
         ["Speed", def.speed + " m/s"],
-        ["Aggro range", def.aggro + " m"],
-        ["Drops loot", `${def.gold[0]}–${def.gold[1]}g worth`],
-        ["Floors", enemyFloors(kind).join(", ")],
+        ["Base windup", def.windup + "s"],
+        ["Ranged rotation", (def.rotation ?? ["charge", "burst"]).join(" → ")],
+        ["Burst orbs", `${def.burstN ?? 8} (+4 enraged)`],
+        ["Enrage pack", (def.minions ?? ["skitter", "skitter", "slime"]).join(", ")],
+        ["Lair", `${hole} — final-floor arena`],
       ],
-    };
+    });
   });
+  return cards;
 }
 
 function buildCustomers() {
@@ -350,6 +396,10 @@ function mountPreviews(root) {
         const def = ENEMY_KINDS[k];
         const creature = new Creature(def.make(ENEMY_SEED[k] ?? 1, 0));
         views.push(new View(el, creature, { animate: true, disposeModel: true }));
+      } else if (kind === "boss") {
+        const def = bossDefFor(Number(el.dataset.hole));
+        const creature = new Creature(def.make(54321, 2));
+        views.push(new View(el, creature, { animate: true, disposeModel: true }));
       } else if (kind === "blocky" || kind === "customer") {
         const variant = kind === "customer" ? variantForSeed(Number(el.dataset.seed)) : el.dataset.variant;
         const height = el.dataset.height ? Number(el.dataset.height) : 1.6;
@@ -382,7 +432,7 @@ function render(tabId) {
 
   const entries = tab.build();
   const body = document.getElementById("admin-body");
-  const n = entries.length;
+  const n = entries.filter((e) => !e.section).length;
   body.innerHTML = `
     <div class="section-head">
       <h2>${icon(tab.icon)} ${esc(tab.label)}</h2>

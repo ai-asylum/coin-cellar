@@ -3,8 +3,11 @@
 import * as THREE from "three";
 import { portraitDataURL } from "../chargen/portrait.js";
 import { icon, itemIcon, ICONS } from "../core/icons.js";
+import { viewport } from "../core/viewport.js";
 
 const _v = new THREE.Vector3();
+const _gdir = new THREE.Vector3();
+const _gfwd = new THREE.Vector3();
 
 export class HUD {
   constructor(root, engine) {
@@ -45,6 +48,12 @@ export class HUD {
       <div id="portraits"></div>
       <div id="hurt-flash"></div>
       <div id="sheet" class="hidden"></div>
+      <div id="fs-gate" class="hidden">
+        <div class="fs-gate-card">
+          <div class="fs-gate-ic">${icon("play")}</div>
+          <div class="fs-gate-txt">Tap to play fullscreen</div>
+        </div>
+      </div>
     `;
     this.root = root;
     this.goldNum = root.querySelector("#gold-num");
@@ -181,6 +190,11 @@ export class HUD {
     this.debtChip.classList.toggle("urgent", urgent);
   }
 
+  // Rent only matters back at the shop — hide the debt chip while delving.
+  showDebt(visible) {
+    this.debtChip.classList.toggle("hidden", !visible);
+  }
+
   setHearts(hp, max) {
     let s = "";
     for (let i = 0; i < max; i++) s += icon(i < hp ? "heart" : "heartEmpty");
@@ -203,10 +217,20 @@ export class HUD {
     this.goldChip.classList.toggle("gold-corner", corner);
   }
 
-  // The backpack button is a dungeon-only affordance.
+  // The backpack button is a dungeon-only affordance. Its visibility is also
+  // suppressed while the bag panel itself is open (see _applyBagBtn).
   showBag(visible) {
+    this._bagWanted = visible;
+    this._applyBagBtn();
+  }
+
+  // Hide the button while the bag panel is up (it would sit right on top of it),
+  // otherwise honour the dungeon-only wanted state.
+  _applyBagBtn() {
     const btn = this.root.querySelector("#bag-btn");
-    if (btn) btn.classList.toggle("hidden", !visible);
+    if (!btn) return;
+    const bagOpen = this.sheetEl.classList.contains("bag-sheet");
+    btn.classList.toggle("hidden", !this._bagWanted || bagOpen);
   }
 
   banner(main, sub = "", dur = 2.2) {
@@ -252,6 +276,9 @@ export class HUD {
       this.bossTelNameEl.textContent =
         atk === "charge" ? "⚠ Charge — sidestep!" :
         atk === "burst" ? "⚠ Orb Burst — weave the gaps!" :
+        atk === "pounce" ? "⚠ Pounce — off the mark!" :
+        atk === "deluge" ? "⚠ Deluge — clear the circles!" :
+        atk === "blink" ? "⚠ Blink — it's beside you!" :
         "⚠ Slam — back away!";
     }
     this.bossTelFillEl.style.width = (Math.max(0, Math.min(1, frac)) * 100).toFixed(1) + "%";
@@ -335,6 +362,43 @@ export class HUD {
     }
   }
 
+  /**
+   * A single loot sprite arcs from a 3D world point (the drop) across the
+   * screen and into the backpack button, which gives a little pop on arrival.
+   * Mirrors flyCoins but for a picked-up item.
+   */
+  flyToBag(worldPos, iconHtml) {
+    const start = this._project(worldPos);
+    const bag = this.root.querySelector("#bag-btn");
+    if (!start || !bag || bag.classList.contains("hidden")) return;
+    const rect = bag.getBoundingClientRect();
+    const end = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    const el = document.createElement("div");
+    el.className = "item-fly";
+    el.innerHTML = iconHtml;
+    el.style.left = start.x + "px";
+    el.style.top = start.y + "px";
+    this.floatiesEl.appendChild(el);
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const arc = 70 + Math.random() * 60;
+    const anim = el.animate(
+      [
+        { transform: "translate(-50%,-50%) scale(0.6) rotate(0deg)", opacity: 0, offset: 0 },
+        { transform: `translate(calc(-50% + ${dx * 0.3}px), calc(-50% + ${dy * 0.3 - arc}px)) scale(1.25) rotate(-12deg)`, opacity: 1, offset: 0.3 },
+        { transform: `translate(calc(-50% + ${dx * 0.65}px), calc(-50% + ${dy * 0.65 - arc * 0.5}px)) scale(1.1) rotate(8deg)`, opacity: 1, offset: 0.65 },
+        { transform: `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(0.35) rotate(0deg)`, opacity: 0.9, offset: 1 },
+      ],
+      { duration: 620, easing: "cubic-bezier(.4,.05,.5,1)", fill: "forwards" }
+    );
+    anim.onfinish = () => {
+      el.remove();
+      bag.classList.remove("pop");
+      void bag.offsetWidth;
+      bag.classList.add("pop");
+    };
+  }
+
   // -------------------------------------------------- FTUE guide + key hints
   /**
    * Bouncing arrow + text label over a world position (the current tutorial
@@ -342,8 +406,7 @@ export class HUD {
    * edge and swivels to point toward it. Call every frame while guiding.
    */
   guide(worldPos, text) {
-    const p = this._project(worldPos);
-    if (!p) return this.hideGuide();
+    const p = this._projectGuide(worldPos);
     const el = this.guideEl;
     el.classList.remove("hidden");
     if (text !== this._guideText) {
@@ -351,8 +414,8 @@ export class HUD {
       this.guideTextEl.innerHTML = text;
     }
     const m = 70;
-    const x = Math.max(m, Math.min(window.innerWidth - m, p.x));
-    const y = Math.max(m, Math.min(window.innerHeight - m, p.y - 44));
+    const x = Math.max(m, Math.min(viewport.w - m, p.x));
+    const y = Math.max(m, Math.min(viewport.h - m, p.y - 44));
     const edge = x !== p.x || y !== p.y;
     el.classList.toggle("edge", edge);
     el.style.left = x + "px";
@@ -542,22 +605,171 @@ export class HUD {
     _v.copy(worldPos).project(this.engine.camera);
     if (_v.z > 1) return null;
     return {
-      x: ((_v.x + 1) / 2) * window.innerWidth,
-      y: ((1 - _v.y) / 2) * window.innerHeight,
+      x: ((_v.x + 1) / 2) * viewport.w,
+      y: ((1 - _v.y) / 2) * viewport.h,
+    };
+  }
+
+  // Like _project, but the FTUE guide arrow must never wink out: a target
+  // beyond the far plane or behind the camera still gets a usable screen point
+  // (mirrored back when it folds behind us) so the arrow can clamp to the edge
+  // and point the way from clear across a large room. Unlike _project, never
+  // returns null.
+  _projectGuide(worldPos) {
+    const cam = this.engine.camera;
+    _gfwd.set(0, 0, -1).applyQuaternion(cam.quaternion);
+    const behind = _gdir.copy(worldPos).sub(cam.position).dot(_gfwd) <= 0;
+    _v.copy(worldPos).project(cam);
+    let nx = _v.x, ny = _v.y;
+    if (behind) { nx = -nx; ny = -ny; }
+    return {
+      x: ((nx + 1) / 2) * viewport.w,
+      y: ((1 - ny) / 2) * viewport.h,
     };
   }
 
   // ------------------------------------------------------------- sheets
   showSheet(html, cls = "") {
+    // clear any per-sheet anchoring left over from a previous popover so the
+    // default bottom-centre layout applies unless something re-anchors it.
+    this._clearSheetAnchor();
     this.sheetEl.className = cls;
     this.sheetEl.innerHTML = html;
+    this._applyBagBtn();
+    this._initSheetNav();
     return this.sheetEl;
   }
 
+  // A single cutscene dialogue beat: one flanking character portrait (reusing
+  // the haggle portrait styling) plus a spoken line, advanced with one button.
+  showDialogue({ name, variant, side = "right", text, btn = "Next", onNext }) {
+    const img = portraitDataURL(variant, side);
+    this.portraitsEl.innerHTML = img
+      ? `<img class="hg-portrait ${side === "right" ? "hg-cust" : "hg-me"}" src="${img}" alt="">`
+      : "";
+    const el = this.showSheet(`
+      <div class="dlg-name">${name}</div>
+      <div class="dlg-text">${text}</div>
+      <div class="sheet-btns"><button class="btn deal" id="dlg-next">${btn}</button></div>
+    `, "sheet-card dlg-card");
+    // clear the touch controls off-screen while the dialogue holds the stage
+    this.root.classList.add("dlg-open");
+    el.querySelector("#dlg-next").onclick = () => onNext?.();
+    return el;
+  }
+
+  // ---------------------------------------------------------- keyboard nav
+  // Every sheet gets basic keyboard driving for free: J/K (or arrows) move a
+  // highlight across the primary buttons, Enter fires the focused one and Esc
+  // backs out via the cancel button. Special sheets (the haggle deal) install
+  // their own handler through `setSheetKeys`, which supersedes this.
+  _initSheetNav() {
+    this._sheetKeyHandler = null;
+    this._navBtns = [...this.sheetEl.querySelectorAll(".sheet-btns button:not([disabled])")];
+    // Esc backs out through whatever "cancel" the sheet offers. A corner close
+    // (X) button is the truest "abandon without committing", so it wins over a
+    // secondary deny choice; either way we fall back to the caller's Esc=close.
+    this._navCancel =
+      this.sheetEl.querySelector(".icon-btn[id$='-close'], #esc-x") ||
+      this.sheetEl.querySelector(".sheet-btns .deny") ||
+      null;
+    this._navIdx = -1;
+    if (this._navBtns.length) {
+      // start on the primary (green "deal") action so Enter confirms at once
+      const primary = this._navBtns.findIndex((b) => b.classList.contains("deal"));
+      this._setNavFocus(primary >= 0 ? primary : 0);
+    }
+  }
+
+  _setNavFocus(i) {
+    if (!this._navBtns.length) return;
+    const n = this._navBtns.length;
+    this._navIdx = ((i % n) + n) % n;
+    this._navBtns.forEach((b, k) => b.classList.toggle("kb-focus", k === this._navIdx));
+  }
+
+  // Let a sheet override the default button-nav with its own key routing
+  // (return true from the handler to swallow a key). Call after showSheet.
+  setSheetKeys(handler) {
+    this._sheetKeyHandler = handler;
+    // the custom sheet drives its own controls, so drop the button highlight
+    this._navBtns?.forEach((b) => b.classList.remove("kb-focus"));
+    this._navIdx = -1;
+  }
+
+  // Route a keydown into the open sheet. Returns true if the sheet consumed it.
+  sheetKey(code) {
+    if (!this.sheetOpen) return false;
+    if (this._sheetKeyHandler) return this._sheetKeyHandler(code);
+    const btns = this._navBtns || [];
+    switch (code) {
+      case "KeyK":
+      case "ArrowRight":
+      case "ArrowDown":
+        if (!btns.length) return false;
+        this._setNavFocus(this._navIdx + 1);
+        return true;
+      case "KeyJ":
+      case "ArrowLeft":
+      case "ArrowUp":
+        if (!btns.length) return false;
+        this._setNavFocus(this._navIdx - 1);
+        return true;
+      case "Enter":
+      case "NumpadEnter":
+        if (this._navIdx < 0 || !btns[this._navIdx]) return false;
+        btns[this._navIdx].click();
+        return true;
+      case "Escape":
+        if (!this._navCancel) return false; // let the caller close the sheet
+        this._navCancel.click();
+        return true;
+    }
+    return false;
+  }
+
+  _clearSheetAnchor() {
+    const s = this.sheetEl.style;
+    s.left = s.top = s.bottom = s.transform = "";
+  }
+
+  // Float the currently-shown sheet just above a world point (e.g. the table
+  // slot being edited) so the player barely has to move the mouse. It can
+  // overlap the point if that's what fits on screen.
+  anchorSheetAbove(worldPos) {
+    if (this.sheetEl.classList.contains("hidden")) return;
+    const p = this._project(worldPos);
+    const el = this.sheetEl;
+    const w = el.offsetWidth, h = el.offsetHeight;
+    const vw = viewport.w, vh = viewport.h;
+    const gap = 12, edge = 10;
+    let left, top;
+    if (p) {
+      left = p.x - w / 2;
+      top = p.y - h - gap; // sit above the point
+    } else {
+      left = (vw - w) / 2;
+      top = vh - h - gap;
+    }
+    left = Math.max(edge, Math.min(left, vw - w - edge));
+    top = Math.max(edge, Math.min(top, vh - h - edge));
+    el.style.left = `${left}px`;
+    el.style.top = `${top}px`;
+    el.style.bottom = "auto";
+    el.style.transform = "none";
+  }
+
   hideSheet() {
+    this._clearSheetAnchor();
+    this.root.classList.remove("dlg-open"); // restore any hidden touch controls
     this.sheetEl.className = "hidden";
     this.sheetEl.innerHTML = "";
     this.portraitsEl.innerHTML = "";
+    this._sheetKeyHandler = null;
+    this._navBtns = [];
+    this._navCancel = null;
+    this._navIdx = -1;
+    this._applyBagBtn();
   }
 
   get sheetOpen() {
@@ -629,6 +841,30 @@ export class HUD {
     el.querySelector("#hg-p10").onclick = () => setPrice(price + cfg.base * 0.1);
     dealBtn.onclick = () => cb.onDeal(price);
     el.querySelector("#hg-no").onclick = () => cb.onLeave();
+    // keyboard: J/K nudge the price down/up, Enter seals the deal, Esc walks.
+    const step = Math.max(1, cfg.base * 0.02);
+    this.setSheetKeys((code) => {
+      switch (code) {
+        case "KeyJ":
+        case "ArrowLeft":
+        case "ArrowDown":
+          setPrice(price - step);
+          return true;
+        case "KeyK":
+        case "ArrowRight":
+        case "ArrowUp":
+          setPrice(price + step);
+          return true;
+        case "Enter":
+        case "NumpadEnter":
+          cb.onDeal(price);
+          return true;
+        case "Escape":
+          cb.onLeave();
+          return true;
+      }
+      return false;
+    });
     return {
       setMood: (m) => (moodEl.innerHTML = icon(m)),
       say: (t) => {

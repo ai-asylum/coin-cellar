@@ -41,11 +41,21 @@ joins.
 This keeps the two clients consistent without a referee server, at the cost of the
 guest depending on the host being present.
 
-## Joining a game
+## Friends & teleport invites
 
-- The host creates a room and gets a **4-letter room code**.
-- The guest enters that code to connect (WebRTC peer-to-peer under the hood).
-- Access via the co-op button in the HUD (or the `C` key).
+Co-op is organized around a **friends list** rather than one-off room codes.
+
+- Each player picks a **display name**; the game registers them on the broker
+  under it so friends can reach them directly (WebRTC peer-to-peer under the
+  hood).
+- You **add friends by name** in the friends menu, and the list is saved
+  locally between runs.
+- From the **shop**, you can **invite** a friend. That sends them a teleport
+  invite; if they accept they drop straight into your world as the guest (you're
+  the host).
+- A player can **only accept a teleport invite while above ground** — you can't
+  be yanked out of a live cellar delve. Surface first, then accept.
+- Access via the friends button in the HUD (or the `C` key).
 
 ## Design differences vs. single-player
 
