@@ -20,15 +20,10 @@ export const buildMethods = {
     this._occludeMats = [wallMat, wallMat2];
     const woodMat = makeToonMaterial({ color: 0x8a5a33, rim: 0 });
     const wood2 = makeToonMaterial({ color: 0x6e4526, rim: 0 });
-    // a drab, dusty grey shared by every un-repaired table — swapped back to the
-    // table's real materials once the player pays to restore it (see repairTable).
-    this._brokenMat = makeToonMaterial({ color: 0x5b554e, rim: 0 });
-    // a bright emissive white the whole table wears while it's the interact
-    // target, replacing the ground ring (pulsed in update(); see highlightTable).
-    this._glowMat = makeToonMaterial({ color: 0xffffff, rim: 0 });
-    this._glowMat.emissive = new THREE.Color(0xffffff);
-    this._glowMat.emissiveIntensity = 0.8;
-    this._glowTable = null; // which broken table is currently lit up
+    // an un-built table is no longer shown as a greyed-out ghost mesh: its real
+    // fixture stays hidden and a glowing outline on the floor marks the footprint
+    // where it'll go once the player pays to build it (see _applyTableState).
+    this._glowTable = null; // which locked table's floor outline is currently lit
     const { W, D } = SHOP;
 
     // floor: warm planks (canvas texture keeps it cheap + stylised)
@@ -265,10 +260,11 @@ export const buildMethods = {
     this.trapdoorOpen = true;
 
     // display tables (2x2 grid, 2 slots each = 8 slots). Each table is a
-    // repairable fixture: all but the first start dusty and broken (greyed out,
-    // slots unusable) until the player pays to restore them — see repairTable.
-    // `this.tables` groups every table's meshes + slots + repair cost so the
-    // game glue can offer the "Repair" prompt and persist what's been fixed.
+    // buildable fixture: all but the first start un-built (their real mesh hidden,
+    // slots unusable, a glowing floor outline marking the footprint) until the
+    // player pays to build them — see repairTable / _applyTableState.
+    // `this.tables` groups every table's meshes + slots + build cost so the
+    // game glue can offer the "Repair" prompt and persist what's been built.
     this.tables = [];
     const tablePts = [
       [-1.6, 0.6], [1.6, 0.6],
@@ -281,6 +277,10 @@ export const buildMethods = {
       const legs = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.72, 0.8), wood2);
       legs.position.y = 0.36;
       t.add(top, legs);
+      // footprint outline flagging where this table gets built (shown while it's
+      // locked, in place of the old greyed-out ghost mesh)
+      const outline = makeFloorOutline(2.4, 1.3);
+      t.add(outline);
       t.position.set(tx, 0, tz);
       g.add(t);
       this.colliders.push({ x: tx, z: tz, hw: 1.15, hd: 0.6 });
@@ -288,6 +288,7 @@ export const buildMethods = {
         group: t,
         meshes: [top, legs],
         origMats: [woodMat, wood2],
+        outline,
         cost: 200,
         fancy: false,
         repaired: ti === 0, // only the first shelf comes ready to stock
@@ -332,6 +333,8 @@ export const buildMethods = {
     const fTop = new THREE.Mesh(new THREE.BoxGeometry(3.34, 0.14, 1.16), velvetMat);
     fTop.position.y = 0.84;
     fancy.add(fLegs, fTrim, fTop);
+    const fancyOutline = makeFloorOutline(3.7, 1.5);
+    fancy.add(fancyOutline);
     fancy.position.set(fancyCx, 0, fancyZ);
     g.add(fancy);
     this.colliders.push({ x: fancyCx, z: fancyZ, hw: 1.75, hd: 0.66 });
@@ -341,6 +344,7 @@ export const buildMethods = {
       group: fancy,
       meshes: [fLegs, fTrim, fTop],
       origMats: [wood2, goldMat, velvetMat],
+      outline: fancyOutline,
       cost: 1000,
       fancy: true,
       repaired: false,
@@ -368,7 +372,7 @@ export const buildMethods = {
       this.slots.push(slot);
     }
     this.tables.push(fancyTable);
-    // grey out every broken fixture now the whole set is built
+    // hide every locked fixture (leaving its floor outline) now the set is built
     for (const table of this.tables) this._applyTableState(table);
 
     // lamps for cosiness
@@ -684,6 +688,39 @@ function makeFloorHint() {
       blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false,
     })
   );
+}
+
+// A flat rectangular frame that lies on the floor to mark where a locked table
+// will be built — a glowing footprint outline in place of the old greyed-out
+// ghost mesh. Base colour is a warm amber; highlightTable() pops it white and
+// pulses its opacity while it's the active interact target. Sized to the table's
+// footprint (w x d, in world units).
+function makeFloorOutline(w, d, color = 0xffcf86) {
+  const hw = w / 2, hd = d / 2, t = 0.13; // band thickness
+  const outer = new THREE.Shape();
+  outer.moveTo(-hw, -hd);
+  outer.lineTo(hw, -hd);
+  outer.lineTo(hw, hd);
+  outer.lineTo(-hw, hd);
+  outer.lineTo(-hw, -hd);
+  const hole = new THREE.Path();
+  hole.moveTo(-hw + t, -hd + t);
+  hole.lineTo(hw - t, -hd + t);
+  hole.lineTo(hw - t, hd - t);
+  hole.lineTo(-hw + t, hd - t);
+  hole.lineTo(-hw + t, -hd + t);
+  outer.holes.push(hole);
+  const geo = new THREE.ShapeGeometry(outer).rotateX(-Math.PI / 2);
+  const mesh = new THREE.Mesh(
+    geo,
+    new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity: 0.42,
+      blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false,
+    })
+  );
+  mesh.position.y = 0.02; // hover just above the planks to avoid z-fighting
+  mesh.userData.baseColor = color;
+  return mesh;
 }
 
 function makeFloorTexture() {
