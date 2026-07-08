@@ -12,6 +12,11 @@ import { icon } from "../core/icons.js";
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 
+// The shallow floors act as a safe zone: pass out on floor 1–3 and the shop
+// clerk hauls you back up with your bag intact (see _respawn). Deeper than
+// this and a knockout still costs you everything you were carrying.
+const SAFE_ZONE_FLOOR = 3;
+
 export const combatMethods = {
   // Three-hit chain: light, light, then a wider, heavier finisher. Swing again
   // within the combo window to advance; pause and it resets to the first hit.
@@ -203,8 +208,13 @@ export const combatMethods = {
     this.particles.burst(_v2.copy(this.player.position).setY(this.player.height * 0.55), { color: 0xffd0c0, n: 6, speed: 2.2, up: 1.0, life: 0.35, size: 0.9 });
     this.hud.float(_v2.copy(this.player.position).setY(1.8), `-${dmg}`, "dmg hurt");
     if (this.hp <= 0) {
+      // On the shallow floors the clerk recovers you before you drop your bag —
+      // latch it now (the floor is still known here) so _respawn keeps the loot.
+      this._safeRecovery = this.playerArea === "dungeon" &&
+        this.dungeon.floor >= 1 && this.dungeon.floor <= SAFE_ZONE_FLOOR;
       this.player.die(_v.multiplyScalar(-6).setY(-2));
-      this.hud.banner("You got carried home…", "your bag was lost", 2.6);
+      this.hud.banner("You got carried home…",
+        this._safeRecovery ? "the clerk found you in the street" : "your bag was lost", 2.6);
       this.audio.gameover();
       this._respawnT = 2.4;
     } else {
@@ -217,8 +227,11 @@ export const combatMethods = {
     // drop any mid-flight use flourishes (the old player blob is a ragdoll now)
     for (const fx of this._useFx) fx.mesh.removeFromParent();
     this._useFx = [];
-    // dying empties your bag (the loot you were carrying) instead of taxing gold
-    this.inventory = [];
+    // dying empties your bag (the loot you were carrying) instead of taxing gold —
+    // unless the clerk pulled you out of the safe-zone floors, where it stays put
+    const safeRecovery = this._safeRecovery;
+    this._safeRecovery = false;
+    if (!safeRecovery) this.inventory = [];
     if (!this.net.isGuest) {
       this._syncState();
     }
@@ -242,6 +255,17 @@ export const combatMethods = {
     this.hud.setGoldCorner(false);
     this.input.setDodgeVisible(false);
     this._save();
+    if (safeRecovery) {
+      // the clerk hauled you back with the loot — tuck it into the storeroom
+      // like any homecoming, then have them explain what happened
+      this._depositBag();
+      this.hud.speak({
+        name: "Shop Clerk",
+        text: "We found you in the dungeon, you're lucky you didn't pass out deeper.",
+        cta: "▸ ok",
+        onAdvance: () => this.hud.hideSpeak(),
+      });
+    }
   },
 
   playersInDungeon() {

@@ -82,6 +82,7 @@ export class Game {
     this._dashDX = 0;
     this._dashDZ = 0;
     this._respawnT = -1;
+    this._safeRecovery = false; // set on a shallow-floor knockout: keep the bag
     this._pickupSuppressT = 0;
     this._useFx = []; // in-flight "used an item" flourishes over the player's head
     this._remoteUseFx = []; // same flourish, mirrored over the co-op partner
