@@ -55,6 +55,7 @@ export const ITEMS = {
   // ---- second wave: colourful merch that leans on the icon pack ----
   mushroom: { name: "Wild Mushroom",    icon: "mushroom",  base: 10,  tier: 1, heal: 1 },
   meat:     { name: "Roast Meat",       icon: "meat",      base: 18,  tier: 1, heal: 2 },
+  rathide:  { name: "Rat Hide",         icon: "rathide",   base: 6,   tier: 1 },
   egg:      { name: "Griffon Egg",      icon: "egg",       base: 40,  tier: 2 },
   key:      { name: "Brass Key",        icon: "key",       base: 52,  tier: 2 },
   bomb:     { name: "Blast Bomb",       icon: "bomb",      base: 44,  tier: 2 },
@@ -171,6 +172,12 @@ const makers = {
       mesh(new THREE.CapsuleGeometry(0.08, 0.13, 4, 10).rotateZ(Math.PI / 2), M(0x9c5a2e), 0, 0.1),
       mesh(new THREE.SphereGeometry(0.05, 10, 8), M(0xe1738a), 0.11, 0.1),
       mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.1).rotateZ(Math.PI / 2), M(0xf1ead8), -0.16, 0.1)
+    ),
+  // a small rolled-up pelt: a stubby tan bundle cinched by a paler cord
+  rathide: () =>
+    group(
+      mesh(new THREE.CapsuleGeometry(0.075, 0.15, 6, 10).rotateZ(Math.PI / 2), M(0x9c7350), 0, 0.09),
+      mesh(new THREE.TorusGeometry(0.078, 0.014, 6, 14), M(0xcdbb96), 0, 0.09, 0, 0, Math.PI / 2)
     ),
   egg: () => mesh(new THREE.CapsuleGeometry(0.075, 0.06, 6, 12), M(0xd8e6dc), 0, 0.12),
   key: () =>

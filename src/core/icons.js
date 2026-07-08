@@ -34,7 +34,7 @@ const COLOR = new Set([
   "caveshroom", "jelly", "herb", "bread", "sword", "potion", "ring", "dagger",
   "lantern", "amulet", "swords", "tome", "gem", "fang", "crown",
   "mushroom", "meat", "egg", "key", "bomb", "shield", "bell", "feather",
-  "hourglass", "star",
+  "hourglass", "star", "rathide",
   "bow", "staff", "armor", "boots",
 ]);
 
