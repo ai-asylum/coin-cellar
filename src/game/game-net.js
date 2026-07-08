@@ -432,7 +432,7 @@ export const netMethods = {
         const id = this.inventory[m.idx];
         if (id != null && D.active) {
           this.inventory.splice(m.idx, 1);
-          D.spawnDrop(id, m.x, m.z);
+          D.spawnDrop(id, m.x, m.z, null, m.fx != null ? { flyFrom: { x: m.fx, z: m.fz } } : {});
           this._syncInv();
         }
         break;

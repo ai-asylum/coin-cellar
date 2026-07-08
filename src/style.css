@@ -373,24 +373,12 @@ button { font-family: inherit; cursor: pointer; }
 @keyframes btnpulse { 50% { box-shadow: 0 5px 0 #4a2c14, 0 0 34px rgba(255, 211, 77, 0.85); border-color: var(--gold); } }
 @media (pointer: fine) { #action-btn { display: none; } }
 
-/* dodge / roll button sits just inboard of the action button */
-#dodge-btn {
-  pointer-events: auto; z-index: 20;
-  position: absolute; right: calc(112px + env(safe-area-inset-right));
-  bottom: calc(30px + env(safe-area-inset-bottom));
-  width: 62px; height: 62px; border-radius: 50%; font-size: 26px;
-  background: radial-gradient(circle at 35% 30%, #cfe6ff, #5f8fc0);
-  border: 3px solid #2f4d6e; color: #14233a;
-  box-shadow: 0 4px 0 #223a56, 0 0 16px rgba(120, 180, 255, 0.35);
-  display: flex; align-items: center; justify-content: center;
-}
-#dodge-btn .ic { width: 1em; height: 1em; }
-#dodge-btn:active { transform: scale(0.9); }
-@media (pointer: fine) { #dodge-btn { display: none; } }
+/* (the old dodge button was removed — the primary #action-btn is now the attack
+   button while delving; see input.js / game.js) */
 
-/* interact button — portals / stairs. Sits just above the context action
+/* interact button — portals / stairs. Sits just above the attack / action
    button. Shown only while something's in reach (toggled from
-   input.setInteract); combat is dash-only, so it never shares a press. */
+   input.setInteract), so it never shares a press with the attack button. */
 #interact-btn {
   pointer-events: auto; z-index: 20;
   position: absolute; right: calc(24px + env(safe-area-inset-right));
@@ -408,12 +396,11 @@ button { font-family: inherit; cursor: pointer; }
 @media (pointer: fine) { #interact-btn { display: none !important; } }
 
 /* clear the touch controls while the backpack panel is open so the loot list
-   (and its click-away backdrop) own the screen — the joystick / action / dodge
-   / interact buttons are appended after #sheet, so they're later siblings */
+   (and its click-away backdrop) own the screen — the joystick / action /
+   interact buttons are appended after #sheet, so they're later siblings */
 @media (pointer: coarse) {
   #sheet.bag-sheet ~ #joystick,
   #sheet.bag-sheet ~ #action-btn,
-  #sheet.bag-sheet ~ #dodge-btn,
   #sheet.bag-sheet ~ #interact-btn { display: none !important; }
 }
 

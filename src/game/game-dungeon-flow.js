@@ -77,7 +77,6 @@ export const dungeonFlowMethods = {
     this.hud.showBag(true);
     this.hud.showGold(true);
     this.hud.setGoldCorner(false); // the sewer's a safe hub — keep gold up top
-    this.input.setDodgeVisible(false);
     if (this.hud.sheetOpen) this.hud.hideSheet();
     this.player.position.copy(this.sewer.entrancePos).add(_v.set(0, 0, -1.4));
     this.player.animator.prevPos.copy(this.player.position);
@@ -385,7 +384,6 @@ export const dungeonFlowMethods = {
     this.hud.showBag(true);
     this.hud.showGold(true);
     this.hud.setGoldCorner(true);
-    this.input.setDodgeVisible(true);
     _v.copy(this.dungeon.entrancePos).add(DUNGEON_ORIGIN);
     this.player.position.set(_v.x + 0.8, 0, _v.z + 0.8);
     this.player.animator.prevPos.copy(this.player.position);
@@ -421,7 +419,6 @@ export const dungeonFlowMethods = {
     this.hud.showBag(false);
     this.hud.showGold(true);
     this.hud.setGoldCorner(false);
-    this.input.setDodgeVisible(false);
     if (this.hud.sheetOpen) this.hud.hideSheet();
     this.player.position.copy(this.shop.trapdoorPos).add(_v.set(1.2, 0, 0.5));
     this.player.animator.prevPos.copy(this.player.position);

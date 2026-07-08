@@ -18,6 +18,10 @@ const _v2 = new THREE.Vector3();
 // this and a knockout still costs you everything you were carrying.
 const SAFE_ZONE_FLOOR = 3;
 
+// How close a foe must be for the dash to auto-aim onto it. Kept just past the
+// lunge's own travel + reach so it only snaps onto foes it can actually hit.
+const AUTOAIM_RANGE = 3.2;
+
 export const combatMethods = {
   // Offset to the nearest living foe within `range` (or null if the floor's
   // clear nearby). Used to bend the dash onto a target so it auto-aims.
@@ -52,9 +56,10 @@ export const combatMethods = {
       dx = Math.sin(this.player.heading);
       dz = Math.cos(this.player.heading);
     }
-    // auto-aim: snap the lunge onto the nearest foe in reach so the dash lands
-    // its hit without needing precise aim
-    const target = this._nearestEnemyWithin(5.5);
+    // auto-aim: snap the lunge onto the nearest foe ONLY when one is close enough
+    // for the dash to actually reach it (the lunge travels ~2 units). A foe
+    // further out is left alone so you keep dashing where you're steering.
+    const target = this._nearestEnemyWithin(AUTOAIM_RANGE);
     if (target) { dx = target.dx / target.dist; dz = target.dz / target.dist; }
 
     this._dashDX = dx;
@@ -176,18 +181,13 @@ export const combatMethods = {
     this.hud.showBag(false);
     this.hud.showGold(true);
     this.hud.setGoldCorner(false);
-    this.input.setDodgeVisible(false);
     this._save();
     if (safeRecovery) {
       // the clerk hauled you back with the loot — tuck it into the storeroom
-      // like any homecoming, then have them explain what happened
+      // like any homecoming, then bring the clerk in beside you to explain what
+      // happened (a character you wake up next to, who then sees himself out)
       this._depositBag();
-      this.hud.speak({
-        name: "Shop Clerk",
-        text: "We found you in the dungeon, you're lucky you didn't pass out deeper.",
-        cta: "▸ ok",
-        onAdvance: () => this.hud.hideSpeak(),
-      });
+      this._clerkRecovery();
     }
   },
 

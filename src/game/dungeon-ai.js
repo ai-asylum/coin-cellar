@@ -13,6 +13,16 @@ const _d = new THREE.Vector3();
 const _v = new THREE.Vector3();
 const _p = new THREE.Vector3();
 
+// shortest-arc lerp between two headings (radians), so a fleeing creature turns
+// smoothly across the ±π wrap instead of spinning the long way round
+function angLerp(a, b, t) {
+  let d = b - a;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  return a + d * t;
+}
+const clampN = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
+
 export const aiMethods = {
   // touching an enemy's body hurts, attacking or not — a slime that drifts
   // into you should still sting. The player's i-frames gate the actual damage;
@@ -119,10 +129,24 @@ export const aiMethods = {
     if (target && bd < def.aggro) e.state = "chase";
     else if (e.state === "chase") e.state = "idle";
 
+    const preX = c.position.x, preZ = c.position.z;
     if (e.state === "chase" && target) this._chase(e, target, bd, speed, dt);
     else this._wander(e, speed, dt);
 
     this._finishFrame(e, dt, elapsed);
+
+    // Prey that barely moved while fleeing is jammed against geometry — bank a
+    // sideways turn so next frame it peels along the wall instead of grinding
+    // into it. Clears once it's running freely again.
+    if (e.behavior === "flee" && e.state === "chase") {
+      const moved = Math.hypot(c.position.x - preX, c.position.z - preZ);
+      if (moved < speed * dt * 0.5) {
+        if (!e.fleeTurn) e.fleeTurn = (Math.random() < 0.5 ? -1 : 1) * 0.7;
+        e.fleeTurn = clampN(e.fleeTurn * 1.25, -2.4, 2.4);
+      } else {
+        e.fleeTurn = (e.fleeTurn || 0) * 0.6;
+      }
+    }
   },
 
   // separation + wall collision + creature tick + net track, shared by every path
@@ -145,17 +169,21 @@ export const aiMethods = {
 
     switch (e.behavior) {
       case "flee": {
-        // prey, not predator: sprint directly away from the nearest player and
-        // never wind up an attack. A gentle sine weave keeps it from running a
-        // dead-straight line (and reads as a panicked scurry); it puts on a
-        // burst of speed the closer the player gets. Wall collision in
-        // _finishFrame keeps it from clipping through geometry when cornered.
-        const weave = Math.sin(e.t * 9 + e.seed) * 0.35;
-        _p.set(_d.z, 0, -_d.x).multiplyScalar(weave); // perpendicular jitter
-        _d.multiplyScalar(-1).add(_p).normalize(); // flip to point away, then weave
-        c.heading = Math.atan2(_d.x, _d.z);
-        const panic = dist < 3 ? 1.35 : 1; // extra scramble when close
-        c.position.addScaledVector(_d, speed * panic * dt);
+        // prey, not predator: run away from the nearest player and never wind up
+        // an attack. Rather than sprint dead-away (which pins it in corners), it
+        // eases a committed escape heading toward "away from the player", plus a
+        // gentle scurry weave and any sideways kick banked from bumping a wall
+        // last frame (see _updateEnemy) — so a cornered rat peels along the wall
+        // and slips free instead of grinding face-first into it.
+        const away = Math.atan2(-_d.x, -_d.z); // _d points at the player
+        if (e.fleeHeading == null) e.fleeHeading = away;
+        const weave = Math.sin(e.t * 9 + e.seed) * 0.25;
+        const goal = away + (e.fleeTurn || 0) + weave;
+        e.fleeHeading = angLerp(e.fleeHeading, goal, 0.2);
+        c.heading = e.fleeHeading;
+        const panic = dist < 2.2 ? 1.4 : 1; // extra scramble when close
+        c.position.x += Math.sin(e.fleeHeading) * speed * panic * dt;
+        c.position.z += Math.cos(e.fleeHeading) * speed * panic * dt;
         break;
       }
       case "swarm": {

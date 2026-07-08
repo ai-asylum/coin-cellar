@@ -206,6 +206,7 @@ export class Game {
     this._updateLobbyPlayers(dt, elapsed);
     this.shop.update(dt, elapsed);
     this._updateMayor(dt, elapsed);
+    this._updateClerk(dt, elapsed);
     this.dungeon.update(dt, elapsed);
     this.sewer.update(dt, elapsed);
     this.particles.update(dt);
@@ -291,7 +292,7 @@ export class Game {
     const sheetBlocked = this.hud.sheetOpen || this.hud.speakOpen;
 
     // A live dialogue bubble eats the action press to advance itself: a click
-    // anywhere on screen, Space/J/Enter, or the on-screen action button. The
+    // anywhere on screen, Space/Enter, or the on-screen action button. The
     // edge is consumed so it can't leak into an attack or interact this frame
     // (movement/actions are already frozen by sheetBlocked above).
     if (this.hud.speakOpen) {
@@ -300,8 +301,13 @@ export class Game {
       this.input.interactEdge = false;
     }
 
-    // dodge / roll (underground only) — grabbed before movement so it can override it
-    if (this.input.dodgeEdge && !sheetBlocked && (this.playerArea === "dungeon" || this.playerArea === "sewer")) this._dodge();
+    // dash / attack — grabbed before movement so it can override it. Underground
+    // the primary on-screen button IS the attack, so a press of it (actionEdge)
+    // triggers the dash too; keys (J/Shift) and the right mouse button dash in
+    // every area via dodgeEdge.
+    const attackPress = this.input.dodgeEdge ||
+      (this.playerArea === "dungeon" && this.input.actionEdge);
+    if (attackPress && !sheetBlocked) this._dodge();
 
     if (this._dashT >= 0) {
       // committed dash: ease-out lunge along the dash direction, damaging every
@@ -312,6 +318,9 @@ export class Game {
       c.position.x += this._dashDX * sp * dt;
       c.position.z += this._dashDZ * sp * dt;
       this._dashStrike();
+      // the slash swoosh rides along with the hero through the whole lunge
+      // instead of hanging in the air where the dash began
+      this.slash.follow(c.position.x, 0.62, c.position.z);
       if (this._dashT >= this._dashDur) this._dashT = -1;
     } else if (!sheetBlocked && (mv.x || mv.y)) {
       const speed = 3.7 * (this.stats.speedMul || 1); // boots / heavy-armour tweak
@@ -340,8 +349,11 @@ export class Game {
     // floor loot: items rest on the ground and are drawn toward the hero once
     // they're inside the magnet field, accelerating the closer/longer they're
     // pulled, then collected on contact. Suppressed briefly after you toss
-    // something so you don't instantly re-grab what you just dropped.
+    // something so you don't instantly re-grab what you just dropped. The magnet
+    // switches off entirely once the bag is full — nothing gets yanked around
+    // that you can't pick up (walking onto a drop still surfaces the "bag full").
     if (this.playerArea === "dungeon" && performance.now() >= (this._pickupSuppressT || 0)) {
+      const bagFull = this.inventory.length >= this.invCap;
       for (const drop of [...this.dungeon.drops]) {
         if (drop.fly) continue; // still popping out / arcing onto the floor
         const dp = drop.mesh.position;
@@ -352,14 +364,14 @@ export class Game {
           this._pickupDrop(drop);
           continue;
         }
-        if (d2 <= PICKUP_MAGNET_R * PICKUP_MAGNET_R) {
+        if (!bagFull && d2 <= PICKUP_MAGNET_R * PICKUP_MAGNET_R) {
           const d = Math.sqrt(d2) || 1e-4;
           drop.pull = Math.min(PICKUP_PULL_MAX, (drop.pull || PICKUP_PULL_MIN) + PICKUP_PULL_ACCEL * dt);
           const step = Math.min(drop.pull * dt, d);
           dp.x += (dx / d) * step;
           dp.z += (dz / d) * step;
         } else if (drop.pull) {
-          drop.pull = 0; // drifted out of range — let it settle again
+          drop.pull = 0; // drifted out of range (or bag full) — let it settle
         }
       }
     }
@@ -371,13 +383,12 @@ export class Game {
     const act = this._contextAction();
     const inDungeon = this.playerArea === "dungeon";
     const hasInteract = !!act.label;
-    // On touch the single action button doubles as the dungeon interact (stairs
-    // / gate / portal) when you're standing on one; desktop fires those off E.
-    const foldInteract = inDungeon && hasInteract && this.input.isTouch;
     if (inDungeon) {
-      // no swings any more, so the action button only shows for a real interact
-      this.input.setActionLabel(foldInteract ? act.label : null, foldInteract);
-      this.input.setInteract(act.label, hasInteract && !this.input.isTouch);
+      // the primary button is the ATTACK button while delving (crossed swords);
+      // real interacts (stairs / gate / portal / chest) get their own button
+      // when something's in reach, so the two never fight over one press.
+      this.input.setActionLabel("swords", false);
+      this.input.setInteract(act.label, hasInteract);
     } else {
       this.input.setActionLabel(act.label);
       this.input.setInteract(null, false);
@@ -393,14 +404,11 @@ export class Game {
       this.hud.interactHint(act.focus, act.hint, this.input.isTouch ? "" : "E");
     else this.hud.hideInteractHint();
     if (!sheetBlocked && this._dashT < 0) {
-      // E / interact button (desktop): fire the context action (portal, stairs, …)
+      // E / interact button: fire the context action (portal, stairs, chest, …)
       if (this.input.interactEdge && hasInteract && act.fn) act.fn();
-      // Space / click / action button: interact when folded (touch, standing on
-      // a stairs / gate / portal), otherwise act in the shop / sewer
-      if (this.input.actionEdge && act.fn) {
-        if (foldInteract) act.fn();
-        else if (!inDungeon) act.fn();
-      }
+      // primary button / Space / click acts only above ground — while delving it
+      // attacks instead (handled up top via attackPress), so skip it in-dungeon
+      if (this.input.actionEdge && !inDungeon && act.fn) act.fn();
     }
 
     // Serve the whole line in one go: after the player opens the first deal we
@@ -714,7 +722,6 @@ export class Game {
     this.hud.showBag(this.playerArea === "dungeon");
     this.hud.showGold(true);
     this.hud.setGoldCorner(this.playerArea === "dungeon");
-    this.input.setDodgeVisible(this.playerArea === "dungeon");
     document.getElementById("coop-btn").onclick = () => this._friendSheet();
     document.getElementById("pause-btn").onclick = () => this._toggleEscMenu();
     // set the mute button to match saved preference
@@ -964,12 +971,14 @@ export class Game {
     const dropZ = p.z + Math.cos(h) * DROP_FWD;
     // brief window so you don't instantly re-grab what you just tossed
     this._pickupSuppressT = performance.now() + 1500;
+    // the item visibly arcs out of the player toward its landing spot
+    const flyFrom = { x: p.x, z: p.z };
     if (this.net.isGuest) {
-      this.net.send({ t: "dropReq", idx, x: dropX, z: dropZ });
+      this.net.send({ t: "dropReq", idx, x: dropX, z: dropZ, fx: p.x, fz: p.z });
       this.inventory.splice(idx, 1);
     } else {
       this.inventory.splice(idx, 1);
-      this.dungeon.spawnDrop(itemId, dropX, dropZ);
+      this.dungeon.spawnDrop(itemId, dropX, dropZ, null, { flyFrom });
       this._syncInv();
       this._save();
     }
@@ -1010,7 +1019,7 @@ const DROP_FWD = 2.5;
 // floor-loot magnet: items inside PICKUP_MAGNET_R are pulled toward the hero,
 // their speed ramping from PICKUP_PULL_MIN up to PICKUP_PULL_MAX (units/s) at
 // PICKUP_PULL_ACCEL (units/s²), and are collected once within PICKUP_COLLECT_R.
-const PICKUP_MAGNET_R = 2.6;
+const PICKUP_MAGNET_R = 1.3;
 const PICKUP_COLLECT_R = 0.55;
 const PICKUP_PULL_MIN = 2.5;
 const PICKUP_PULL_ACCEL = 22;

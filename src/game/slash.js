@@ -72,6 +72,12 @@ export class SlashArc {
     this.pivot.visible = true;
   }
 
+  /** Keep the live swoosh pinned to a moving swinger (e.g. the dashing hero) so
+   * the effect travels with them instead of hanging where the swing began. */
+  follow(x, y, z) {
+    if (this.t >= 0) this.pivot.position.set(x, y, z);
+  }
+
   update(dt) {
     if (this.t < 0) return;
     this.t += dt;

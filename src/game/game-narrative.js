@@ -11,6 +11,10 @@ import { DUNGEON_ORIGIN } from "./dungeon.js";
 // shop rent-free in exchange for helping rebuild the town, then again once the
 // first lot goes up.
 const MAYOR_VARIANT = "q"; // Kenney "Villager Q"
+// The shop clerk who hauls you home after a shallow-floor knockout: a fixed
+// variant so the body you wake up next to matches the bust in the dialogue.
+const CLERK_VARIANT = "e";
+const CLERK_LINE = "We found you in the dungeon, you're lucky you didn't pass out deeper.";
 const MAYOR_INTRO_LINES = [
   "Ha! I was looking for one of those!",
   "The shop's yours rent-free, but you need to help me revive this town.",
@@ -358,5 +362,74 @@ export const narrativeMethods = {
         break;
     }
     if (this._mayor === m) c.update(dt, elapsed);
+  },
+
+  // ---- shallow-floor rescue: the shop clerk -------------------------------
+  // After a knockout on floors 1–3 the clerk hauls you back up. He's standing
+  // right beside you as you come to, delivers a single reassuring line (his face
+  // flanks the bubble like the Mayor's), then heads out through the shopfront.
+  _clerkRecovery() {
+    if (this._clerk) return;
+    const creature = new BlockyCreature(CLERK_VARIANT, { height: 1.5 });
+    const p = this.player.position;
+    creature.position.set(p.x + 1.1, 0, p.z + 0.3);
+    creature.heading = Math.atan2(p.x - creature.position.x, p.z - creature.position.z);
+    this.shop.group.add(creature);
+    this.shop.doorHeld = true; // hold the shopfront open so he can see himself out
+    this._clerk = {
+      creature,
+      portrait: portraitDataURL(CLERK_VARIANT, "left"),
+      state: "talk",
+      path: [this.shop.doorInside, this.shop.doorPos,
+        new THREE.Vector3(this.shop.streetHalfX, 0, this.shop.streetWalkZ)],
+      pathIdx: 0, pathT: 0,
+    };
+    this.hud.speak({
+      name: "Shop Clerk",
+      portrait: this._clerk.portrait,
+      text: CLERK_LINE,
+      cta: "▸ ok",
+      onAdvance: () => {
+        this.hud.hideSpeak();
+        if (this._clerk) this._clerk.state = "leave";
+      },
+    });
+  },
+
+  _endClerkScene() {
+    const m = this._clerk;
+    if (!m) return;
+    this._clerk = null;
+    this.shop.doorHeld = false;
+    m.creature.dispose?.();
+    this.shop.group.remove(m.creature);
+  },
+
+  // Drive the clerk each frame: face you while he talks, then walk his exit path
+  // out the door and off up the street, disposing once he's gone.
+  _updateClerk(dt, elapsed) {
+    const m = this._clerk;
+    if (!m) return;
+    const c = m.creature;
+    if (m.state === "leave") {
+      const tgt = m.path[m.pathIdx];
+      _v.set(tgt.x - c.position.x, 0, tgt.z - c.position.z);
+      const d = _v.length();
+      m.pathT += dt;
+      if (d < 0.16 || m.pathT > 8) { // reached, or a per-leg timeout guard
+        m.pathIdx++;
+        m.pathT = 0;
+        if (m.pathIdx >= m.path.length) return this._endClerkScene();
+      } else {
+        _v.normalize();
+        c.position.addScaledVector(_v, Math.min(2.6 * dt, d));
+        c.heading = Math.atan2(_v.x, _v.z);
+        this.collide(c.position, c.radius * 0.8, this.shop.colliders);
+      }
+    } else {
+      // still coming to — the clerk stays put, watching over you
+      c.heading = Math.atan2(this.player.position.x - c.position.x, this.player.position.z - c.position.z);
+    }
+    c.update(dt, elapsed);
   },
 };

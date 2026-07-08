@@ -17,9 +17,11 @@ export const ENEMY_KINDS = {
   // chase. Frail and quick; drops its hide when you finally corner one.
   rat: {
     make: (seed) => ratSpec({ key: `e_rat_${seed % 6}`, seed, scale: 0.55 + (seed % 3) * 0.03, hue: 0.05 + (seed % 4) * 0.02 }),
-    hp: 2, dmg: 0, speed: 3.4, aggro: 9, gold: [2, 6],
+    // low aggro so it only bolts once you're right on top of it (otherwise it
+    // just potters about); rathide is an uncommon drop so hides stay worth it
+    hp: 2, dmg: 0, speed: 3.4, aggro: 4, gold: [2, 6],
     behavior: "flee", harmless: true, windup: 0.3, reach: 0.9, glow: [0.5, 0.35, 0.3],
-    loot: ["rathide"], dropRate: 0.85,
+    loot: ["rathide"], dropRate: 0.3,
   },
   // fast erratic swarmer: darts in, quick bite, backs off
   skitter: {
@@ -330,27 +332,30 @@ export function isBossFloor(floorN) {
 }
 // Each themed dungeon spawns only its own natives — DUNGEON_MIX[dungeon] lists
 // the roster per local floor (1st/2nd/3rd), thickening toward the boss floor.
+// Every floor mixes in the odd skittish rat for ambient life (harmless prey you
+// can chase for a hide), except the very first floor, which stays rats-only as
+// a gentle, no-damage warm-up.
 export const DUNGEON_MIX = [
   [ // Rat Warren — the first floor is nothing but skittish rats (a gentle,
     // no-damage warm-up); the crawl proper starts on the second floor
     ["rat"],
-    ["skitter", "slime", "goblin"],
-    ["slime", "goblin", "wisp", "archer"],
+    ["skitter", "slime", "goblin", "rat"],
+    ["slime", "goblin", "wisp", "archer", "rat"],
   ],
   [ // Flooded Deep — splitting blobs, tide crabs and geyser lures
-    ["puddle", "snapper"],
-    ["puddle", "snapper", "angler"],
-    ["snapper", "angler", "puddle", "puddle"],
+    ["puddle", "snapper", "rat"],
+    ["puddle", "snapper", "angler", "rat"],
+    ["snapper", "angler", "puddle", "puddle", "rat"],
   ],
   [ // Bone Hollow — bone-bugs, grave-lights and charging sentinels
-    ["rattler", "gravewisp"],
-    ["rattler", "gravewisp", "boneguard"],
-    ["rattler", "boneguard", "gravewisp", "boneguard"],
+    ["rattler", "gravewisp", "rat"],
+    ["rattler", "gravewisp", "boneguard", "rat"],
+    ["rattler", "boneguard", "gravewisp", "boneguard", "rat"],
   ],
   [ // Gloom Drain — walking bombs, blink-casters and moss hulks
-    ["sporeling", "gloomcaster"],
-    ["sporeling", "gloomcaster", "mossbrute"],
-    ["gloomcaster", "sporeling", "mossbrute", "mossbrute"],
+    ["sporeling", "gloomcaster", "rat"],
+    ["sporeling", "gloomcaster", "mossbrute", "rat"],
+    ["gloomcaster", "sporeling", "mossbrute", "mossbrute", "rat"],
   ],
 ];
 export function floorMixFor(floorN) {

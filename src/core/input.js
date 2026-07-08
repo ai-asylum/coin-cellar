@@ -1,7 +1,8 @@
 // Unified input: WASD / arrows to move (facing follows movement); dynamic
-// virtual joystick + context action button on touch. Combat is dash-only, so
-// the action button is a pure context / interact button — the dash (dodge) is
-// the attack. The game reads:
+// virtual joystick + a primary button on touch. Combat is dash-only: that
+// primary button is the ATTACK button while delving (its press dashes) and the
+// context button above ground; a separate interact button handles stairs /
+// portals / chests. The game reads:
 //   input.move        THREE.Vector2 (len <= 1)
 //   input.actionEdge  true for the frame the action/context press fired
 //   input.dodgeEdge   true for the frame a dash was requested
@@ -29,12 +30,12 @@ export class Input {
     window.addEventListener("keydown", (e) => {
       if (e.repeat) return;
       this._keys.add(e.code);
-      if (e.code === "Space" || e.code === "KeyJ" || e.code === "Enter") {
+      if (e.code === "Space" || e.code === "Enter") {
         this._actionQueued = true;
         this.actionHeld = true;
       }
-      // dash attack: Shift, K, or L
-      if (e.code === "ShiftLeft" || e.code === "ShiftRight" || e.code === "KeyK" || e.code === "KeyL") {
+      // dash attack: J or Shift (K is no longer bound to combat)
+      if (e.code === "KeyJ" || e.code === "ShiftLeft" || e.code === "ShiftRight") {
         this._dodgeQueued = true;
       }
       // interact (portals, stairs, chests, doors, haggle): E or F — kept apart
@@ -48,7 +49,7 @@ export class Input {
     });
     window.addEventListener("keyup", (e) => {
       this._keys.delete(e.code);
-      if (e.code === "Space" || e.code === "KeyJ" || e.code === "Enter") this.actionHeld = false;
+      if (e.code === "Space" || e.code === "Enter") this.actionHeld = false;
     });
 
     // --- virtual joystick (left 60% of screen, dynamic origin)
@@ -62,9 +63,9 @@ export class Input {
     this._joyOrigin = { x: 0, y: 0 };
     this._joyVec = { x: 0, y: 0 };
 
-    // --- context / interact button (labelled by icon name; see core/icons.js).
-    // Combat is dash-only, so this never triggers an attack — it fires the
-    // current context action (shop deals, portals, stairs) and hides when idle.
+    // --- primary button (labelled by icon name; see core/icons.js). It is the
+    // ATTACK button (fires the dash) while delving, and the context button
+    // (shop deals, prompts) above ground — the game routes its press per area.
     this.actionBtn = document.createElement("button");
     this.actionBtn.id = "action-btn";
     this._actionLabel = null;
@@ -80,18 +81,6 @@ export class Input {
     this.actionBtn.addEventListener("touchend", release);
     this.actionBtn.addEventListener("mousedown", press);
     this.actionBtn.addEventListener("mouseup", release);
-
-    // --- dash button (touch): the attack — an auto-aiming lunge with i-frames
-    this.dodgeBtn = document.createElement("button");
-    this.dodgeBtn.id = "dodge-btn";
-    this.dodgeBtn.innerHTML = icon("walk");
-    hudEl.appendChild(this.dodgeBtn);
-    const dodgePress = (e) => {
-      e.preventDefault();
-      this._dodgeQueued = true;
-    };
-    this.dodgeBtn.addEventListener("touchstart", dodgePress, { passive: false });
-    this.dodgeBtn.addEventListener("mousedown", dodgePress);
 
     // --- interact button (touch): portals / stairs / chests — only shown when
     // something's in reach, so it never steals the attack button's press
@@ -134,14 +123,13 @@ export class Input {
 
     if (!this.isTouch) {
       this.stick.style.display = "none";
-      this.dodgeBtn.style.display = "none";
     }
   }
 
-  // Label the context / interact button with an icon name, or pass a falsy name
-  // to hide it (combat is dash-only now, so there's no "attack" label — the
-  // button only appears for a real context action). Touch-only: never forces it
-  // visible on desktop, where CSS keeps it hidden.
+  // Label the primary button with an icon name (the crossed-swords attack glyph
+  // while delving, a context icon above ground), or pass a falsy name to hide
+  // it. Touch-only: never forces it visible on desktop, where CSS keeps it
+  // hidden.
   setActionLabel(name, show = true) {
     const on = !!name;
     if (this.isTouch) this.actionBtn.style.display = on ? "" : "none";
@@ -151,13 +139,6 @@ export class Input {
       this.actionBtn.innerHTML = icon(name);
     }
     this.actionBtn.classList.toggle("pulse", show);
-  }
-
-  // Show/hide the touch dodge/roll button. Rolling only exists in the dungeon,
-  // so the shop hides it entirely. Desktop never shows it.
-  setDodgeVisible(show) {
-    if (!this.isTouch) return;
-    this.dodgeBtn.style.display = show ? "flex" : "none";
   }
 
   // Show/hide the touch interact button and label it with the current context
