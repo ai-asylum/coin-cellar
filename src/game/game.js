@@ -3947,6 +3947,42 @@ function lerpAngle(a, b, k) {
   return a + d * k;
 }
 
+const _snap = { x: 0, z: 0, h: 0 };
+const SNAP_DELAY = 0.1; // s of interpolation buffer to absorb packet jitter
+
+// Interpolate a snapshot buffer [{t,x,z,h}] into `_snap` at a render time
+// slightly behind now, so remote/lobby avatars glide instead of teleporting
+// between the ~8-11 Hz position packets. Returns false only when the buffer
+// is empty; clamps to the newest sample (no extrapolation) when it runs dry.
+function sampleSnaps(buf) {
+  const n = buf.length;
+  if (!n) return false;
+  const renderT = performance.now() / 1000 - SNAP_DELAY;
+  const first = buf[0];
+  const last = buf[n - 1];
+  if (renderT <= first.t) {
+    _snap.x = first.x; _snap.z = first.z; _snap.h = first.h;
+    return true;
+  }
+  if (renderT >= last.t) {
+    _snap.x = last.x; _snap.z = last.z; _snap.h = last.h;
+    return true;
+  }
+  for (let i = 0; i < n - 1; i++) {
+    const a = buf[i], b = buf[i + 1];
+    if (renderT <= b.t) {
+      const span = b.t - a.t;
+      const k = span > 1e-6 ? (renderT - a.t) / span : 0;
+      _snap.x = a.x + (b.x - a.x) * k;
+      _snap.z = a.z + (b.z - a.z) * k;
+      _snap.h = lerpAngle(a.h, b.h, k);
+      return true;
+    }
+  }
+  _snap.x = last.x; _snap.z = last.z; _snap.h = last.h;
+  return true;
+}
+
 // Friend names are player-supplied — escape them before dropping into markup.
 function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => (
