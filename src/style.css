@@ -917,6 +917,19 @@ html.force-landscape #hud {
   transform-origin: 0 0;
   transform: translateX(100vw) rotate(90deg);
 }
+/* iOS Safari resolves `vh`/`vw` against the *largest* viewport (address bar
+   hidden), so the rotated box ends up bigger than the visible screen — the
+   scene scales up and the bottom-edge touch buttons slide off. Dynamic units
+   track the currently-visible viewport, matching the window.innerHeight/Width
+   the renderer sizes itself from, so the two stay locked together. */
+@supports (width: 100dvh) {
+  html.force-landscape #app,
+  html.force-landscape #hud {
+    width: 100dvh;
+    height: 100dvw;
+    transform: translateX(100dvw) rotate(90deg);
+  }
+}
 
 /* ============================================================ admin panel */
 #admin-panel {
