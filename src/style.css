@@ -388,9 +388,9 @@ button { font-family: inherit; cursor: pointer; }
 #dodge-btn:active { transform: scale(0.9); }
 @media (pointer: fine) { #dodge-btn { display: none; } }
 
-/* interact button — portals / stairs / chests. Sits just above the attack
-   button so the swing and the "use this" press never share a target. Shown
-   only while something's in reach (toggled from input.setInteract). */
+/* interact button — portals / stairs. Sits just above the context action
+   button. Shown only while something's in reach (toggled from
+   input.setInteract); combat is dash-only, so it never shares a press. */
 #interact-btn {
   pointer-events: auto; z-index: 20;
   position: absolute; right: calc(24px + env(safe-area-inset-right));

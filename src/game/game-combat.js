@@ -1,5 +1,6 @@
-// Player combat: swings, ranged shots, aim assist, dodge rolls, taking damage
-// and respawn. Attached to Game.prototype via Object.assign, so `this` is the
+// Player combat: the dash strike (auto-aiming lunge that damages what it sweeps
+// through — combat is dash-only), taking damage and respawn. Attached to
+// Game.prototype via Object.assign, so `this` is the
 // live Game instance. NB: `_recomputeStats` and the `get _crit` accessor stay
 // in game.js (Object.assign would copy a getter's value, not the accessor) —
 // the methods here reach them through `this` as usual.
@@ -18,128 +19,26 @@ const _v2 = new THREE.Vector3();
 const SAFE_ZONE_FLOOR = 3;
 
 export const combatMethods = {
-  // Three-hit chain: light, light, then a wider, heavier finisher. Swing again
-  // within the combo window to advance; pause and it resets to the first hit.
-  // Ranged weapons (bow / staff) route to _rangedAttack instead.
-  _attack() {
-    if (this.playerArea === "shop") return; // no swinging behind the counter
-    if (this._dashT >= 0) return; // no attacking mid-roll
-    if (this.stats.weaponType !== "sword") return this._rangedAttack();
-    if (!this.player.attack()) return; // still mid-swing — ignore this press
-
-    if (this._comboT > 0 && this._comboStep < 3) this._comboStep++;
-    else this._comboStep = 1;
-    this._comboT = 0.6; // window to chain the next swing
-    const step = this._comboStep;
-    const finisher = step === 3;
-
-    const crit = Math.random() < this._crit;
-    let dmg = Math.max(1, Math.round((finisher ? 4 : 2) * this.stats.dmgMul));
-    if (crit) dmg *= 2;
-
-    this.audio.swingCombo(step - 1);
-    this._pendingHit = finisher ? 0.2 : 0.14;
-    this._pendingHitOpts = {
-      dmg, crit, finisher,
-      range: finisher ? 2.8 : 2.1,
-      arc: finisher ? -0.2 : 0.3, // the finisher sweeps a much wider arc
-      knock: finisher ? 1.7 : 1,
-    };
-
-    // gentle aim assist: bend the swing toward the nearest foe in front so a
-    // hit lands without needing pixel-perfect aim (this is why melee used to
-    // only connect when an enemy was practically touching you). The committed
-    // heading is then held through the swing (see the facing block above) so
-    // the delayed hit lands where the swoosh points.
-    this.player.heading = this._assistedHeading(this.player.heading);
-    const h = this.player.heading;
-    // crescent swoosh — larger + warmer on the finisher
-    _v.copy(this.player.position).setY(0.62);
-    this.slash.play(_v, h, finisher ? 1.5 : 1);
-    _v.set(this.player.position.x + Math.sin(h) * 1.4, 0.8, this.player.position.z + Math.cos(h) * 1.4);
-    this.particles.burst(_v, { color: finisher ? 0xffe0a0 : 0xdfe8ff, n: finisher ? 12 : 7, speed: finisher ? 3 : 2.1, up: 1.4, gravity: 3, life: 0.3, size: 0.85 });
-    if (finisher) {
-      this.audio.finisher();
-    }
-    // Tell the partner to swing right now. The periodic "p" snapshot only
-    // samples at ~11 Hz, so a quick swing can slip between packets — an explicit
-    // event guarantees the swoosh (and its committed heading) always land.
-    this.net.send({ t: "atk", h, finisher: finisher ? 1 : 0 });
-  },
-
-  // Bow / staff shot: gated by the weapon's cadence, auto-aimed at the nearest
-  // live foe (or the facing direction if the floor's clear). Spawns a friendly
-  // projectile the dungeon resolves against enemies. Crits still roll off the
-  // ring bonus; the staff's bolts pierce and can carry a splash.
-  _rangedAttack() {
-    if (this._rangedCd > 0 || this._dashT >= 0 || this._respawnT >= 0 || this.gameOver) return;
-    const w = this.stats.weapon;
-    if (!w) return;
-    this._rangedCd = w.cd || 0.4;
-    const h = this._nearestEnemyHeading(this.player.heading);
-    this.player.heading = h;
-    this.player.attack(); // reuse the arm swing as a draw / cast gesture
-    this.audio.swingCombo(0);
-    const crit = Math.random() < this._crit;
-    let dmg = Math.max(1, Math.round((w.projDmg || 3) * this.stats.dmgMul));
-    if (crit) dmg *= 2;
-    if (this.playerArea !== "dungeon" || !this.dungeon.active) return;
-    const sx = Math.sin(h), sz = Math.cos(h);
-    const sp = w.projSpeed || 14;
-    const ox = this.player.position.x + sx * 0.5;
-    const oz = this.player.position.z + sz * 0.5;
-    this.dungeon.spawnPlayerProjectile(ox, oz, sx * sp, sz * sp, {
-      color: w.projColor || 0xffffff, dmg, crit,
-      radius: w.type === "staff" ? 0.3 : 0.2,
-      pierce: !!w.pierce, splash: w.splash || 0,
-      y: this.player.height * 0.55, life: 2.2,
-    });
-    _v.set(ox, this.player.height * 0.55, oz);
-    this.particles.burst(_v, { color: w.projColor || 0xffffff, n: 5, speed: 2.2, up: 0.6, life: 0.25, size: 0.7 });
-  },
-
-  // Heading toward the closest living foe within a generous radius — used for
-  // ranged auto-aim (unlike _assistedHeading it doesn't require a frontal cone).
-  _nearestEnemyHeading(h) {
-    if (this.playerArea !== "dungeon" || !this.dungeon.active) return h;
+  // Offset to the nearest living foe within `range` (or null if the floor's
+  // clear nearby). Used to bend the dash onto a target so it auto-aims.
+  _nearestEnemyWithin(range) {
+    if (this.playerArea !== "dungeon" || !this.dungeon.active) return null;
     const p = this.player.position;
-    let best = null, bestD = 16 * 16;
+    let best = null, bestD = range * range;
     for (const e of this.dungeon.enemies) {
       if (e.deadT >= 0) continue;
       const dx = e.creature.position.x - p.x;
       const dz = e.creature.position.z - p.z;
       const d = dx * dx + dz * dz;
-      if (d < bestD && d > 0.001) { bestD = d; best = { dx, dz }; }
+      if (d < bestD && d > 0.0001) { bestD = d; best = { dx, dz, dist: Math.sqrt(d) }; }
     }
-    return best ? Math.atan2(best.dx, best.dz) : h;
+    return best;
   },
 
-  // Pick a swing heading with a bit of aim assist: if a live foe sits within
-  // reach and roughly in front, snap the swing onto it; otherwise keep the
-  // player's own facing. Favours whatever's closest to the current aim, then
-  // by distance, and ignores anything clearly behind you.
-  _assistedHeading(h) {
-    if (this.playerArea !== "dungeon" || !this.dungeon.active) return h;
-    const p = this.player.position;
-    const fwdX = Math.sin(h), fwdZ = Math.cos(h);
-    const ASSIST = 3.0;
-    let best = null, bestScore = -Infinity;
-    for (const e of this.dungeon.enemies) {
-      if (e.deadT >= 0) continue;
-      const dx = e.creature.position.x - p.x;
-      const dz = e.creature.position.z - p.z;
-      const dist = Math.hypot(dx, dz);
-      if (dist < 0.001 || dist > ASSIST + e.creature.radius) continue;
-      const dot = (dx * fwdX + dz * fwdZ) / dist;
-      if (dot < -0.15) continue; // don't wheel around to hit something behind
-      const score = dot * 2 - dist * 0.15;
-      if (score > bestScore) { bestScore = score; best = { dx, dz }; }
-    }
-    return best ? Math.atan2(best.dx, best.dz) : h;
-  },
-
-  // A quick roll: brief i-frames + a burst of speed, on a short cooldown.
-  // Rolls in the movement direction, or backsteps away from your facing.
+  // The dash is the whole of your offence now: a quick lunge with brief i-frames
+  // that damages every foe it sweeps through (and cracks chests / smashes props
+  // in its path — see Dungeon.dashHit). When a foe is close the lunge auto-aims,
+  // snapping onto the nearest one so you dash straight into the fight. Short cd.
   _dodge() {
     if (this._dashT >= 0 || this._dodgeCd > 0 || this._respawnT >= 0 || this.gameOver) return;
     const mv = this.input.move;
@@ -148,19 +47,46 @@ export const combatMethods = {
       const l = Math.hypot(mv.x, mv.y) || 1;
       dx = mv.x / l; dz = mv.y / l;
     } else {
-      // backstep: away from where the player is facing
-      dx = -Math.sin(this.player.heading);
-      dz = -Math.cos(this.player.heading);
+      // no steer: lunge the way you're facing (a forward strike now that the
+      // dash is an attack, not a backstep)
+      dx = Math.sin(this.player.heading);
+      dz = Math.cos(this.player.heading);
     }
+    // auto-aim: snap the lunge onto the nearest foe in reach so the dash lands
+    // its hit without needing precise aim
+    const target = this._nearestEnemyWithin(5.5);
+    if (target) { dx = target.dx / target.dist; dz = target.dz / target.dist; }
+
     this._dashDX = dx;
     this._dashDZ = dz;
     this._dashT = 0;
     this._dodgeCd = 0.55 * (this.stats.dodgeCdMul || 1);
-    this._invulnT = Math.max(this._invulnT, 0.36); // i-frames through the roll
+    this._invulnT = Math.max(this._invulnT, 0.36); // i-frames through the dash
+    // fresh damage pass for this dash: each foe / chest takes the hit only once
+    this._dashHitIds = new Set();
+    this._dashCrit = Math.random() < this._crit;
+    this._dashDmg = Math.max(1, Math.round(4 * this.stats.dmgMul)) * (this._dashCrit ? 2 : 1);
+    this.player.heading = Math.atan2(dx, dz);
     this.player.animator.squash.kick(5);
     this.audio.dodge();
+    // Keep the dash's own VFX: the blue burst at the feet ...
     _v.copy(this.player.position).setY(0.1);
     this.particles.burst(_v, { color: 0xbfe8ff, n: 9, speed: 2.6, up: 0.6, gravity: 3, life: 0.35, size: 0.9 });
+    // ... plus a slash swoosh along the lunge so the strike reads as an attack
+    _v.copy(this.player.position).setY(0.62);
+    this.slash.play(_v, this.player.heading, 1.2);
+  },
+
+  // Resolve the dash's contact for the current frame while it's live: damage
+  // every foe swept through (each hit once, tracked in _dashHitIds), crack any
+  // chest it barrels into and smash scenery in its path. Host applies damage; a
+  // guest sends the hit and lets the host echo it back.
+  _dashStrike() {
+    if (this._dashT < 0 || !this._dashHitIds) return;
+    if (this.playerArea !== "dungeon" || !this.dungeon.active) return;
+    this.dungeon.dashHit(this.player, this._dashDmg, this, {
+      crit: this._dashCrit, hitIds: this._dashHitIds,
+    });
   },
 
   enemyHitsPlayer(e, targetEntry) {
