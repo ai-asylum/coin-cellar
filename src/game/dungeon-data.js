@@ -2,7 +2,7 @@
 // the floor/dungeon geometry math. Pure data + tiny helpers, split out of
 // dungeon.js so the class file can stay a slim orchestrator.
 import * as THREE from "three";
-import { goblinSpec, bruteSpec, skitterSpec, slimeSpec, wispSpec, archerSpec, bossSpec, humanoidSpec, hsl } from "../chargen/species.js";
+import { goblinSpec, bruteSpec, skitterSpec, slimeSpec, wispSpec, archerSpec, bossSpec, humanoidSpec, ratSpec, hsl } from "../chargen/species.js";
 import { rng, pick, clamp } from "../core/engine.js";
 
 export const DUNGEON_ORIGIN = new THREE.Vector3(200, 0, 0);
@@ -12,6 +12,15 @@ export const DUNGEON_ORIGIN = new THREE.Vector3(200, 0, 0);
 // reaction window the player dodges into) and, for ranged foes, a keep-away
 // band. Every attack now telegraphs before it can hurt you.
 export const ENEMY_KINDS = {
+  // warren rat: harmless prey. It never attacks — the moment it notices you it
+  // bolts the other way (behavior "flee"), so the first floor is a low-stakes
+  // chase. Frail and quick; drops its hide when you finally corner one.
+  rat: {
+    make: (seed) => ratSpec({ key: `e_rat_${seed % 6}`, seed, scale: 0.55 + (seed % 3) * 0.03, hue: 0.05 + (seed % 4) * 0.02 }),
+    hp: 2, dmg: 0, speed: 3.4, aggro: 9, gold: [2, 6],
+    behavior: "flee", harmless: true, windup: 0.3, reach: 0.9, glow: [0.5, 0.35, 0.3],
+    loot: ["rathide"], dropRate: 0.85,
+  },
   // fast erratic swarmer: darts in, quick bite, backs off
   skitter: {
     make: (seed, tier) => {
@@ -322,8 +331,9 @@ export function isBossFloor(floorN) {
 // Each themed dungeon spawns only its own natives — DUNGEON_MIX[dungeon] lists
 // the roster per local floor (1st/2nd/3rd), thickening toward the boss floor.
 export const DUNGEON_MIX = [
-  [ // Rat Warren — the classic starter crawl, exactly the original mixes
-    ["skitter", "slime"],
+  [ // Rat Warren — the first floor is nothing but skittish rats (a gentle,
+    // no-damage warm-up); the crawl proper starts on the second floor
+    ["rat"],
     ["skitter", "slime", "goblin"],
     ["slime", "goblin", "wisp", "archer"],
   ],

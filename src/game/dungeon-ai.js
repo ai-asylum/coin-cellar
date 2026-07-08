@@ -18,7 +18,9 @@ export const aiMethods = {
   // into you should still sting. The player's i-frames gate the actual damage;
   // a per-enemy cooldown keeps the net traffic (remote player) sane.
   _contactDamage(e, dt, players) {
-    if (e.deadT >= 0) return;
+    // harmless critters (the fleeing rat) never sting on contact — brushing
+    // past one as it bolts should cost the player nothing
+    if (e.deadT >= 0 || e.def.harmless) return;
     e.contactCd = (e.contactCd ?? 0) - dt;
     if (e.contactCd > 0) return;
     const c = e.creature;
@@ -142,6 +144,20 @@ export const aiMethods = {
     const ready = e.attackCd <= 0;
 
     switch (e.behavior) {
+      case "flee": {
+        // prey, not predator: sprint directly away from the nearest player and
+        // never wind up an attack. A gentle sine weave keeps it from running a
+        // dead-straight line (and reads as a panicked scurry); it puts on a
+        // burst of speed the closer the player gets. Wall collision in
+        // _finishFrame keeps it from clipping through geometry when cornered.
+        const weave = Math.sin(e.t * 9 + e.seed) * 0.35;
+        _p.set(_d.z, 0, -_d.x).multiplyScalar(weave); // perpendicular jitter
+        _d.multiplyScalar(-1).add(_p).normalize(); // flip to point away, then weave
+        c.heading = Math.atan2(_d.x, _d.z);
+        const panic = dist < 3 ? 1.35 : 1; // extra scramble when close
+        c.position.addScaledVector(_d, speed * panic * dt);
+        break;
+      }
       case "swarm": {
         // erratic weave so a swarm doesn't march in a straight line
         const weave = Math.sin(e.t * 7 + e.seed) * 0.55;

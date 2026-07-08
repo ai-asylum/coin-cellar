@@ -198,6 +198,71 @@ export function skitterSpec({ key, seed, legsN = 6, scale = 0.75, hue = 0.78 }) 
   };
 }
 
+// ---------------------------------------------------------------- rat
+// Small four-legged rodent — the first floor's only inhabitant. A skittish
+// forager (big round ears, a twitchy pink snout, a long bald tail) that runs
+// from the player rather than fighting it (see dungeon-ai's "flee" behavior).
+export function ratSpec({ key, seed = 0, scale = 0.58, hue = 0.07 }) {
+  const r = rng(seed);
+  const fur = hsl(hue, 0.26, 0.4 + r() * 0.08);
+  const belly = hsl(hue, 0.18, 0.62);
+  const flesh = hsl(0.02, 0.45, 0.68); // bare pink of ears, nose and tail
+  const g = new Rig();
+  const root = g.bone("root", -1, [0, GROUND, 0]);
+  const hips = g.bone("hips", root, [0, -0.48 - GROUND, 0]);
+  const head = g.bone("head", hips, [0, 0.08, 0.3]);
+  const t1 = g.bone("tail1", hips, [0, 0.02, -0.32]);
+  const t2 = g.bone("tail2", t1, [0, 0.08, -0.2]);
+
+  // low, plump body over a paler belly
+  g.ellipsoid(hips, [0, -0.48, -0.04], 0.22, 0.19, 0.3, fur);
+  g.ellipsoid(hips, [0, -0.56, -0.02], 0.18, 0.12, 0.26, belly, 0.14);
+  // head with a tapered snout and a little pink nose
+  g.sphere(head, [0, -0.4, 0.28], 0.15, fur);
+  g.capsule(head, [0, -0.42, 0.36], [0, -0.45, 0.5], 0.08, 0.03, fur, 0.06);
+  g.sphere(head, [0, -0.45, 0.52], 0.03, flesh, 0.05);
+  // big round ears (fur outer disc, pink inner)
+  g.sphere(head, [-0.12, -0.26, 0.24], 0.085, fur, 0.05);
+  g.sphere(head, [0.12, -0.26, 0.24], 0.085, fur, 0.05);
+  g.sphere(head, [-0.12, -0.26, 0.27], 0.05, flesh, 0.05);
+  g.sphere(head, [0.12, -0.26, 0.27], 0.05, flesh, 0.05);
+  // long bald tail trailing up behind
+  g.capsule(t1, [0, -0.48, -0.32], [0, -0.4, -0.56], 0.05, 0.03, flesh);
+  g.capsule(t2, [0, -0.4, -0.56], [0, -0.28, -0.74], 0.03, 0.012, flesh, 0.08);
+
+  // four short legs; diagonal pairs (group 0/1) give a scurrying trot
+  const legDefs = [[-1, 0.14, 0], [1, 0.14, 1], [-1, -0.16, 1], [1, -0.16, 0]];
+  const legs = [];
+  legDefs.forEach(([side, z, grp], i) => {
+    const sock = [side * 0.15, -0.5, z];
+    const foot = [side * 0.19, GROUND + 0.02, z];
+    const b = g.bone("leg" + i, hips, [sock[0], 0, sock[2]]);
+    g.capsule(b, sock, [foot[0], foot[1] + 0.02, foot[2]], 0.05, 0.032, fur);
+    const Lp = (p) => [p[0] * scale, (p[1] - GROUND) * scale, p[2] * scale];
+    legs.push({ bone: b, socket: Lp(sock), foot: Lp(foot), group: grp });
+  });
+
+  const L = (x, y, z) => [x * scale, (y - GROUND) * scale, z * scale];
+  return {
+    key, scale, groundY: GROUND, blend: 0.1,
+    parts: g.parts, bones: g.bones,
+    face: {
+      head,
+      eyes: { l: L(-0.07, -0.36, 0.36), r: L(0.07, -0.36, 0.36), r0: 0.04 * scale },
+    },
+    anim: {
+      mode: "walker",
+      hips, chest: hips, head,
+      tail: [t1, t2],
+      legs, arms: [],
+      hipH: (-0.48 - GROUND) * scale,
+      stride: 0.26 * scale,
+      radius: 0.34 * scale,
+      height: (0.0 - GROUND) * scale,
+    },
+  };
+}
+
 // ---------------------------------------------------------------- slime
 export function slimeSpec({ key, scale = 0.7, hue = 0.36 }) {
   const body = hsl(hue, 0.6, 0.5);
