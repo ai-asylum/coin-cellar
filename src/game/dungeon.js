@@ -10,7 +10,7 @@ import { scatterDungeonDecor, disposeDecor } from "./decor.js";
 import { Projectiles } from "./projectile.js";
 import { rng, pick } from "../core/engine.js";
 import { DUNGEON_ORIGIN, isBossFloor, dungeonIndexFor, bossDefFor, ENEMY_KINDS, HOLE_THEMES, DEFAULT_THEME, FLOORS_PER_DUNGEON, floorMixFor } from "./dungeon-data.js";
-import { CELL, makeChest, makeGate, makeFloorGeometry, makeTilesTexture } from "./dungeon-geometry.js";
+import { CELL, makeChest, makeGate, makeFloorGeometry } from "./dungeon-geometry.js";
 import { aiMethods } from "./dungeon-ai.js";
 import { combatMethods } from "./dungeon-combat.js";
 
@@ -163,13 +163,12 @@ export class Dungeon {
     // palette deepens with the floor within its own dungeon (1st/2nd/3rd floor)
     const localFloor = (floorN - 1) % FLOORS_PER_DUNGEON;
     const palette = theme.palettes[Math.min(localFloor, theme.palettes.length - 1)];
-    const floorTex = makeTilesTexture(palette, seed + floorN);
     // the floor only exists under open (walkable) cells — one merged quad per
     // cell rather than a single slab, so there's no floor hanging out beyond the
-    // walls. UVs keep the tiled texture continuous across neighbouring cells.
+    // walls. Flat theme color for now (checkerboard texture removed).
     this._floorMesh = new THREE.Mesh(
       makeFloorGeometry(open, GW, GH, cellPos),
-      new THREE.MeshToonMaterial({ map: floorTex })
+      new THREE.MeshToonMaterial({ color: new THREE.Color(palette[1]) })
     );
     this.group.add(this._floorMesh);
 
