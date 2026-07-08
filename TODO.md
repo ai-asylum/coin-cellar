@@ -10,5 +10,5 @@ Ordered list of tasks. Work top to bottom.
 - [ ] 6. Remove the greyed-out unlockable tables and replace them by outlines on the floor.
 - [ ] 7. Add a rat creature for the first floor that drops rat hide. It won't attack the player and runs away. Only rats spawn on the first floor.
 - [ ] 8. Boss gate: make it spawn far from the player so you don't walk into it accidentally. Make the items flying when boss is dead fly closer to the dead boss. Give the player the choice to go back up in the boss gate too.
-- [ ] 9. First screen (with Play button) is in landscape; should be portrait right away.
+- [x] 9. First screen (with Play button) is in landscape; should be portrait right away.
 - [ ] 10. Remove checkerboard pattern on dungeon floor; use a flat color for now.
