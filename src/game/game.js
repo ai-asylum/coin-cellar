@@ -319,7 +319,9 @@ export class Game {
 
     // movement
     const mv = this.input.move;
-    const sheetBlocked = this.hud.sheetOpen;
+    // A sheet or a live dialogue bubble both freeze the player: no walking,
+    // no swinging, no context-interacts until it's dismissed.
+    const sheetBlocked = this.hud.sheetOpen || this.hud.speakOpen;
 
     // dodge / roll (underground only) — grabbed before movement so it can override it
     if (this.input.dodgeEdge && !sheetBlocked && (this.playerArea === "dungeon" || this.playerArea === "sewer")) this._dodge();
@@ -349,7 +351,7 @@ export class Game {
     } else if (!sheetBlocked && (mv.x || mv.y)) {
       c.heading = Math.atan2(mv.x, mv.y);
     }
-    const colliders = this.playerArea === "shop" ? this.shop.colliders
+    const colliders = this.playerArea === "shop" ? this.shop.playerColliders
       : this.playerArea === "sewer" ? this.sewer.colliders : this.dungeon.colliders;
     this.collide(c.position, c.radius * 0.8, colliders);
     if (this.playerArea === "shop") {
@@ -481,6 +483,13 @@ export class Game {
 
   // Keyboard shortcuts for the on-screen actions + the admin panel.
   _handleKey(code) {
+    // A live dialogue bubble owns the keyboard: the "ok" keys advance it and
+    // everything else is swallowed so you can't move, attack or interact while
+    // someone's mid-sentence.
+    if (this.hud.speakOpen) {
+      if (code === "KeyJ" || code === "Enter" || code === "Space") this.hud.advanceSpeak();
+      return;
+    }
     // An open modal takes keyboard priority: J/K move the highlight, Enter
     // picks it, Esc backs out — and the haggle sheet remaps those to nudge the
     // price / seal the deal / walk away. The esc-menu keeps Esc = resume; the
@@ -571,23 +580,31 @@ export class Game {
       if (slot) {
         const table = slot.table;
         if (table && !table.repaired) {
-          const i = this.shop.tables.indexOf(table);
-          const broke = this.gold < table.cost;
-          return {
-            label: broke ? "warning" : "coin",
-            hint: `Repair ${table.cost}g`,
-            fn: () => this._repairTable(i),
-            // no ground ring for tables — the whole table glows white instead
-            // (see Shop.highlightTable); the hint text floats above the top.
-            focus: _focus.copy(table.group.position).setY(1.35).clone(),
-            color: broke ? 0x9aa0aa : 0x66ff9e,
-            glowTable: table,
-          };
+          // Hold back the repair UI until the tutorial's first house is rebuilt:
+          // a brand-new player shouldn't be nudged to fix shelves before the
+          // Mayor's put them on the restoration loop. Until then a broken table
+          // just reads as scenery (no prompt, no glow). townPop() is persisted,
+          // so returning players — who've already raised a home — see it as usual.
+          if (this.townPop() > 0) {
+            const i = this.shop.tables.indexOf(table);
+            const broke = this.gold < table.cost;
+            return {
+              label: broke ? "warning" : "coin",
+              hint: `Repair ${table.cost}g`,
+              fn: () => this._repairTable(i),
+              // no ground ring for tables — the whole table glows white instead
+              // (see Shop.highlightTable); the hint text floats above the top.
+              focus: _focus.copy(table.group.position).setY(1.35).clone(),
+              color: broke ? 0x9aa0aa : 0x66ff9e,
+              glowTable: table,
+            };
+          }
+        } else {
+          if (slot.item)
+            return { label: "box", hint: "Swap", fn: () => this._replaceMenu(slot), focus: _focus.copy(slot.pos).clone(), color: 0xff9d5c };
+          if (this.stash.length > 0)
+            return { label: "box", hint: "Stock", fn: () => this._placeMenu(slot), focus: _focus.copy(slot.pos).clone(), color: 0x66ff9e };
         }
-        if (slot.item)
-          return { label: "box", hint: "Swap", fn: () => this._replaceMenu(slot), focus: _focus.copy(slot.pos).clone(), color: 0xff9d5c };
-        if (this.stash.length > 0)
-          return { label: "box", hint: "Stock", fn: () => this._placeMenu(slot), focus: _focus.copy(slot.pos).clone(), color: 0x66ff9e };
       }
       return { label: "swords", fn: () => this._attack() };
     }
@@ -1200,6 +1217,7 @@ export class Game {
   // fresh save, solo only, and hands off to the Mayor when the loop closes.
   _tutStart() {
     this.tutorial = "delve";
+    this.shop.doorLocked = true; // keep the new player in until the Mayor's intro
     setTimeout(() => this._tutHint(), 3200); // let the intro banner clear first
   }
 
@@ -1448,10 +1466,16 @@ export class Game {
   _mayorGoToLot(idx) {
     const m = this._mayor;
     if (!m) return;
+    this.shop.doorLocked = false; // first dialog's done — the shopfront's free now
     m.targetLot = idx;
     m.state = idx >= 0 ? "toLot" : "leave";
     const lot = this.shop.lots[idx];
-    if (lot) this._questArrow = { pos: lot.interactPos.clone(), text: `${icon("home")} Rebuild — ${lot.cost}g` };
+    if (lot) {
+      // wait a couple of metres to the right of the plot — clear of the spot the
+      // player stands on to rebuild — and hold there until the house goes up.
+      m.standSpot = lot.interactPos.clone().add(_v.set(2.5, 0, 0));
+      this._questArrow = { pos: lot.interactPos.clone(), text: `${icon("home")} Rebuild — ${lot.cost}g` };
+    }
   }
 
   _mayorLeave() {
@@ -1507,7 +1531,8 @@ export class Game {
   }
 
   // Drive the Mayor cutscene each frame: walk in, stand and talk, stroll out to
-  // the lot, linger, then leave. He follows a short waypoint path (routed
+  // a spot just right of the target lot and wait there until it's rebuilt (then
+  // a praise beat sends him off). He follows a short waypoint path (routed
   // through the doorway so he doesn't try to walk through the back wall);
   // movement is a simple seek + wall-slide and the body auto-animates from its
   // own position delta. A per-state timeout keeps him from ever getting stuck.
@@ -1542,7 +1567,7 @@ export class Game {
       if (m.state === "enter") setPath([this.shop.doorInside, m.talkSpot]);
       else if (m.state === "toLot") {
         const lot = this.shop.lots[m.targetLot];
-        setPath(lot ? [this.shop.doorInside, this.shop.doorPos, lot.interactPos] : [this.shop.doorInside]);
+        setPath(lot ? [this.shop.doorInside, this.shop.doorPos, m.standSpot] : [this.shop.doorInside]);
       } else setPath([this.shop.doorInside, this.shop.doorPos,
         new THREE.Vector3(this.shop.streetHalfX, 0, this.shop.streetWalkZ)]);
     }
@@ -1562,14 +1587,13 @@ export class Game {
         if (follow(2.6)) {
           m.path = null;
           m.state = "await";
-          m.lingerT = 3.5;
           const lot = this.shop.lots[m.targetLot];
           if (lot) c.heading = Math.atan2(lot.cx - c.position.x, lot.collider.z - c.position.z);
         }
         break;
       case "await":
-        m.lingerT -= dt;
-        if (m.lingerT <= 0) m.state = "leave";
+        // hold by the plot (facing it) until the player rebuilds it — the repair
+        // fires _mayorAfterRestore, which moves him on. No timed walk-off.
         break;
       case "leave":
         if (follow(2.7)) return this._endMayorScene();
@@ -1672,7 +1696,7 @@ export class Game {
     }
     this.paused = !this.net.connected;
     const sub = id === 0
-      ? "the way down — today's layout is the same for everyone"
+      ? ""
       : `shortcut to Floor ${hole.floor} — ${this._shortcutLabel(id)} left`;
     const el = this.hud.showSheet(`
       <div class="sheet-title"><span class="big-emoji">${icon("hole")}</span>

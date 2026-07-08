@@ -178,6 +178,7 @@ export class Shop {
     mkLeaf(doorR, -1); // right leaf, hinged on the right jamb
     this.doorsOpen = true; // the shop trades all day; the shopfront swings with foot traffic
     this.doorHeld = false; // scene override: a scripted scene is holding the doors open
+    this.doorLocked = false; // FTUE: fence the player inside until the Mayor's intro is done
     this._doorAngle = 0; // 0 = shut, 1 = fully swung open (eased each frame)
     // toggled in/out of `colliders` so a shut door blocks the player (kept out
     // of the baked nav grid, so open doors let customers path straight through)
@@ -760,6 +761,16 @@ export class Shop {
     this.doorsOpen = !!open;
   }
 
+  // Colliders the *player* is fenced by: the shared walls/furniture, plus the
+  // shopfront doorway while it's FTUE-locked — even when the leaves are swung
+  // open for a scripted customer. Customers and the Mayor keep reading the base
+  // `colliders`, so they still path through the doorway freely.
+  get playerColliders() {
+    if (this.doorLocked && !this.colliders.includes(this._doorCollider))
+      return [...this.colliders, this._doorCollider];
+    return this.colliders;
+  }
+
   // ------------------------------------------------------------ tables
   // Reflect a table's repaired/broken state onto its meshes (real materials vs
   // the drab grey) and its slots (a broken table's slots can't be stocked).
@@ -863,7 +874,10 @@ export class Shop {
     // its collider lifts, below) whenever they step up to it, day or night.
     const pp = this.game.player && this.game.player.position;
     const playerNear = !!pp && (pp.distanceTo(this.doorInside) < 2.0 || pp.distanceTo(this.doorPos) < 2.6);
-    const wantOpen = this.customers.some((c) => !c._outside) || this.doorHeld || playerNear;
+    // while the shopfront's locked for the FTUE the player can't nudge it open by
+    // walking up — only a scripted customer streaming in (or a held-open scene)
+    // still swings it, so it reads as firmly shut until the Mayor's intro ends.
+    const wantOpen = this.customers.some((c) => !c._outside) || this.doorHeld || (playerNear && !this.doorLocked);
 
     // ease the shopfront doors toward their open/shut pose
     const doorTgt = wantOpen ? 1 : 0;

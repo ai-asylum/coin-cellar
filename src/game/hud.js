@@ -74,6 +74,8 @@ export class HUD {
     this.backdropEl.addEventListener("click", () => this._onBackdrop?.());
     this.portraitsEl = root.querySelector("#portraits");
     this.dialogEl = root.querySelector("#dialog");
+    this.speakOpen = false;
+    this._onAdvance = null;
     this.floatiesEl = root.querySelector("#floaties");
     this.hurtFlashEl = root.querySelector("#hurt-flash");
     this.toastWrap = root.querySelector("#toast-wrap");
@@ -418,10 +420,20 @@ export class HUD {
         <div class="dlg-text">${text}</div>
         <div class="dlg-cta">${cta}</div>
       </div>`;
-    el.onclick = () => onAdvance?.();
+    this.speakOpen = true;
+    this._onAdvance = onAdvance;
+    el.onclick = () => this.advanceSpeak();
+  }
+
+  // Advance the open dialogue bubble (bar tap, or the "ok" key/button routed
+  // through the game). No-op if nothing's being said.
+  advanceSpeak() {
+    if (this.speakOpen) this._onAdvance?.();
   }
 
   hideSpeak() {
+    this.speakOpen = false;
+    this._onAdvance = null;
     this.dialogEl.classList.add("hidden");
     this.dialogEl.onclick = null;
     this.dialogEl.innerHTML = "";
