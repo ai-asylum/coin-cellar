@@ -217,9 +217,6 @@ export const combatMethods = {
         this._safeRecovery ? "the clerk found you in the street" : "your bag was lost", 2.6);
       this.audio.gameover();
       this._respawnT = 2.4;
-    } else {
-      // still standing but hurt — quaff a consumable if one fits the wound
-      this._tryAutoHeal();
     }
   },
 
