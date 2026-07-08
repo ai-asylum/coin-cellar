@@ -337,13 +337,30 @@ export class Game {
       c.position.z = clamp(c.position.z, b.minZ, b.maxZ);
     }
 
-    // auto-pickup drops (world coords)
+    // floor loot: items rest on the ground and are drawn toward the hero once
+    // they're inside the magnet field, accelerating the closer/longer they're
+    // pulled, then collected on contact. Suppressed briefly after you toss
+    // something so you don't instantly re-grab what you just dropped.
     if (this.playerArea === "dungeon" && performance.now() >= (this._pickupSuppressT || 0)) {
       for (const drop of [...this.dungeon.drops]) {
+        if (drop.fly) continue; // still popping out / arcing onto the floor
         const dp = drop.mesh.position;
-        const dx = dp.x - c.position.x;
-        const dz = dp.z - c.position.z;
-        if (dx * dx + dz * dz < 1.1) this._pickupDrop(drop);
+        const dx = c.position.x - dp.x;
+        const dz = c.position.z - dp.z;
+        const d2 = dx * dx + dz * dz;
+        if (d2 <= PICKUP_COLLECT_R * PICKUP_COLLECT_R) {
+          this._pickupDrop(drop);
+          continue;
+        }
+        if (d2 <= PICKUP_MAGNET_R * PICKUP_MAGNET_R) {
+          const d = Math.sqrt(d2) || 1e-4;
+          drop.pull = Math.min(PICKUP_PULL_MAX, (drop.pull || PICKUP_PULL_MIN) + PICKUP_PULL_ACCEL * dt);
+          const step = Math.min(drop.pull * dt, d);
+          dp.x += (dx / d) * step;
+          dp.z += (dz / d) * step;
+        } else if (drop.pull) {
+          drop.pull = 0; // drifted out of range — let it settle again
+        }
       }
     }
 
@@ -990,6 +1007,14 @@ const USE_FX_DUR = 0.85;
 const USE_FX_SIZE = 0.8;
 // how far in front of the player a dropped item lands (world units)
 const DROP_FWD = 2.5;
+// floor-loot magnet: items inside PICKUP_MAGNET_R are pulled toward the hero,
+// their speed ramping from PICKUP_PULL_MIN up to PICKUP_PULL_MAX (units/s) at
+// PICKUP_PULL_ACCEL (units/s²), and are collected once within PICKUP_COLLECT_R.
+const PICKUP_MAGNET_R = 2.6;
+const PICKUP_COLLECT_R = 0.55;
+const PICKUP_PULL_MIN = 2.5;
+const PICKUP_PULL_ACCEL = 22;
+const PICKUP_PULL_MAX = 16;
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();

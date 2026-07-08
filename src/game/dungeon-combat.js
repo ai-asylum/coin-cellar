@@ -376,10 +376,16 @@ export const combatMethods = {
     shadow.position.set(0, -mesh.position.y + 0.02, 0);
     mesh.add(shadow);
     this.game.engine.scene.add(mesh);
-    const drop = { id: id ?? this.game.net.newId(), item: itemId, mesh, phase: Math.random() * 9, restX: rx, restZ: rz };
+    // `pull` tracks the magnet speed once a hero is in range (see game._updatePlayer).
+    const drop = { id: id ?? this.game.net.newId(), item: itemId, mesh, phase: Math.random() * 9, restX: rx, restZ: rz, pull: 0 };
     if (opts.flyFrom) {
       drop.fly = { fromX: opts.flyFrom.x, fromZ: opts.flyFrom.z, t: 0, dur: 0.5 + Math.random() * 0.4, arc: 1.6 + Math.random() * 1.4 };
       mesh.position.set(opts.flyFrom.x, 0.7, opts.flyFrom.z);
+    } else {
+      // a small in-place hop so freshly-dropped loot visibly pops out and lands
+      // on the floor first — it can't be collected while it's still arcing, so
+      // kills at point-blank range no longer vanish straight into the bag.
+      drop.fly = { fromX: rx, fromZ: rz, t: 0, dur: 0.38, arc: 0.5 };
     }
     this.drops.push(drop);
     const msg = { t: "drop", id: drop.id, item: itemId, x, z };
