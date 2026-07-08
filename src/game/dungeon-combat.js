@@ -269,16 +269,17 @@ export const combatMethods = {
       const spoils = [g1, g2, "crown", "potion"];
       for (let i = 0; i < 3 + hole; i++) spoils.push(pick(rl, table.rare));
       spoils.forEach((id, i) => {
-        // scatter across the arena floor (kept off the walls) — each spoil arcs
-        // out from where the boss fell, so the loot showers across the room
-        let x, z;
+        // land close to the boss corpse — each spoil arcs out in a tight ring
+        // from where the boss fell so the hoard clusters by the body instead of
+        // showering across the whole arena (which made loot easy to miss).
+        const a = (i / spoils.length) * Math.PI * 2 + rl() * 0.7;
+        const rad = 0.9 + rl() * 1.1; // ~1–2 units out, a snug pile
+        let x = bx + Math.sin(a) * rad;
+        let z = bz + Math.cos(a) * rad;
+        // still keep drops off the arena walls when we know the room bounds
         if (b) {
-          x = b.minX + 1.6 + rl() * (b.maxX - b.minX - 3.2);
-          z = b.minZ + 1.6 + rl() * (b.maxZ - b.minZ - 3.2);
-        } else {
-          const a = (i / spoils.length) * Math.PI * 2;
-          x = bx + Math.sin(a) * 3.4;
-          z = bz + Math.cos(a) * 3.4;
+          x = Math.min(b.maxX - 1.6, Math.max(b.minX + 1.6, x));
+          z = Math.min(b.maxZ - 1.6, Math.max(b.minZ + 1.6, z));
         }
         this.spawnDrop(id, x, z, null, { flyFrom: { x: bx, z: bz } });
       });

@@ -97,6 +97,21 @@ export class Dungeon {
     }
     }
 
+    // On the boss floor the arrival spot is room 0, so make room 0 the room
+    // that sits FARTHEST from the sealed door. Otherwise the player can spawn
+    // right beside the gate and stumble into the boss fight unintentionally —
+    // this pushes the entrance to the opposite end of the floor. (The stairs,
+    // picked farthest-from-entrance below, then land back near the door.)
+    if (isBoss && rooms.length > 1) {
+      const gcx = gateX + 0.5, gcy = BY + BH + 2; // grid cell just below the doorway
+      let bi = 0, bd = -Infinity;
+      for (let i = 0; i < rooms.length; i++) {
+        const d = Math.abs(rooms[i].cx - gcx) + Math.abs(rooms[i].cy - gcy);
+        if (d > bd) { bd = d; bi = i; }
+      }
+      if (bi !== 0) { const t = rooms[0]; rooms[0] = rooms[bi]; rooms[bi] = t; }
+    }
+
     // carve a 2-cell-wide L corridor (horizontal leg then vertical leg)
     const carve = (a, b) => {
       for (let x = Math.min(a.cx, b.cx); x <= Math.max(a.cx, b.cx); x++) {

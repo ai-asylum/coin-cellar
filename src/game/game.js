@@ -613,12 +613,13 @@ export class Game {
           return { label: "home", hint: "Return", fn: () => this._returnHome(), focus: _v.clone().setY(0.06), color: 0x7fd8ff };
         }
       }
-      // the sealed boss door: unlock it with the key, or read the "locked" cue
+      // the sealed boss door: opens a choice — breach it (with a key) or turn
+      // back up out of the dungeon rather than committing to the boss
       if (this.dungeon.gatePos && !this.dungeon.gateOpen) {
         _v.copy(this.dungeon.gatePos).add(DUNGEON_ORIGIN);
         if (_v.distanceTo(p) < 2.0) {
           const has = this._hasBossKey();
-          return { label: has ? "skull" : "warning", hint: has ? "Unlock" : "Locked", fn: () => this._openGate(), focus: _v.clone().setY(0.06), color: has ? 0xff5a5a : 0x9aa0aa };
+          return { label: has ? "skull" : "warning", hint: "Boss door", fn: () => this._gatePrompt(), focus: _v.clone().setY(0.06), color: has ? 0xff5a5a : 0x9aa0aa };
         }
       }
       // stairs stay inert (and invisible) on the tutorial floor until the chest

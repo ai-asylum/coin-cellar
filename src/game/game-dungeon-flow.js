@@ -545,6 +545,36 @@ export const dungeonFlowMethods = {
     this._save();
   },
 
+  // Standing at the sealed boss door: offer the plunge into the arena OR a
+  // retreat back up the way you came. The boss fight is a commitment, so this
+  // gives an out — a keyless (or simply unready) delver isn't forced through.
+  _gatePrompt() {
+    if (this.hud.sheetOpen || this.dungeon.gateOpen) return;
+    // freeze the sim while the choice is up (but not in co-op, so a delving
+    // partner isn't stranded mid-run) — mirrors the stairs descend prompt
+    this.paused = !this.net.connected;
+    const has = this._hasBossKey();
+    const boss = bossDefFor(dungeonIndexFor(this.dungeon.floor));
+    const el = this.hud.showSheet(`
+      <div class="sheet-title"><span class="big-emoji">${icon("skull")}</span>
+        <div><b>The sealed door</b><br/><small>${has ? `${boss.name} waits beyond — enter, or turn back up?` : `You need a ${itemIcon("key")} Brass Key to breach it.`}</small></div></div>
+      <div class="sheet-btns">
+        <button class="btn deny" id="gate-up">${icon("home")} Go back up</button>
+        <button class="btn deal" id="gate-enter">${icon("skull")} Enter boss</button>
+      </div>
+    `, "sheet-card");
+    el.querySelector("#gate-up").onclick = () => {
+      this.paused = false;
+      this.hud.hideSheet();
+      this._returnHome();
+    };
+    el.querySelector("#gate-enter").onclick = () => {
+      this.paused = false;
+      this.hud.hideSheet();
+      this._openGate();
+    };
+  },
+
   // Unlock the sealed boss door. Needs a Brass Key in the bag, which the door
   // consumes; the host owns the world so guests route the request through it.
   _openGate() {
