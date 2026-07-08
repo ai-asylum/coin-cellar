@@ -490,7 +490,7 @@ button { font-family: inherit; cursor: pointer; }
 .big-emoji { font-size: 34px; }
 .mood { margin-left: auto; font-size: 30px; }
 
-/* a sheet button you can't afford reads as such (unseal-yes, …) */
+/* a sheet button you can't afford reads as such */
 .sheet-btns .btn:disabled { opacity: 0.5; cursor: default; }
 
 /* ---- Recettear "Capitalism, ho!" haggle panel ---- */

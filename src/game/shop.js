@@ -898,12 +898,9 @@ export class Shop {
       }
     }
 
-    // The cellar trapdoor now stands open all day (decoupled from the shopfront,
-    // which trades continuously) so you can drop down whenever you like — the
-    // only thing that seals it is the solo real-time lock after a run.
-    const sealed = this.game._cellarLocked() && !this.game.net.connected;
-    const trapTgt = sealed ? 0 : 1;
-    this._trapAngle += (trapTgt - this._trapAngle) * Math.min(1, dt * 5);
+    // The cellar trapdoor stands open all day (decoupled from the shopfront,
+    // which trades continuously) so you can drop down whenever you like.
+    this._trapAngle += (1 - this._trapAngle) * Math.min(1, dt * 5);
     if (this.trapLid) this.trapLid.rotation.z = this._trapAngle * 1.9; // swings up to lean on the left wall
     this.trapdoorOpen = this._trapAngle > 0.5;
     // the glowing shaft below only shows once the lid's cracked open

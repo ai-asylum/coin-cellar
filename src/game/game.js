@@ -33,10 +33,6 @@ export function requestFullscreen() {
   } catch (e) {}
 }
 
-const UNSEAL_FEE = 100; // what the Guild charges to crack the cellar open before its lock lifts
-// After a delve the cellar seals itself for an hour of real time before it can
-// be opened again — or pay the Guild the unseal fee to crack it open early.
-const CELLAR_LOCK_MS = 60 * 60 * 1000;
 // A sewer shortcut, once earned by descending past a boss, stays unsealed for
 // three hours of real time before it re-locks.
 const SHORTCUT_TTL_MS = 3 * 60 * 60 * 1000;
@@ -78,9 +74,6 @@ export class Game {
     // --- state
     this.day = 1; // run counter — bumps each fresh delve, feeds dungeon variety
     this.gold = 100;
-    // the cellar seals for an hour of real time after each delve — epoch ms the
-    // lock lifts (0 = open). Persisted, so the timer keeps ticking across reloads.
-    this.cellarLockUntil = 0;
     // sewer shortcuts: epoch ms each deeper mouth (index 1..N-1) re-locks; index
     // 0 is the always-open entrance. Earned by descending past each boss, they
     // let you drop straight to floors 4/7/10. Persisted (wall-clock TTL).
@@ -323,6 +316,16 @@ export class Game {
     // no swinging, no context-interacts until it's dismissed.
     const sheetBlocked = this.hud.sheetOpen || this.hud.speakOpen;
 
+    // A live dialogue bubble eats the action press to advance itself: a click
+    // anywhere on screen, Space/J/Enter, or the on-screen action button. The
+    // edge is consumed so it can't leak into an attack or interact this frame
+    // (movement/actions are already frozen by sheetBlocked above).
+    if (this.hud.speakOpen) {
+      if (this.input.actionEdge) this.hud.advanceSpeak();
+      this.input.actionEdge = false;
+      this.input.interactEdge = false;
+    }
+
     // dodge / roll (underground only) — grabbed before movement so it can override it
     if (this.input.dodgeEdge && !sheetBlocked && (this.playerArea === "dungeon" || this.playerArea === "sewer")) this._dodge();
 
@@ -483,13 +486,11 @@ export class Game {
 
   // Keyboard shortcuts for the on-screen actions + the admin panel.
   _handleKey(code) {
-    // A live dialogue bubble owns the keyboard: the "ok" keys advance it and
-    // everything else is swallowed so you can't move, attack or interact while
-    // someone's mid-sentence.
-    if (this.hud.speakOpen) {
-      if (code === "KeyJ" || code === "Enter" || code === "Space") this.hud.advanceSpeak();
-      return;
-    }
+    // A live dialogue bubble swallows every shortcut so you can't pop menus or
+    // interact mid-sentence. Advancing runs off the action press (Space/J/Enter,
+    // a click anywhere, or the on-screen button) in _updatePlayer instead — this
+    // just makes sure those keys don't also trigger a shortcut here.
+    if (this.hud.speakOpen) return;
     // An open modal takes keyboard priority: J/K move the highlight, Enter
     // picks it, Esc backs out — and the haggle sheet remaps those to nudge the
     // price / seal the deal / walk away. The esc-menu keeps Esc = resume; the
@@ -533,10 +534,6 @@ export class Game {
       const tutBlocksCellar = this.tutorial && this.tutorial !== "delve";
       if (!tutBlocksCellar && this.shop.trapdoorOpen && p.distanceTo(this.shop.trapdoorPos) < 1.5)
         return { label: "hole", hint: "Enter", fn: () => this._delve(), focus: _focus.copy(this.shop.trapdoorPos).setY(0.06).clone(), color: 0xb98cff };
-      // sealed after a delve (solo): the cellar's locked for an hour of real
-      // time — show the countdown, or pay the Guild to crack it open early
-      if (!tutBlocksCellar && !this.net.connected && this._cellarLocked() && p.distanceTo(this.shop.trapdoorPos) < 1.5)
-        return { label: "hole", hint: this._cellarLockLabel(), fn: () => this._delve(), focus: _focus.copy(this.shop.trapdoorPos).setY(0.06).clone(), color: 0x9aa0aa };
       // the sealed side rooms: step up to a locked door to buy the extension.
       // Once bought the door swings open for good and there's nothing to prompt.
       // Locked out until the FTUE's done so a new player isn't pulled off the loop.
@@ -1168,31 +1165,8 @@ export class Game {
     }
   }
 
-  // ================================================================ cellar lock
-  // The cellar seals for an hour of real time after each delve. These read the
-  // wall clock, so the timer keeps ticking while the tab's closed.
-  _cellarLocked() {
-    return Date.now() < this.cellarLockUntil;
-  }
-
-  // Seal the cellar for the full lock from right now (called when a fresh run
-  // drops down the trapdoor).
-  _lockCellar() {
-    this.cellarLockUntil = Date.now() + CELLAR_LOCK_MS;
-    this._syncState();
-    this._save();
-  }
-
-  // Short label for how long the cellar stays sealed — shown on the trapdoor's
-  // interact prompt.
-  _cellarLockLabel() {
-    const ms = Math.max(0, this.cellarLockUntil - Date.now());
-    const mins = Math.ceil(ms / 60000);
-    return mins >= 60 ? "Sealed 1h" : `Sealed ${mins}m`;
-  }
-
   // Set up the shop for a fresh session. No more day/night cycle — the shop is
-  // always open for trade; the cellar's real-time lock is the only pacing.
+  // always open for trade; the cellar stays open so you can delve any time.
   _beginShop(first = false) {
     this.hp = this.maxHp;
     this.hud.setHearts(this.hp, this.maxHp);
@@ -1611,42 +1585,9 @@ export class Game {
       this.hud.toast(`${icon("box")} Finish setting up shop before delving again`);
       return;
     }
-    // sealed for an hour of real time after the last run (solo) — the Guild
-    // will crack it open again for a fee
-    if (!this.net.connected && this._cellarLocked()) return this._unsealPrompt();
     // before dropping down: gear up and pick supplies from the storeroom
     if (this._packable().length > 0 || this._stashGearCount() > 0) return this._packMenu();
     this._startDelve();
-  }
-
-  // The cellar's sealed for an hour of real time after a run — offer to pay the
-  // Guild to crack it open early.
-  _unsealPrompt() {
-    if (this.hud.sheetOpen) return;
-    const fee = UNSEAL_FEE;
-    const broke = this.gold < fee;
-    const left = this._cellarLockLabel().toLowerCase();
-    const el = this.hud.showSheet(`
-      <div class="sheet-title"><span class="big-emoji">${icon("hole")}</span>
-        <div><b>The cellar is sealed</b><br/><small>${left} — or the Guild will crack it open now for ${fee}g</small></div></div>
-      <div class="sheet-btns">
-        <button class="btn deny" id="unseal-no">${icon("close")} Wait it out</button>
-        <button class="btn deal" id="unseal-yes" ${broke ? "disabled" : ""}>${icon("coin")} Pay ${fee}g${broke ? ` (you have ${this.gold}g)` : ""}</button>
-      </div>
-    `, "sheet-card");
-    el.querySelector("#unseal-yes").onclick = () => {
-      if (this.gold < fee) return;
-      this.hud.hideSheet();
-      this._spendGold(fee, this.shop.trapdoorPos);
-      this.today.spent += fee;
-      this.cellarLockUntil = 0;
-      this.dungeon.dispose(); // scrap the last run's cleared floors — fresh run
-      this.sewerHole = -1;
-      this.net.send({ t: "dungeonReset" });
-      this.hud.toast(`${icon("hole")} The seal cracks open — down you go`);
-      this._delve();
-    };
-    el.querySelector("#unseal-no").onclick = () => this.hud.hideSheet();
   }
 
   // Dropping through the trapdoor lands in the shared sewer now, not straight
@@ -1971,13 +1912,10 @@ export class Game {
     // the themed dungeon (and its boss/palette) follows the current floor now
     // that dungeons are stacked; the tutorial cellar keeps its private look
     if (!this.tutorial) this.sewerHole = dungeonIndexFor(this.dungeon.floor);
-    // dropping down (not each floor) seals the cellar for the real-time lock —
-    // guarded so descending stairs mid-run doesn't reset the timer. Solo only;
-    // co-op leaves the cellar always open for the partner.
-    if (!this.net.connected && !this._cellarLocked()) {
-      this.day++; // a fresh run — bump the counter that feeds dungeon variety
-      this._lockCellar();
-    }
+    // a fresh drop (not descending stairs mid-run) bumps the run counter that
+    // feeds dungeon variety — guarded on playerArea so mid-run stairs, which
+    // start already in the dungeon, don't re-roll it. Solo only.
+    if (!this.net.connected && this.playerArea !== "dungeon") this.day++;
     this.playerArea = "dungeon";
     this.hud.showHearts(true);
     this.hud.showBag(true);
@@ -3004,7 +2942,6 @@ export class Game {
         <button data-a="stockshelves">${icon("box")} Stock shelves</button>
         <button data-a="clearbag">${icon("trash")} Empty bag</button>
         <button data-a="delve">${icon("hole")} Delve</button>
-        <button data-a="unlock">${icon("hole")} Unlock cellar</button>
         <button data-a="floor">${icon("arrowDown")} Next floor</button>
         <button data-a="key">${itemIcon("key")} Give key</button>
         <button data-a="kill">${icon("skull")} Kill enemies</button>
@@ -3083,12 +3020,6 @@ export class Game {
         this._save();
         this.hud.toast(`${icon("trash")} Bag & storeroom emptied`);
         break;
-      case "unlock":
-        this.cellarLockUntil = 0;
-        this._syncState();
-        this._save();
-        this.hud.toast(`${icon("hole")} Cellar unlocked`);
-        break;
       case "delve":
         if (this.playerArea !== "dungeon") this._delve();
         break;
@@ -3139,7 +3070,6 @@ export class Game {
     this.tutorial = null; // silence any in-flight step transitions during setup
     this._endMayorScene(); // tear down any in-flight Mayor cutscene
     this._questArrow = null;
-    this.cellarLockUntil = 0;
     this.gold = 100;
     this.hud.setGold(this.gold, false);
     for (const c of [...this.shop.customers]) this.shop._removeCustomer(c);
@@ -3866,7 +3796,6 @@ export class Game {
     try {
       localStorage.setItem(SAVE_KEY, JSON.stringify({
         day: this.day, gold: this.gold, inv: this.inventory, stash: this.stash,
-        cellarLockUntil: this.cellarLockUntil,
         shortcutUntil: this.shortcutUntil,
         equipment: this.equipment,
         expansions: this.expansionsBought,
@@ -3889,7 +3818,6 @@ export class Game {
         this.stash = (s.stash ?? []).filter((id) => ITEMS[id]);
         this.stash.push(...(s.inv ?? []).filter((id) => ITEMS[id]));
         this.inventory = [];
-        this.cellarLockUntil = s.cellarLockUntil ?? 0;
         if (Array.isArray(s.shortcutUntil)) {
           // keep the array shape stable even if N_DUNGEONS ever changes
           for (let i = 1; i < this.shortcutUntil.length; i++)
