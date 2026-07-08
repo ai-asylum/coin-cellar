@@ -329,6 +329,13 @@ export const netMethods = {
         }
         break;
       }
+      case "dSmash": {
+        // guest smashed a destructible prop: roll its forage drop host-side so
+        // the loot isn't doubled (the guest already burst it cosmetically)
+        if (this.net.isGuest) return;
+        if (D.active) D.smashDecorById(m.id);
+        break;
+      }
       case "stockReq": {
         if (this.net.isGuest) return;
         const slot = m.slotIdx >= 0 ? this.shop.slots[m.slotIdx] : this.shop.freeSlot();

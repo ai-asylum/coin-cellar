@@ -26,6 +26,7 @@ const mesh = (geo, mat, x = 0, y = 0, z = 0, rx = 0, rz = 0) => {
 // weapon slot's `type` (sword|bow|staff) also picks the whole attack style.
 export const ITEMS = {
   caveshroom: { name: "Cave Mushroom", icon: "caveshroom", base: 8, tier: 1, heal: 1 },
+  crystal: { name: "Rock Crystal",  icon: "crystal", base: 6,   tier: 1 },
   jelly:   { name: "Slime Jelly",   icon: "jelly",   base: 12,  tier: 1 },
   herb:    { name: "Moon Herb",     icon: "herb",    base: 16,  tier: 1, heal: 1 },
   bread:   { name: "Honey Bread",   icon: "bread",   base: 14,  tier: 1, heal: 2 },
@@ -85,7 +86,7 @@ export const EQUIP_DROPS = ["bow", "staff", "armor", "boots", "ssword", "tome", 
 
 export const LOOT_BY_TIER = [
   [],
-  ["caveshroom", "jelly", "herb", "bread", "wsword", "mushroom", "meat"],
+  ["caveshroom", "crystal", "jelly", "herb", "bread", "wsword", "mushroom", "meat"],
   ["jelly", "herb", "potion", "ring", "dagger", "lantern", "egg", "key", "bomb"],
   ["potion", "ring", "amulet", "ssword", "tome", "lantern", "shield", "bell", "feather"],
   ["amulet", "tome", "gem", "fang", "crown", "ssword", "hourglass", "star"],
@@ -136,6 +137,12 @@ const makers = {
       mesh(new THREE.BoxGeometry(0.17, 0.055, 0.23), M(0xe8dcc0), 0, 0.052)
     ),
   gem: () => mesh(new THREE.OctahedronGeometry(0.13), M(0x86e8ff), 0, 0.14),
+  // a small amethyst shard cluster — a tall point flanked by a stubby sibling
+  crystal: () =>
+    group(
+      mesh(new THREE.ConeGeometry(0.055, 0.24, 5), M(0x9b7ae0), 0, 0.16),
+      mesh(new THREE.ConeGeometry(0.038, 0.13, 5), M(0xb79cf0), 0.07, 0.09, 0, 0, 0.25)
+    ),
   fang: () => mesh(new THREE.ConeGeometry(0.07, 0.28, 8), M(0xf2ead8), 0, 0.14, 0, 0.35, 0.5),
   crown: () =>
     group(
