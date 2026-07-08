@@ -1464,18 +1464,6 @@ export class Game {
       m.standSpot = lot.interactPos.clone().add(_v.set(2.5, 0, 0));
       this._questArrow = { pos: lot.interactPos.clone(), text: `${icon("home")} Rebuild — ${lot.cost}g` };
     }
-    // one last FTUE beat: the opener sold, so nudge the player back down to
-    // restock before chasing the Mayor's rebuild. The real game's open now
-    // (tutorial is null), so this is a lightweight flag that only steers the
-    // guide arrow + a hint; it clears on the next delve, handing the arrow to
-    // the lot quest above.
-    if (!this.net.connected) {
-      this._restockNudge = true;
-      setTimeout(() => {
-        if (this._restockNudge)
-          this.hud.toast(`${icon("hole")} Restock the inventory — head back down to the cellar for more stock`);
-      }, 700);
-    }
   }
 
   _mayorLeave() {
@@ -1517,9 +1505,21 @@ export class Game {
 
   // Once the Mayor's target lot is rebuilt: clear the arrow and give him a short
   // congratulatory follow-up (walking back on if he's already wandered off).
+  // Only now — with the house up — do we send the final FTUE beat: nudge the
+  // player back down to restock the thinned shelves. It's a lightweight flag
+  // that steers the guide arrow + a hint and clears on the next delve.
   _mayorAfterRestore() {
     this._questArrow = null;
-    const done = () => this._mayorLeave();
+    const done = () => {
+      this._mayorLeave();
+      if (!this.net.connected) {
+        this._restockNudge = true;
+        setTimeout(() => {
+          if (this._restockNudge)
+            this.hud.toast(`${icon("hole")} Restock the inventory — head back down to the cellar for more stock`);
+        }, 700);
+      }
+    };
     if (this._mayor) {
       this._mayor.state = "talk";
       this._mayor.path = null;
@@ -1641,7 +1641,10 @@ export class Game {
     if ((restocking || !this.bossBeaten) && !this.net.connected) {
       const seed = daySeed();
       this.sewerHole = 0;
-      if (!this.dungeon.active || this.dungeon.floor !== 1)
+      // regenerate unless a real (non-tutorial) floor 1 is already live — after
+      // the FTUE the private tutorial cellar is still active on floor 1, so the
+      // restock delve must rebuild it as the actual Rat Warren dungeon.
+      if (!this.dungeon.active || this.dungeon.floor !== 1 || this.dungeon.tutorial)
         this.dungeon.generate(1, seed);
       this._beginHoleDive(this.shop.trapdoorPos, () => this._enterDungeon());
       return;
@@ -3190,16 +3193,21 @@ export class Game {
         return; // _mayorIntro opens its own sheet
 
       case "restock": {
-        // post-Mayor state: the FTUE proper is done (tutorial null), he's already
-        // picked a lot to rebuild, and the restock nudge is steering the player
-        // back down for more stock (the lot quest arrow waits behind the nudge
-        // until the next delve clears it)
+        // post-restore state: the FTUE proper is done (tutorial null), the
+        // Mayor's target lot is already rebuilt, and the restock nudge is now
+        // steering the player back down for more stock (it clears on the next
+        // delve)
         toShop();
         this.shop.doorLocked = false;
         this.tutorial = null;
+        this._questArrow = null;
+        const lotIdx = this._mayorTargetLot();
+        if (lotIdx >= 0 && !this.shop.lots[lotIdx]?.restored) {
+          this.shop.restoreLot(lotIdx);
+          this.townRestored[lotIdx] = true;
+          this.townResidents.push(this.shop.lots[lotIdx].resident);
+        }
         this._restockNudge = true;
-        const lot = this.shop.lots[this._mayorTargetLot()];
-        if (lot) this._questArrow = { pos: lot.interactPos.clone(), text: `${icon("home")} Rebuild — ${lot.cost}g` };
         this.player.position.copy(this.shop.trapdoorPos).add(_v.set(1.4, 0, 1.0));
         this.player.animator.prevPos.copy(this.player.position);
         this._snapCamera();
