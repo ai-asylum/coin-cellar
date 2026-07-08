@@ -830,7 +830,7 @@ export class Game {
 
   // Pull a consumable out of the bag and kick off the over-head use flourish;
   // the actual heal lands when the item drops onto the player (see
-  // _updateUseFx). Shared by manual bag use and the auto-heal below.
+  // _updateUseFx). Driven by the player explicitly using an item from the bag.
   _consumeHeal(idx) {
     const itemId = this.inventory[idx];
     const it = ITEMS[itemId];
@@ -849,31 +849,6 @@ export class Game {
       this._syncInv();
       this._save();
     }
-  }
-
-  // Auto-quaff the instant you're hurt, but only a consumable whose heal value
-  // fits the hearts you're missing — so a big potion isn't wasted topping off a
-  // single heart. Chains while more still fits (e.g. two +1s for a 2-heart hit).
-  _tryAutoHeal() {
-    if (this.playerArea !== "dungeon" || this.gameOver || this._respawnT >= 0) return;
-    for (;;) {
-      const missing = this.maxHp - this.hp;
-      if (missing <= 0) break;
-      // heals already in flight count against the deficit so a flurry of hits
-      // doesn't over-consume before the earlier sips have landed
-      let pending = 0;
-      for (const fx of this._useFx) if (!fx.applied) pending += fx.heal;
-      const need = missing - pending;
-      if (need <= 0) break;
-      let bestIdx = -1, bestHeal = 0;
-      for (let i = 0; i < this.inventory.length; i++) {
-        const heal = ITEMS[this.inventory[i]]?.heal || 0;
-        if (heal && heal <= need && heal > bestHeal) { bestHeal = heal; bestIdx = i; }
-      }
-      if (bestIdx < 0) break;
-      this._consumeHeal(bestIdx);
-    }
-    if (this.hud.sheetOpen) this._openBag();
   }
 
   // Spawn the item sprite above the player's head; _updateUseFx animates the

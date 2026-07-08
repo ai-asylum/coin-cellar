@@ -207,9 +207,6 @@ export const combatMethods = {
       this.hud.banner("You got carried home…", "your bag was lost", 2.6);
       this.audio.gameover();
       this._respawnT = 2.4;
-    } else {
-      // still standing but hurt — quaff a consumable if one fits the wound
-      this._tryAutoHeal();
     }
   },
 
