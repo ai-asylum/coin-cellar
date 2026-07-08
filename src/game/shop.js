@@ -95,24 +95,30 @@ export class Shop {
   }
 
   // ------------------------------------------------------------ tables
-  // Reflect a table's repaired/broken state onto its meshes (real materials vs
-  // the drab grey) and its slots (a broken table's slots can't be stocked).
+  // Reflect a table's built/locked state: a built table shows its real fixture
+  // (correct materials) and usable slots; a locked one hides the fixture and
+  // shows only its glowing floor outline, marking where it'll go, slots off.
   _applyTableState(table) {
     const broken = !table.repaired;
-    table.meshes.forEach((m, k) => { m.material = broken ? this._brokenMat : table.origMats[k]; });
+    table.meshes.forEach((m, k) => { m.material = table.origMats[k]; m.visible = !broken; });
+    if (table.outline) {
+      table.outline.visible = broken;
+      table.outline.material.color.setHex(table.outline.userData.baseColor);
+      table.outline.material.opacity = 0.42;
+    }
     for (const s of table.slots) s.disabled = broken;
   }
 
-  // Light one broken table up white (the interact affordance, in place of the
-  // ground ring), or pass null/undefined to clear. Its meshes swap to the
-  // pulsing emissive-white material; the previously lit table is restored to
-  // whatever its state calls for (grey if still broken, real wood once fixed).
+  // Flag one locked table as the interact target (the affordance in place of a
+  // ground ring), or pass null/undefined to clear. Its floor outline pops to
+  // white and pulses (see update()); the previously lit table's outline is
+  // reset by _applyTableState to its resting amber.
   highlightTable(table) {
     const next = table || null;
     if (this._glowTable === next) return;
     if (this._glowTable) this._applyTableState(this._glowTable);
     this._glowTable = next;
-    if (next) for (const m of next.meshes) m.material = this._glowMat;
+    if (next && next.outline) next.outline.material.color.setHex(0xffffff);
   }
 
   // Pay to restore table `i`: swap its dusty grey for the real wood/velvet and
@@ -172,8 +178,9 @@ export class Shop {
     for (const s of this.shafts) s.userData.update(dt, elapsed);
     this._updateLighting(dt);
 
-    // throb the white glow on whichever broken table is the current target
-    if (this._glowTable) this._glowMat.emissiveIntensity = 0.55 + Math.sin(elapsed * 6) * 0.45;
+    // throb the floor outline on whichever locked table is the current target
+    if (this._glowTable && this._glowTable.outline)
+      this._glowTable.outline.material.opacity = 0.55 + Math.sin(elapsed * 6) * 0.35;
 
     // feed the see-through wall cutout so walls never hide the player
     const player = this.game.player;
