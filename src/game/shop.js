@@ -5,7 +5,7 @@
 // The Recettear loop: buy low in the dungeon, pin the price just under each
 // customer's hidden tolerance, chain PERFECT deals.
 import * as THREE from "three";
-import { makeToonMaterial, makeBlobShadow } from "../core/toon.js";
+import { makeToonMaterial, makeBlobShadow, feedOccluder } from "../core/toon.js";
 import { makeLightShaft } from "../core/godrays.js";
 import { BlockyCreature, variantForSeed, HARD_SEED } from "../chargen/blocky.js";
 import { ITEMS, itemSprite, LOOT_BY_TIER } from "./items.js";
@@ -42,21 +42,34 @@ export class Shop {
     this._litInit = false; // snap the daylight to the current hour on first tick
     this.colliders = []; // {x, z, hw, hd} AABBs (walls & furniture)
     this._custSeedPool = Array.from({ length: 10 }, (_, i) => 1000 + i);
-    // customers arrive as one big rush the moment the doors open; when the
-    // last one leaves, the doors swing shut until the player opens up again.
-    this._waveLeft = 0; // shoppers still to rush in from the street
-    this._waveActive = false; // a rush is underway — auto-close when it empties
-    this._spawnT = 0; // spacing between arrivals inside the rush
+    // the shop trades all day now: shoppers trickle in on a steady timer for as
+    // long as anything's on the shelves — no manual "open up", no rush/close.
+    // The pace quickens as the town fills out (each restored house = a resident).
+    this._spawnT = 3; // countdown to the next arrival
     this._passerT = 2; // countdown to the next passer-by
+    this._queueSeq = 0; // monotonic ticket number for the counter queue order
     this._build();
   }
 
   _build() {
     const g = this.group;
-    const wallMat = makeToonMaterial({ color: 0x8a6f9e, rim: 0 });
-    const wallMat2 = makeToonMaterial({ color: 0x77608c, rim: 0 });
+    // the enclosing walls use the same see-through cutout as the dungeon, so a
+    // wall between the camera and the player dithers away instead of hiding them
+    // (fed live camera + torso positions each frame in update()).
+    const wallMat = makeToonMaterial({ color: 0x8a6f9e, rim: 0, occlude: true });
+    const wallMat2 = makeToonMaterial({ color: 0x77608c, rim: 0, occlude: true });
+    this._occludeMats = [wallMat, wallMat2];
     const woodMat = makeToonMaterial({ color: 0x8a5a33, rim: 0 });
     const wood2 = makeToonMaterial({ color: 0x6e4526, rim: 0 });
+    // a drab, dusty grey shared by every un-repaired table — swapped back to the
+    // table's real materials once the player pays to restore it (see repairTable).
+    this._brokenMat = makeToonMaterial({ color: 0x5b554e, rim: 0 });
+    // a bright emissive white the whole table wears while it's the interact
+    // target, replacing the ground ring (pulsed in update(); see highlightTable).
+    this._glowMat = makeToonMaterial({ color: 0xffffff, rim: 0 });
+    this._glowMat.emissive = new THREE.Color(0xffffff);
+    this._glowMat.emissiveIntensity = 0.8;
+    this._glowTable = null; // which broken table is currently lit up
     const { W, D } = SHOP;
 
     // floor: warm planks (canvas texture keeps it cheap + stylised)
@@ -75,16 +88,27 @@ export class Shop {
       return m;
     };
 
-    // side walls
-    mkWall(0.4, wallH, D, -W / 2, wallH / 2, 0, wallMat2); // left
-    mkWall(0.4, wallH, D, W / 2, wallH / 2, 0, wallMat2); // right
+    // side walls — each carries a doorway through to an adjoining empty room
+    // (one to the left, one to the right of the shop), so the player can stroll
+    // between them and the camera re-frames on whichever room they stand in.
+    const sideDoorZ = -3.5, sideDoorHW = 1.1; // doorway centre + half-width (z)
+    this.sideDoorZ = sideDoorZ;
+    this.sideDoorHW = sideDoorHW;
+    const gapBack = sideDoorZ - sideDoorHW, gapFront = sideDoorZ + sideDoorHW;
+    for (const sx of [-W / 2, W / 2]) {
+      // wall split into a back piece and a front piece, leaving the door gap
+      mkWall(0.4, wallH, gapBack - -D / 2, sx, wallH / 2, (-D / 2 + gapBack) / 2, wallMat2);
+      mkWall(0.4, wallH, D / 2 - gapFront, sx, wallH / 2, (gapFront + D / 2) / 2, wallMat2);
+      // lintel across the top of the opening
+      mkWall(0.4, wallH - 2.2, sideDoorHW * 2, sx, (2.2 + wallH) / 2, sideDoorZ, wallMat2);
+      this.colliders.push(
+        { x: sx, z: (-D / 2 + gapBack) / 2, hw: 0.35, hd: (gapBack + D / 2) / 2 },
+        { x: sx, z: (gapFront + D / 2) / 2, hw: 0.35, hd: (D / 2 - gapFront) / 2 }
+      );
+    }
     // front wall (nearest the camera): one low wall so the view stays open
     mkWall(W, 1.1, 0.35, 0, 0.55, D / 2, wallMat2);
-    this.colliders.push(
-      { x: -W / 2, z: 0, hw: 0.35, hd: D / 2 },
-      { x: W / 2, z: 0, hw: 0.35, hd: D / 2 },
-      { x: 0, z: D / 2, hw: W / 2, hd: 0.3 }
-    );
+    this.colliders.push({ x: 0, z: D / 2, hw: W / 2, hd: 0.3 });
 
     // back wall = the shopfront: a door on the left, a display window
     // ("vitrine") on the right. Customers stream in through the door; goods on
@@ -126,11 +150,11 @@ export class Shop {
     doorMat.position.set(doorCx, 0.01, backZ + 0.9);
     g.add(doorMat);
 
-    // hinged double doors filling the shopfront doorway. They swing open during
-    // the day so customers can wander in, and shut at night. Each leaf pivots
+    // hinged double doors filling the shopfront doorway. They swing open to let
+    // customers wander in, and shut once the rush is over. Each leaf pivots
     // on its outer jamb and swings outward into the street.
     const doorPanelMat = makeToonMaterial({ color: 0x7a4a28, rim: 0 });
-    const doorTrimMat = makeToonMaterial({ color: 0x5c3720, rim: 0 });
+    const doorTrimMat = makeToonMaterial({ color: 0x5c3720, rim: 0, polygonOffset: true });
     const handleMat = makeToonMaterial({ color: 0xe6c26a, rim: 0 });
     this.doorLeaves = [];
     const mkLeaf = (hingeX, dir) => {
@@ -152,22 +176,84 @@ export class Shop {
     };
     mkLeaf(doorL, 1); // left leaf, hinged on the left jamb
     mkLeaf(doorR, -1); // right leaf, hinged on the right jamb
-    this.doorsOpen = false;
-    this.doorHeld = false; // scene override: someone (the landlord) is holding the doors open
+    this.doorsOpen = true; // the shop trades all day; the shopfront swings with foot traffic
+    this.doorHeld = false; // scene override: a scripted scene is holding the doors open
     this._doorAngle = 0; // 0 = shut, 1 = fully swung open (eased each frame)
     // toggled in/out of `colliders` so a shut door blocks the player (kept out
     // of the baked nav grid, so open doors let customers path straight through)
     this._doorCollider = { x: doorCx, z: backZ, hw: doorW / 2, hd: 0.35 };
 
-    // counter (along the right wall, clear of the window)
-    const counter = mkWall(0.9, 1.0, 3, W / 2 - 0.7, 0.5, -1.2, woodMat);
-    this.colliders.push({ x: W / 2 - 0.7, z: -1.2, hw: 0.45, hd: 1.5 });
-    this.counterPos = new THREE.Vector3(W / 2 - 1.4, 0, -1.2);
+    // counter: a service bar in the lower-right corner, run down along Z until
+    // its front end butts against the low front (downmost) wall. Kept a stride
+    // off the right wall so the shopkeeper still has room to slip in behind it.
+    const counterX = W / 2 - 1.9; // 4.6 — inset from the right wall
+    const counterD = 3.4; // runs along Z
+    const counterZ = D / 2 - counterD / 2 - 0.2; // front end touches the wall
+    const counterSink = 0.4; // sunk into the floor so the bar sits low
+    const counterTopY = 1.0 - counterSink;
+    const regZ = counterZ + counterD / 2 - 0.7; // register near the front end
+    mkWall(0.8, 1.0, counterD, counterX, 0.5 - counterSink, counterZ, woodMat);
+    // a paler benchtop cap so the surface reads under the props on top
+    const counterTop = new THREE.Mesh(
+      new THREE.BoxGeometry(0.92, 0.1, counterD + 0.12),
+      makeToonMaterial({ color: 0xa5703f, rim: 0 })
+    );
+    counterTop.position.set(counterX, counterTopY, counterZ);
+    g.add(counterTop);
+    this.colliders.push({ x: counterX, z: counterZ, hw: 0.4, hd: counterD / 2 });
+    // where the shopkeeper stands to serve — behind the bar, by the register
+    this.counterPos = new THREE.Vector3(counterX + 0.95, 0, regZ);
+
+    // a brass cash register at the front end of the bar
+    const register = new THREE.Group();
+    const regBodyMat = makeToonMaterial({ color: 0x3c4a52, rim: 0 });
+    const regTrimMat = makeToonMaterial({ color: 0xe6c26a, rim: 0 });
+    const regBody = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.34, 0.4), regBodyMat);
+    regBody.position.y = 0.17;
+    const regDrawer = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.14, 0.44), regTrimMat);
+    regDrawer.position.y = 0.06;
+    const regHead = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.22, 0.12), regBodyMat);
+    regHead.position.set(0, 0.43, -0.12);
+    const regKeys = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.06, 0.22), regTrimMat);
+    regKeys.position.set(0, 0.3, 0.07);
+    const regBell = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffe6a8 }));
+    regBell.position.set(0.14, 0.5, -0.12);
+    register.add(regBody, regDrawer, regHead, regKeys, regBell);
+    register.position.set(counterX, counterTopY, regZ);
+    register.rotation.y = Math.PI / 2;
+    g.add(register);
+
+    // a small brass desk lamp toward the back of the bar — dark by day, kindled
+    // warm once night falls (pushed into lampLights alongside the floor lamps)
+    const cLamp = new THREE.Group();
+    const cBase = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.13, 0.05, 12), regTrimMat);
+    cBase.position.y = 0.02;
+    const cPole = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.04, 0.5), regTrimMat);
+    cPole.position.y = 0.27;
+    const cShade = new THREE.Mesh(new THREE.ConeGeometry(0.17, 0.2, 12), makeToonMaterial({ color: 0x2e6b52, rim: 0 }));
+    cShade.position.y = 0.58;
+    const cBulb = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffe6a8 }));
+    cBulb.position.y = 0.5;
+    const cGlow = new THREE.PointLight(0xffca7a, 0, 5, 1.8);
+    cGlow.position.y = 0.52;
+    cLamp.add(cBase, cPole, cShade, cBulb, cGlow);
+    cLamp.position.set(counterX, counterTopY, counterZ - counterD / 2 + 0.5);
+    g.add(cLamp);
+    this.lampLights.push(cGlow);
+
+    // haggling customers queue in single file along the front (downmost) wall:
+    // the head of the line waits in front of the register and the rest trail
+    // off to the left. Once served they peel away and head up toward the door.
+    this.queueSpots = [];
+    const qHeadX = counterX - 1.0, qZ = D / 2 - 1.0; // hug the downmost wall
+    for (let i = 0; i < MAX_CUSTOMERS; i++) {
+      this.queueSpots.push(new THREE.Vector3(qHeadX - i * 0.95, 0, qZ));
+    }
 
     // trapdoor to the dungeon (mid left)
     const trap = new THREE.Mesh(
       new THREE.CircleGeometry(0.95, 24).rotateX(-Math.PI / 2),
-      makeToonMaterial({ color: 0x241735, rim: 0 })
+      makeToonMaterial({ color: 0x241735, rim: 0, polygonOffset: true })
     );
     trap.position.set(-W / 2 + 1.9, 0.02, 1.2);
     g.add(trap);
@@ -180,7 +266,7 @@ export class Shop {
     this.trapdoorPos = trap.position.clone();
     this.portalGlow = new THREE.Mesh(
       new THREE.CircleGeometry(0.8, 24).rotateX(-Math.PI / 2),
-      new THREE.MeshBasicMaterial({ color: 0x7a4dff, transparent: true, opacity: 0.5 })
+      new THREE.MeshBasicMaterial({ color: 0x7a4dff, transparent: true, opacity: 0.5, depthWrite: false })
     );
     this.portalGlow.position.copy(trap.position).setY(0.04);
     g.add(this.portalGlow);
@@ -192,10 +278,10 @@ export class Shop {
 
     // hinged trapdoor lid: a heavy wooden flap that lies shut over the hole
     // while the shopfront is open for trade, and creaks open once the doors are
-    // closed for the night so the shopkeeper can drop down into the cellar. It
+    // closed so the shopkeeper can drop down into the cellar. It
     // hinges on its far (back) edge and swings up toward the wall.
     const lidMat = makeToonMaterial({ color: 0x6e4526, rim: 0 });
-    const lidTrim = makeToonMaterial({ color: 0x4a2c17, rim: 0 });
+    const lidTrim = makeToonMaterial({ color: 0x4a2c17, rim: 0, polygonOffset: true });
     const lidPivot = new THREE.Group();
     const lidR = 1.05; // covers the 0.95 hole with a little overhang
     lidPivot.position.set(trap.position.x - lidR, 0.05, trap.position.z); // hinge at the wall-side (left) edge
@@ -218,12 +304,17 @@ export class Shop {
     this._trapAngle = 1;
     this.trapdoorOpen = true;
 
-    // display tables (2x2 grid, 2 slots each = 8 slots)
+    // display tables (2x2 grid, 2 slots each = 8 slots). Each table is a
+    // repairable fixture: all but the first start dusty and broken (greyed out,
+    // slots unusable) until the player pays to restore them — see repairTable.
+    // `this.tables` groups every table's meshes + slots + repair cost so the
+    // game glue can offer the "Repair" prompt and persist what's been fixed.
+    this.tables = [];
     const tablePts = [
       [-1.6, 0.6], [1.6, 0.6],
       [-1.6, 3.2], [1.6, 3.2],
     ];
-    for (const [tx, tz] of tablePts) {
+    tablePts.forEach(([tx, tz], ti) => {
       const t = new THREE.Group();
       const top = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.14, 1.1), woodMat);
       top.position.y = 0.78;
@@ -233,15 +324,38 @@ export class Shop {
       t.position.set(tx, 0, tz);
       g.add(t);
       this.colliders.push({ x: tx, z: tz, hw: 1.15, hd: 0.6 });
+      const table = {
+        group: t,
+        meshes: [top, legs],
+        origMats: [woodMat, wood2],
+        cost: 200,
+        fancy: false,
+        repaired: ti === 0, // only the first shelf comes ready to stock
+        slots: [],
+        interactPos: new THREE.Vector3(tx, 0, tz + 1.05),
+      };
       for (const dx of [-0.55, 0.55]) {
-        this.slots.push({
+        const slot = {
           pos: new THREE.Vector3(tx + dx, 0.86, tz),
           browsePos: new THREE.Vector3(tx + dx, 0, tz + 1.05),
+          // standing spots on every side of the table, so a shopper can view
+          // the item from whichever side is nearest / reachable rather than
+          // always squeezing to the front (see _browseSpotFor)
+          browseSpots: [
+            new THREE.Vector3(tx + dx, 0, tz + 1.05), // front
+            new THREE.Vector3(tx + dx, 0, tz - 1.05), // back
+            new THREE.Vector3(tx + 1.6, 0, tz),       // right
+            new THREE.Vector3(tx - 1.6, 0, tz),       // left
+          ],
           item: null,
           mesh: null,
-        });
+          table,
+        };
+        table.slots.push(slot);
+        this.slots.push(slot);
       }
-    }
+      this.tables.push(table);
+    });
 
     // the fancy vitrine table: a velvet-topped, gold-trimmed display set in
     // front of the window. Prized goods go here for a proper haggle (the plain
@@ -261,15 +375,41 @@ export class Shop {
     fancy.position.set(fancyCx, 0, fancyZ);
     g.add(fancy);
     this.colliders.push({ x: fancyCx, z: fancyZ, hw: 1.75, hd: 0.66 });
+    // the prized vitrine is the priciest fixture to restore (1000g) and, like
+    // the plain shelves, starts broken until the player pays to bring it back.
+    const fancyTable = {
+      group: fancy,
+      meshes: [fLegs, fTrim, fTop],
+      origMats: [wood2, goldMat, velvetMat],
+      cost: 1000,
+      fancy: true,
+      repaired: false,
+      slots: [],
+      interactPos: new THREE.Vector3(fancyCx, 0, fancyZ + 1.15),
+    };
     for (const dx of [-1.05, 0, 1.05]) {
-      this.slots.push({
+      const slot = {
         pos: new THREE.Vector3(fancyCx + dx, 0.92, fancyZ),
         browsePos: new THREE.Vector3(fancyCx + dx, 0, fancyZ + 1.15),
+        // the vitrine hugs the back wall, so its back side is walled off — the
+        // reachable spots are the front and the two flanks (blocked ones are
+        // filtered out in _browseSpotFor)
+        browseSpots: [
+          new THREE.Vector3(fancyCx + dx, 0, fancyZ + 1.15), // front
+          new THREE.Vector3(fancyCx + 2.25, 0, fancyZ),      // right
+          new THREE.Vector3(fancyCx - 2.25, 0, fancyZ),      // left
+        ],
         item: null,
         mesh: null,
         fancy: true,
-      });
+        table: fancyTable,
+      };
+      fancyTable.slots.push(slot);
+      this.slots.push(slot);
     }
+    this.tables.push(fancyTable);
+    // grey out every broken fixture now the whole set is built
+    for (const table of this.tables) this._applyTableState(table);
 
     // lamps for cosiness
     for (const sx of [-1, 1]) {
@@ -280,12 +420,14 @@ export class Shop {
       shade.position.y = 2.2;
       const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.14, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffe6a8 }));
       bulb.position.y = 2.0;
-      // a real warm point light in the bulb — off by day, kindled at night by
-      // _updateLighting so the shop actually glows once the sun's gone down
+      // a real warm point light in the bulb — kept dark now the shop holds a
+      // fixed bright-midday palette (see _updateLighting)
       const glow = new THREE.PointLight(0xffca7a, 0, 9, 1.6);
       glow.position.y = 2.0;
       lamp.add(pole, shade, bulb, glow);
-      lamp.position.set(sx * (W / 2 - 1), 0, 2.8);
+      // tucked into the corners against the street-facing shopfront wall,
+      // clear of the door (left) and display window (right)
+      lamp.position.set(sx * (W / 2 - 1), 0, backZ + 0.9);
       g.add(lamp);
       this.lampLights.push(glow);
     }
@@ -316,33 +458,24 @@ export class Shop {
       g.add(m);
       return m;
     };
-    const streetW = 24;
+    const streetW = 44;
     const paveFar = backZ - 2.6; // pavement runs from the wall out to here
     const roadFar = backZ - 9.5;
-    mkGround(streetW, backZ - paveFar, 0, (backZ + paveFar) / 2, 0x9a94a6); // pavement
-    mkGround(streetW, paveFar - roadFar, 0, (paveFar + roadFar) / 2, 0x4b4557); // road
-    mkGround(streetW, 0.18, 0, paveFar + 0.09, 0xc7c1d2); // curb line
-    // dashed centre line down the road
-    for (let lx = -streetW / 2 + 1.5; lx < streetW / 2; lx += 2.4) {
-      mkGround(1.1, 0.18, lx, (paveFar + roadFar) / 2, 0xd9d3a0);
-    }
+    // a medieval dirt street: earthy packed-stone pavement by the shopfront and
+    // a muted cobble-toned road out to the far buildings — no kerb, no lane paint.
+    this.roadColor = 0x6f6558;
+    mkGround(streetW, backZ - paveFar, 0, (backZ + paveFar) / 2, 0x8a7c66); // pavement
+    mkGround(streetW, paveFar - roadFar, 0, (paveFar + roadFar) / 2, this.roadColor); // road
+    // a shallow gutter running down the middle of the road (drainage channel)
+    mkGround(streetW, 0.8, 0, (paveFar + roadFar) / 2, 0x565049).position.y = 0.004;
 
-    // a building facade across the street for depth (seen through the window)
+    // the far flanks that frame the street; the middle is taken up by the two
+    // walk-in buildings built in _buildTown().
     const facadeZ = roadFar - 0.3;
-    mkWall(streetW, 5.2, 0.5, 0, 2.6, facadeZ, makeToonMaterial({ color: 0x6a5a7d, rim: 0 }));
-    mkWall(streetW, 0.7, 0.7, 0, 5.35, facadeZ, wood2); // cornice
-    const winLit = new THREE.MeshBasicMaterial({ color: 0xffdf9c });
-    const winDark = makeToonMaterial({ color: 0x2c2438, rim: 0 });
-    for (let wx = -streetW / 2 + 1.6; wx < streetW / 2 - 1; wx += 2.6) {
-      for (const wy of [1.7, 3.4]) {
-        const pane = new THREE.Mesh(
-          new THREE.BoxGeometry(1.1, 1.2, 0.1),
-          Math.random() < 0.5 ? winLit : winDark
-        );
-        pane.position.set(wx, wy, facadeZ + 0.3);
-        g.add(pane);
-      }
-    }
+    // the far flanks used to be flat painted facades; they're now the town's
+    // restoration lots — run-down ruins and boarded-up empty plots the player
+    // pays the Mayor's fund to rebuild into houses (see _buildLots / restoreLot).
+    this._buildLots(mkWall, mkGround, facadeZ);
 
     // street lamps flanking the doorway
     for (const sx of [-6.5, 6.5]) {
@@ -361,16 +494,24 @@ export class Shop {
     // lanes the pedestrians use, and the ends they enter / leave from
     this.streetHalfX = 7.5; // spawn / exit x on either side
     this.streetWalkZ = backZ - 1.3; // stroll lane (level with the doorstep)
+    // the open ground ambient pedestrians are free to roam: the full width of
+    // the road out front, clamped shy of the shopfront (so nobody strolls into
+    // the shop) and kept in front of the far buildings (so nobody clips a wall).
+    this.streetRegion = {
+      xMax: 19,
+      nearZ: backZ - 1.0, // nearest the shop they'll drift
+      farZ: roadFar + 0.6, // out to just in front of the far buildings
+    };
 
     this.doorPos = new THREE.Vector3(doorCx, 0, backZ - 1.3); // outside: door step
     this.doorInside = new THREE.Vector3(doorCx, 0, backZ + 1.2); // threshold just inside
-    // pulsing affordance ring on the threshold so the doors read as interactive
-    this.doorHint = makeFloorHint();
-    this.doorHint.position.copy(this.doorInside).setY(0.03);
-    g.add(this.doorHint);
 
     // billboard scenery lining the street outside (seeded so co-op peers match)
     populateStreet(g, rng(0xC0FFEE), { W, backZ, streetHalfX: this.streetHalfX });
+
+    // the rest of the town: two empty rooms flanking the shop, two walk-in
+    // buildings across the road, and the plaza floor beneath them all.
+    this._buildTown(mkWall, mkGround, wallMat2, wood2, roadFar, streetW, wallH, backZ);
 
     // bake a coarse navigation grid of the shop floor so customers can route
     // around the tables & furniture instead of shoving straight through them.
@@ -380,30 +521,289 @@ export class Shop {
     this.colliders.push(this._doorCollider);
   }
 
-  // Open or shut the shopfront. When open, customers can arrive. The doorway
-  // collider and the physical swing are driven in update() so that closing up
-  // keeps the door held open until every customer has run out.
-  setDoorsOpen(open) {
-    open = !!open;
-    if (this.doorsOpen === open) return;
-    this.doorsOpen = open;
-    if (!open) {
-      // closing kills any rush in progress so a stale flag can't slam the
-      // doors shut the instant they're next opened
-      this._waveActive = false;
-      this._waveLeft = 0;
+  // Build the rest of the town around the shop: two empty rooms flanking it
+  // (entered through the doorways cut into the side walls), two walk-in
+  // buildings across the road, the plaza floor, and the camera zones that lock
+  // the view onto whichever room the player is standing in.
+  _buildTown(mkWall, mkGround, wallMat, trimMat, roadFar, streetW, wallH, backZ) {
+    const { W, D } = SHOP;
+
+    // --- flanking rooms: two sealed spaces the player can buy their way into
+    // to extend the shop. Until bought, each is a pitch-black void behind a
+    // locked door set in the shared side wall; paying the fee (see game.js)
+    // swings the door open and lights the room up as an extension. ---
+    const roomHalfW = 4;
+    const black = () => new THREE.MeshBasicMaterial({ color: 0x000000 });
+    const doorPanelMat = makeToonMaterial({ color: 0x7a4a28, rim: 0 });
+    const doorTrimMat = makeToonMaterial({ color: 0x5c3720, rim: 0, polygonOffset: true });
+    const handleMat = makeToonMaterial({ color: 0xe6c26a, rim: 0 });
+    this.expansions = [];
+    this._townWallMat = wallMat; // restored onto a room's walls when it's bought
+    for (const side of [-1, 1]) {
+      const cx = side * (W / 2 + roomHalfW); // room centre x
+      // floor + the three enclosing walls, all blacked out until the room's bought
+      const floor = mkGround(roomHalfW * 2, D, cx, 0, 0);
+      floor.material = black();
+      const outerWall = mkWall(0.4, wallH, D, cx + side * roomHalfW, wallH / 2, 0, wallMat);
+      const backWall = mkWall(roomHalfW * 2, wallH, 0.4, cx, wallH / 2, -D / 2, wallMat);
+      const frontWall = mkWall(roomHalfW * 2, 1.1, 0.35, cx, 0.55, D / 2, wallMat);
+      const litColor = side < 0 ? 0x8a7a5f : 0x86748f; // floor colour once bought
+      const dark = [outerWall, backWall, frontWall];
+      for (const m of dark) m.material = black();
+      // the rug, hidden until the room is opened up
+      const rugMesh = mkGround(2.6, 1.7, cx, 1.4, side < 0 ? 0x6a4f6a : 0x4f5f6a);
+      rugMesh.position.y = 0.02;
+      rugMesh.visible = false;
+      this.colliders.push(
+        { x: cx + side * roomHalfW, z: 0, hw: 0.35, hd: D / 2 },
+        { x: cx, z: -D / 2, hw: roomHalfW, hd: 0.35 },
+        { x: cx, z: D / 2, hw: roomHalfW, hd: 0.3 }
+      );
+
+      // a hinged door filling the shared-wall opening. Hinges on the back jamb
+      // and swings into the room. A collider bars the doorway while it's locked.
+      const hingeZ = this.sideDoorZ - this.sideDoorHW;
+      const pivot = new THREE.Group();
+      pivot.position.set(side * W / 2, 0, hingeZ);
+      const panel = new THREE.Mesh(new THREE.BoxGeometry(0.12, 2.18, this.sideDoorHW * 2), doorPanelMat);
+      panel.position.set(0, 1.09, this.sideDoorHW);
+      pivot.add(panel);
+      for (const pz of [this.sideDoorHW * 0.55, this.sideDoorHW * 1.45]) {
+        const plank = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.14, this.sideDoorHW * 1.4), doorTrimMat);
+        plank.position.set(side * 0.02, 1.55, pz);
+        pivot.add(plank);
+      }
+      const handle = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), handleMat);
+      handle.position.set(side * 0.1, 1.09, this.sideDoorHW * 1.8);
+      pivot.add(handle);
+      this.group.add(pivot);
+      const doorCollider = { x: side * W / 2, z: this.sideDoorZ, hw: 0.35, hd: this.sideDoorHW };
+      this.colliders.push(doorCollider);
+
+      this.expansions.push({
+        side,
+        cost: 2000,
+        unlocked: false,
+        floor, litColor,
+        walls: dark,
+        rug: rugMesh,
+        pivot,
+        doorCollider,
+        _doorA: 0, // eased 0 = shut, 1 = swung open
+        interactPos: new THREE.Vector3(side * (W / 2 - 1.0), 0, this.sideDoorZ),
+      });
     }
-    if (open) this.game.audio.doorbell();
-    else this.game.audio.stairs();
+
+    // --- the far side of the street is now an unbroken row of restoration lots
+    // (built in _buildLots): no more walk-in buildings hogging the middle. Just
+    // an open plaza rolling back to the line of houses the player rebuilds. ---
+    const backLimit = roadFar - 3.0; // ground stops just behind the row of houses
+
+    // plaza floor so the whole town has ground underfoot past the road (sunk a
+    // hair so it never z-fights the road / lot footprints sitting on top)
+    const plaza = mkGround(streetW, roadFar - backLimit, 0, (roadFar + backLimit) / 2, this.roadColor);
+    plaza.position.y = -0.03;
+
+    // camera zones: standing inside one locks the camera to its centre (like
+    // the shop); out on the open street/plaza the camera follows the player.
+    this.zones = [
+      { minX: -W / 2, maxX: W / 2, minZ: -D / 2 - 0.4, maxZ: 9, cx: 0, cz: 0 }, // shop
+      { minX: -W / 2 - roomHalfW * 2, maxX: -W / 2, minZ: -D / 2 - 0.4, maxZ: 9, cx: -(W / 2 + roomHalfW), cz: 0 }, // left room
+      { minX: W / 2, maxX: W / 2 + roomHalfW * 2, minZ: -D / 2 - 0.4, maxZ: 9, cx: W / 2 + roomHalfW, cz: 0 }, // right room
+    ];
+    // walkable fence for the whole town: the road out front is free to roam
+    // corner to corner (colliders do the fine work — walls and the lot
+    // footprints). Beside the rooms there's no ground north of the shopfront
+    // line, so seal those two flanks with an invisible wall along it.
+    const roomOuter = W / 2 + roomHalfW * 2; // outer edge of the flanking rooms
+    const edgeX = streetW / 2 - 1.0; // road's walkable half-width
+    for (const s of [-1, 1]) {
+      this.colliders.push({ x: s * (roomOuter + edgeX) / 2, z: backZ, hw: (edgeX - roomOuter) / 2, hd: 0.35 });
+    }
+    this.bounds = {
+      minX: -edgeX,
+      maxX: edgeX,
+      minZ: backLimit + 0.5,
+      maxZ: D / 2 + 2.5,
+    };
+  }
+
+  // Buy your way into a flanking room: swing its door open for good, lift the
+  // doorway collider so the player can stroll through, and light the room up
+  // (floor, walls and rug) so it reads as an extension of the shop. `instant`
+  // skips the swing (used when restoring a saved purchase on load).
+  unlockExpansion(i, instant = false) {
+    const ex = this.expansions && this.expansions[i];
+    if (!ex || ex.unlocked) return;
+    ex.unlocked = true;
+    ex.floor.material = makeToonMaterial({ color: ex.litColor, rim: 0 });
+    for (const w of ex.walls) w.material = this._townWallMat;
+    ex.rug.visible = true;
+    this.colliders = this.colliders.filter((c) => c !== ex.doorCollider);
+    if (instant) {
+      ex._doorA = 1;
+      ex.pivot.rotation.y = ex.side * 1.7;
+    }
+  }
+
+  // ---- town restoration lots -----------------------------------------------
+  // The run-down flanks of the street: four sites the player rebuilds with the
+  // Mayor's fund. Two start as boarded-up empty plots (fenced dirt), two as
+  // stone ruins. Each holds a hidden finished-house model that's revealed when
+  // restored; a new resident then moves in (a distinct customer archetype who
+  // shops here, quickening and enriching the foot traffic — see _spawnCustomer).
+  _buildLots(mkWall, mkGround, facadeZ) {
+    this.lots = [];
+    const toon = (color) => makeToonMaterial({ color, rim: 0 });
+    const litWin = () => new THREE.MeshBasicMaterial({ color: 0xffdf9c });
+    // cx, kind, cost, resident archetype index (into ARCHETYPES). An unbroken
+    // row of houses across the street now that the walk-in buildings are gone —
+    // cheapest plots near the middle, pricier ruins out on the flanks.
+    const defs = [
+      { cx: -4.8, kind: "plot", cost: 100, resident: 1 }, // Regular — the Mayor's first ask, one good sale covers it
+      { cx: 4.8, kind: "plot", cost: 700, resident: 1 }, // Regular
+      { cx: -9.6, kind: "plot", cost: 1200, resident: 2 }, // Wealthy
+      { cx: 9.6, kind: "plot", cost: 1800, resident: 2 }, // Wealthy
+      { cx: -14.4, kind: "ruin", cost: 3000, resident: 2 }, // Wealthy
+      { cx: 14.4, kind: "ruin", cost: 4500, resident: 3 }, // Collector
+      { cx: -19.2, kind: "ruin", cost: 7000, resident: 3 }, // Collector
+      { cx: 19.2, kind: "ruin", cost: 9500, resident: 3 }, // Collector
+    ];
+    const z0 = facadeZ - 0.6; // footprint sits just behind the old facade line
+    for (const def of defs) {
+      const { cx } = def;
+      const before = new THREE.Group();
+      const after = new THREE.Group();
+      after.visible = false;
+      this.group.add(before, after);
+
+      // --- finished house (revealed on restore) -----------------------------
+      const bodyCol = def.resident >= 3 ? 0xa87ab0 : def.resident >= 2 ? 0x7d9bd0 : 0xcbb489;
+      const roofCol = def.resident >= 3 ? 0x6a3b6f : def.resident >= 2 ? 0x39557f : 0x9a4a3a;
+      after.add(mkWall(3.6, 2.6, 2.6, cx, 1.3, z0, toon(bodyCol)));
+      const roof = new THREE.Mesh(new THREE.ConeGeometry(2.9, 1.5, 4), toon(roofCol));
+      roof.rotation.y = Math.PI / 4;
+      roof.position.set(cx, 3.35, z0);
+      after.add(roof);
+      after.add(mkWall(0.9, 1.6, 0.12, cx, 0.8, z0 + 1.34, toon(0x5c3720))); // door
+      const win = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, 0.12), litWin());
+      win.position.set(cx + 1.05, 1.5, z0 + 1.34);
+      after.add(win);
+      const chimney = mkWall(0.5, 1.0, 0.5, cx + 1.0, 3.4, z0 - 0.3, toon(0x6e4526));
+      after.add(chimney);
+
+      // --- ruined / empty-plot "before" state -------------------------------
+      const dirt = mkGround(3.8, 2.8, cx, z0, def.kind === "ruin" ? 0x4a4038 : 0x6b5a45);
+      dirt.position.y = 0.02;
+      before.add(dirt);
+      if (def.kind === "ruin") {
+        // a few broken stone wall stubs + scattered rubble
+        for (const [dx, h] of [[-1.3, 1.5], [1.2, 1.0], [0.1, 0.6]]) {
+          before.add(mkWall(0.6, h, 0.6, cx + dx, h / 2, z0 - 0.4, toon(0x6a6258)));
+        }
+        for (let k = 0; k < 5; k++) {
+          const s = 0.25 + Math.random() * 0.3;
+          before.add(mkWall(s, s, s, cx + (Math.random() - 0.5) * 3, s / 2, z0 + (Math.random() - 0.5) * 2, toon(0x585048)));
+        }
+      } else {
+        // boarded-up empty plot: a low picket fence around the dirt + a sign post
+        const fenceMat = toon(0x8a6a44);
+        for (let fx = cx - 1.7; fx <= cx + 1.7; fx += 0.85) {
+          before.add(mkWall(0.12, 0.9, 0.12, fx, 0.45, z0 + 1.3, fenceMat)); // front posts
+        }
+        before.add(mkWall(3.6, 0.12, 0.12, cx, 0.7, z0 + 1.3, fenceMat)); // front rail
+        before.add(mkWall(0.16, 1.4, 0.16, cx, 0.7, z0 + 1.3, toon(0x5c4a30))); // sign post
+        const board = mkWall(1.2, 0.7, 0.1, cx, 1.3, z0 + 1.3, litWin());
+        before.add(board);
+      }
+
+      // seal the flank (as the old facade did) and never let anyone walk the lot
+      const collider = { x: cx, z: z0, hw: 2.0, hd: 1.5 };
+      this.colliders.push(collider);
+
+      this.lots.push({
+        ...def,
+        before, after, collider,
+        restored: false,
+        interactPos: new THREE.Vector3(cx, 0, facadeZ + 1.7), // stand on the road side
+      });
+    }
+  }
+
+  // Rebuild lot `i`: hide the ruin/plot, reveal the finished house. `instant`
+  // skips the little poof (used when replaying saved restorations on load).
+  restoreLot(i, instant = false) {
+    const lot = this.lots && this.lots[i];
+    if (!lot || lot.restored) return;
+    lot.restored = true;
+    lot.before.visible = false;
+    lot.after.visible = true;
+    if (!instant) {
+      this.game.audio.chest();
+      this.game.engine.shake(0.15);
+    }
+  }
+
+  // Which camera zone the player is standing in (locks the view onto its
+  // centre), or null when out on the street/plaza (the camera follows instead).
+  zoneCenter(pos) {
+    for (const z of this.zones) {
+      if (pos.x >= z.minX && pos.x <= z.maxX && pos.z >= z.minZ && pos.z <= z.maxZ) return z;
+    }
+    return null;
+  }
+
+  // Vestigial now that the shop trades all day — the shopfront simply swings
+  // with foot traffic (see update()). Kept as a no-op so the co-op state sync
+  // has something to call.
+  setDoorsOpen(open) {
+    this.doorsOpen = !!open;
+  }
+
+  // ------------------------------------------------------------ tables
+  // Reflect a table's repaired/broken state onto its meshes (real materials vs
+  // the drab grey) and its slots (a broken table's slots can't be stocked).
+  _applyTableState(table) {
+    const broken = !table.repaired;
+    table.meshes.forEach((m, k) => { m.material = broken ? this._brokenMat : table.origMats[k]; });
+    for (const s of table.slots) s.disabled = broken;
+  }
+
+  // Light one broken table up white (the interact affordance, in place of the
+  // ground ring), or pass null/undefined to clear. Its meshes swap to the
+  // pulsing emissive-white material; the previously lit table is restored to
+  // whatever its state calls for (grey if still broken, real wood once fixed).
+  highlightTable(table) {
+    const next = table || null;
+    if (this._glowTable === next) return;
+    if (this._glowTable) this._applyTableState(this._glowTable);
+    this._glowTable = next;
+    if (next) for (const m of next.meshes) m.material = this._glowMat;
+  }
+
+  // Pay to restore table `i`: swap its dusty grey for the real wood/velvet and
+  // free its slots for stock. `instant` skips the poof (used when replaying a
+  // saved purchase on load).
+  repairTable(i, instant = false) {
+    const table = this.tables && this.tables[i];
+    if (!table || table.repaired) return;
+    if (this._glowTable === table) this._glowTable = null; // stop lighting it
+    table.repaired = true;
+    this._applyTableState(table);
+    if (!instant) {
+      this.game.audio.chest();
+      this.game.engine.shake(0.14);
+    }
   }
 
   // ------------------------------------------------------------ stocking
+  // The first empty, usable slot — skips slots on tables still awaiting repair.
   freeSlot() {
-    return this.slots.find((s) => !s.item);
+    return this.slots.find((s) => !s.item && !s.disabled);
   }
 
   stockItem(itemId, slot = this.freeSlot()) {
-    if (!slot || slot.item) return false;
+    if (!slot || slot.item || slot.disabled) return false;
     slot.item = itemId;
     slot.mesh = itemSprite(itemId);
     slot.mesh.position.copy(slot.pos);
@@ -438,6 +838,13 @@ export class Shop {
     for (const s of this.shafts) s.userData.update(dt, elapsed);
     this._updateLighting(dt);
 
+    // throb the white glow on whichever broken table is the current target
+    if (this._glowTable) this._glowMat.emissiveIntensity = 0.55 + Math.sin(elapsed * 6) * 0.45;
+
+    // feed the see-through wall cutout so walls never hide the player
+    const player = this.game.player;
+    if (player) for (const m of this._occludeMats) feedOccluder(m, player, this.game.engine.camera);
+
     // shimmer the fancy-table glows: advance their shader clock and keep each
     // billboarded at the camera so the halo always faces the player
     const cam = this.game.engine.camera;
@@ -452,7 +859,11 @@ export class Shop {
     // shopper has crossed the threshold onto the street they no longer hold it —
     // the doors shut right behind the last one instead of waiting for the whole
     // crowd to stroll off down the block.
-    const wantOpen = this.doorsOpen || this.customers.some((c) => !c._outside) || this.doorHeld;
+    // the player can walk out onto the street: the shopfront swings open (and
+    // its collider lifts, below) whenever they step up to it, day or night.
+    const pp = this.game.player && this.game.player.position;
+    const playerNear = !!pp && (pp.distanceTo(this.doorInside) < 2.0 || pp.distanceTo(this.doorPos) < 2.6);
+    const wantOpen = this.customers.some((c) => !c._outside) || this.doorHeld || playerNear;
 
     // ease the shopfront doors toward their open/shut pose
     const doorTgt = wantOpen ? 1 : 0;
@@ -463,12 +874,21 @@ export class Shop {
       this.doorLeaves[1].rotation.y = -a;
     }
 
-    // The cellar trapdoor is the shopfront's opposite: it stays shut while the
-    // shop is open for business and swings open the moment the doors close (and
-    // the last customer's gone). Ease it inversely to the shopfront doors.
-    // one cellar run a day (solo): once delved, hold the lid shut till morning
-    const sealed = this.game.delvedToday && !this.game.net.connected;
-    const trapTgt = wantOpen || sealed ? 0 : 1;
+    // ease each bought expansion door open (they swing into their room and stay)
+    if (this.expansions) {
+      for (const ex of this.expansions) {
+        const tgt = ex.unlocked ? 1 : 0;
+        if (Math.abs(ex._doorA - tgt) < 0.001) continue;
+        ex._doorA += (tgt - ex._doorA) * Math.min(1, dt * 6);
+        ex.pivot.rotation.y = ex.side * ex._doorA * 1.7; // swing into the room
+      }
+    }
+
+    // The cellar trapdoor now stands open all day (decoupled from the shopfront,
+    // which trades continuously) so you can drop down whenever you like — the
+    // only thing that seals it is the solo real-time lock after a run.
+    const sealed = this.game._cellarLocked() && !this.game.net.connected;
+    const trapTgt = sealed ? 0 : 1;
     this._trapAngle += (trapTgt - this._trapAngle) * Math.min(1, dt * 5);
     if (this.trapLid) this.trapLid.rotation.z = this._trapAngle * 1.9; // swings up to lean on the left wall
     this.trapdoorOpen = this._trapAngle > 0.5;
@@ -489,13 +909,6 @@ export class Shop {
       const s = 1 + pulse * 0.08;
       this.trapHint.scale.set(s, 1, s);
     }
-    if (this.doorHint) {
-      this.doorHint.visible = this._doorAngle < 0.5 && !hlOn(this.doorInside);
-      this.doorHint.material.opacity = 0.16 + pulse * 0.08;
-      const s = 1 + pulse * 0.08;
-      this.doorHint.scale.set(s, 1, s);
-    }
-
     // the doorway only blocks the player once it's actually shut (no customers
     // left to path out through it)
     const hasDoorCollider = this.colliders.includes(this._doorCollider);
@@ -511,48 +924,25 @@ export class Shop {
       return;
     }
 
-    // customers only stream in while it's day *and* the doors are open
-    if (game.phase === "day" && !game.gameOver && this.doorsOpen) this._pumpWaves(dt);
+    // customers trickle in all day for as long as there's stock on the shelves
+    if (!game.gameOver) this._pumpFlow(dt);
 
     for (const cust of [...this.customers]) {
       this._updateCustomer(cust, dt, elapsed);
     }
   }
 
-  // Shift the shop's key + fill light (and the god-ray shafts) across the
-  // trading day so the hour reads at a glance: a cool fresh morning warms up
-  // to a bright midday, mellows into a golden afternoon, then bleeds into an
-  // amber dusk and finally the cool blue of night. Down in the dungeon we hold
-  // a fixed moody palette so descending never looks like broad daylight.
+  // Light the shop in a fixed bright-midday palette (no more day/night cycle),
+  // and hold a fixed moody palette down in the dungeon so descending never
+  // looks like broad daylight.
   _updateLighting(dt) {
     const game = this.game;
     const eng = game.engine;
 
-    // resolve the target palette for the current place + time of day
-    let hemiI, sunI;
-    if (game.playerArea === "dungeon") {
-      const p = DUNGEON_PAL;
-      _tSky.copy(p.sky); _tGround.copy(p.ground); _tSun.copy(p.sun); _tBg.copy(p.bg); _tShaft.copy(p.shaft);
-      hemiI = p.hemiI; sunI = p.sunI;
-    } else if (game.phase === "night") {
-      const p = NIGHT_PAL;
-      _tSky.copy(p.sky); _tGround.copy(p.ground); _tSun.copy(p.sun); _tBg.copy(p.bg); _tShaft.copy(p.shaft);
-      hemiI = p.hemiI; sunI = p.sunI;
-    } else {
-      const prog = game.dayProgress;
-      let a = DAY_KEYS[0], b = DAY_KEYS[DAY_KEYS.length - 1];
-      for (let i = 0; i < DAY_KEYS.length - 1; i++) {
-        if (prog >= DAY_KEYS[i].p && prog <= DAY_KEYS[i + 1].p) { a = DAY_KEYS[i]; b = DAY_KEYS[i + 1]; break; }
-      }
-      const t = a.p === b.p ? 0 : (prog - a.p) / (b.p - a.p);
-      _tSky.copy(a.sky).lerp(b.sky, t);
-      _tGround.copy(a.ground).lerp(b.ground, t);
-      _tSun.copy(a.sun).lerp(b.sun, t);
-      _tBg.copy(a.bg).lerp(b.bg, t);
-      _tShaft.copy(a.shaft).lerp(b.shaft, t);
-      hemiI = a.hemiI + (b.hemiI - a.hemiI) * t;
-      sunI = a.sunI + (b.sunI - a.sunI) * t;
-    }
+    // resolve the target palette for the current place
+    const p = game.playerArea === "dungeon" ? DUNGEON_PAL : SHOP_PAL;
+    _tSky.copy(p.sky); _tGround.copy(p.ground); _tSun.copy(p.sun); _tBg.copy(p.bg); _tShaft.copy(p.shaft);
+    const hemiI = p.hemiI, sunI = p.sunI;
 
     // ease toward it (snap on the very first tick to avoid a startup sweep)
     const k = this._litInit ? 1 - Math.pow(0.0016, dt) : 1;
@@ -569,80 +959,157 @@ export class Shop {
     this._shaftCol.lerp(_tShaft, k);
     for (const s of this.shafts) s.userData.setColor(this._shaftCol);
 
-    // interior lamps: dark by day (the sun does the work), kindled once night
-    // falls so the shop stays warm and readable after dusk
-    const lampTgt = game.phase === "night" ? 2.4 : 0;
-    for (const l of this.lampLights) l.intensity += (lampTgt - l.intensity) * k;
+    // interior lamps stay dark — the fixed midday sun does all the work
+    for (const l of this.lampLights) l.intensity += (0 - l.intensity) * k;
   }
 
-  // Kick off the day's rush: the whole crowd piles in the moment the doors
-  // open. Called by the host when the shopfront opens. Even bare tables draw a
-  // lone browser who peeks in, finds nothing to buy, and files straight back
-  // out — so the doors always close behind the wave (an empty opening must
-  // never leave them stuck open now that there's no manual "close up").
-  beginWave() {
-    this._waveLeft = this.stockedCount() === 0
-      ? 1
-      : Math.min(MAX_CUSTOMERS, this.stockedCount() + 2);
-    this._waveActive = true;
-    this._spawnT = 0;
+  // Trickle shoppers in all day: as long as something's on the shelves and we
+  // haven't hit the concurrent cap, a fresh customer arrives every few seconds.
+  // The pace quickens as the town fills out (each restored house adds a resident
+  // who shops here). Runs on the host regardless of where the player is, so
+  // trade — and passive plain-table income — keeps ticking over while you delve.
+  _pumpFlow(dt) {
+    // During the first-run tutorial the crowd is hand-scripted: the one and only
+    // customer is the Mayor (see spawnMayorCustomer), so hold the auto-flow.
+    if (this.game.tutorial) return;
+    if (this.stockedCount() === 0 || this.customers.length >= MAX_CUSTOMERS) return;
+    this._spawnT -= dt;
+    if (this._spawnT > 0) return;
+    this._spawnCustomer();
+    // more residents → livelier street: base ~5.5s, easing down toward ~1.8s
+    const pop = this.game.townPop ? this.game.townPop() : 0;
+    const interval = Math.max(1.8, 5.5 - pop * 0.5);
+    this._spawnT = interval * (0.7 + Math.random() * 0.6);
   }
 
-  // Rush in the crowd, then bar the door behind them: shoppers pour in on the
-  // player's heels (a heartbeat apart so they don't spawn stacked), and once
-  // the last one has been served and left, the doors swing shut on their own.
-  _pumpWaves(dt) {
-    if (this._waveLeft > 0) {
-      this._spawnT -= dt;
-      if (this._spawnT <= 0 && this.customers.length < MAX_CUSTOMERS) {
-        this._spawnCustomer();
-        this._spawnT = 0.35;
-        this._waveLeft--;
-      }
-      // shelves went bare mid-rush — stop filing more shoppers in
-      if (this.stockedCount() === 0) this._waveLeft = 0;
-    } else if (this._waveActive && this.customers.every((c) => c.state === "leave" && c._outside)) {
-      // everyone's out the door (they finish strolling off down the street
-      // after it shuts) — no need to wait for them to despawn at the corner
-      this._waveActive = false;
-      this.setDoorsOpen(false);
-      this.game.hud.toast("The rush is over — the doors swing shut");
-      this.game._syncState();
-    }
+  // Nudge the next arrival to come almost immediately (used by the FTUE so a
+  // customer shows up the moment the player stocks their first table).
+  hurryNextCustomer(delay = 0.6) {
+    this._spawnT = Math.min(this._spawnT, delay);
   }
 
-  // Cosmetic pedestrians that wander across the street and off the far side —
-  // they never enter, they just make the world outside feel alive. Run on
-  // every client independently; nothing here touches game state.
+  // The FTUE's scripted first shopper: the Mayor himself, in disguise as an
+  // ordinary customer. He walks in, buys the player's first item, and — once
+  // the sale lands — drops the act and reveals who he is (see _mayorFromCustomer).
+  // Built with the Mayor's fixed variant so his body matches the dialogue bust,
+  // forced to buy, and given endless patience so onboarding can't stall out.
+  spawnMayorCustomer(variant) {
+    const game = this.game;
+    const creature = new BlockyCreature(variant, { height: 1.5 });
+    creature.position.set(-this.streetHalfX, 0, this.streetWalkZ);
+    creature.heading = Math.PI / 2;
+    this.group.add(creature);
+    const cust = {
+      id: game.net.newId(),
+      seed: 4242,
+      creature,
+      arch: ARCHETYPES[1] || ARCHETYPES[0],
+      mode: "buy",
+      isMayor: true,
+      sellItem: null,
+      minSell: 0,
+      sellSpot: new THREE.Vector3(0, 0, 1.2),
+      slot: null,
+      ready: false,
+      favorite: null,
+      favScore: -1,
+      target: null,
+      seen: new Set(),
+      toVisit: 1, // makes a beeline for the one stocked table
+      visited: 0,
+      lookT: 0,
+      maxPay: 0,
+      strikes: 0,
+      state: "street",
+      t: 0,
+      patience: 1e9, // he won't leave until the deal is done
+      exitPoint: new THREE.Vector3(-this.streetHalfX, 0, this.streetWalkZ),
+      emote: null,
+    };
+    this.customers.push(cust);
+    game.audio.doorbell();
+    return cust;
+  }
+
+  // Hand a customer's body over to a scripted scene (the Mayor cutscene): clear
+  // their emote and pull them out of the shopper sim, but leave the creature in
+  // the world for the caller to drive. Unlike _removeCustomer it never disposes.
+  detachCustomer(cust) {
+    this._clearEmote(cust);
+    this.customers = this.customers.filter((x) => x !== cust);
+    return cust.creature;
+  }
+
+  // Cosmetic pedestrians that mill about the whole street — not just a single
+  // sidewalk lane. Each strolls between random waypoints spread across the road
+  // (and now and then down the alley to the plaza), pausing here and there,
+  // then wanders off after a while. They never enter the shop and never touch
+  // game state; run on every client independently.
   _updatePassersby(dt, elapsed) {
     const game = this.game;
-    if (game.phase === "day" && !game.gameOver) {
+    if (!game.gameOver) {
       this._passerT -= dt;
-      if (this._passerT <= 0 && this.passersby.length < 3) {
-        this._passerT = 2.5 + Math.random() * 4;
+      if (this._passerT <= 0 && this.passersby.length < 5) {
+        this._passerT = 1.6 + Math.random() * 3;
         this._spawnPasserby();
       }
     }
     for (const p of [...this.passersby]) {
       const c = p.creature;
-      c.position.x += p.dir * p.speed * dt;
-      c.heading = p.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
+      p.life -= dt;
+      if (p.pause > 0) {
+        p.pause -= dt; // loitering — stand still but keep the idle anim ticking
+      } else {
+        const dx = p.tx - c.position.x, dz = p.tz - c.position.z;
+        const d = Math.hypot(dx, dz);
+        if (d < 0.35) {
+          // reached the waypoint: dawdle, then pick the next spot (or head off
+          // the edge once this stroller's time is up)
+          if (p.life <= 0) { p.tx = p.exitX; p.tz = p.exitZ; p.life = -1e9; p.pause = 0; }
+          else { this._pickPasserTarget(p); p.pause = Math.random() < 0.4 ? 0.6 + Math.random() * 1.4 : 0; }
+        } else {
+          c.position.x += (dx / d) * p.speed * dt;
+          c.position.z += (dz / d) * p.speed * dt;
+          c.heading = Math.atan2(dx, dz);
+        }
+      }
       c.update(dt, elapsed);
-      if ((p.dir > 0 && c.position.x > p.endX) || (p.dir < 0 && c.position.x < p.endX)) {
+      // retire once they've reached the exit point beyond the street edge
+      if (p.life <= -1e8 && Math.abs(c.position.x) > this.streetRegion.xMax + 2.5) {
         c.dispose();
         this.passersby = this.passersby.filter((x) => x !== p);
       }
     }
   }
 
+  // Roll a fresh waypoint out on the open road for a stroller: anywhere across
+  // the full width and depth of the road/pavement (which sits in front of the
+  // buildings, so a straight stroll between waypoints never clips a wall).
+  _pickPasserTarget(p) {
+    const R = this.streetRegion;
+    p.tx = (Math.random() - 0.5) * 2 * R.xMax;
+    p.tz = R.farZ + Math.random() * (R.nearZ - R.farZ);
+  }
+
   _spawnPasserby() {
-    const dir = Math.random() < 0.5 ? 1 : -1;
-    const span = this.streetHalfX + 3.5;
+    const R = this.streetRegion;
+    const dir = Math.random() < 0.5 ? 1 : -1; // which edge they walk in from
     const creature = makeCustomerBody(Math.floor(Math.random() * 1e6));
-    creature.position.set(-dir * span, 0, this.streetWalkZ - 0.6 - Math.random() * 0.7);
+    const span = R.xMax + 2.5;
+    creature.position.set(-dir * span, 0, R.farZ + Math.random() * (R.nearZ - R.farZ));
     creature.heading = dir > 0 ? Math.PI / 2 : -Math.PI / 2;
     this.group.add(creature);
-    this.passersby.push({ creature, dir, speed: 1.0 + Math.random() * 0.8, endX: dir * span });
+    const p = {
+      creature,
+      speed: 1.0 + Math.random() * 0.9,
+      life: 10 + Math.random() * 14, // seconds of milling before they head off
+      pause: 0,
+      exitX: dir * span, // where they leave once done
+      exitZ: R.farZ + Math.random() * (R.nearZ - R.farZ),
+      tx: 0, tz: 0,
+    };
+    this._pickPasserTarget(p);
+    this.passersby.push(p);
   }
 
   _spawnCustomer() {
@@ -655,9 +1122,15 @@ export class Shop {
     creature.heading = side > 0 ? -Math.PI / 2 : Math.PI / 2;
     this.group.add(creature);
 
-    // weighted archetype
+    // weighted archetype. Restored houses add residents who shop here: each
+    // bumps their archetype's odds, so a livelier town draws wealthier, rarer
+    // clientele into rotation on top of the passing baseline crowd.
     const bag = [];
     for (const a of ARCHETYPES) for (let i = 0; i < a.w; i++) bag.push(a);
+    for (const idx of this.game.townResidents || []) {
+      const a = ARCHETYPES[idx];
+      if (a) for (let i = 0; i < 3; i++) bag.push(a);
+    }
     const arch = bag[Math.floor(Math.random() * bag.length)];
 
     // Some shoppers arrive as sellers: they carry an item to offload onto the
@@ -669,7 +1142,12 @@ export class Shop {
     const mode = !game.tutorial && Math.random() < SELLER_CHANCE ? "sell" : "buy";
     let sellItem = null, minSell = 0;
     if (mode === "sell") {
-      const tier = clamp(1 + Math.floor(Math.random() * (1 + Math.floor(game.day / 3))), 1, 4);
+      // Sellers bring better goods as the shop grows: the *lowest* tier they'll
+      // try to offload climbs with the day, so the early tier-1 trash (shrooms,
+      // jelly, bread) stops clogging the counter once you're past the first days.
+      const loTier = clamp(1 + Math.floor(game.day / 3), 1, 4);
+      const hiTier = clamp(loTier + 1, 1, 4);
+      const tier = loTier + Math.floor(Math.random() * (hiTier - loTier + 1));
       sellItem = pick(rng(seed + 7), LOOT_BY_TIER[tier]);
       minSell = Math.round(ITEMS[sellItem].base * (0.45 + Math.random() * 0.3)); // 45–75% of base
     }
@@ -720,6 +1198,45 @@ export class Shop {
     ));
   }
 
+  // Is a world point on (or too near) a blocked nav cell? Used to weed out
+  // browse spots that back into a wall or another table.
+  _spotBlocked(p) {
+    const nav = this._nav;
+    if (!nav) return false;
+    const c = Math.floor((p.x - nav.minX) / nav.cell);
+    const r = Math.floor((p.z - nav.minZ) / nav.cell);
+    if (c < 0 || c >= nav.cols || r < 0 || r >= nav.rows) return true;
+    return !!nav.blocked[r * nav.cols + c];
+  }
+
+  // Choose which side of an item's table a shopper should stand at. Rather than
+  // always crowding the front (which can wall a customer off behind a table),
+  // pick the reachable spot closest to where they're standing now — so someone
+  // coming from the door views it from the near side instead of squeezing past.
+  _browseSpotFor(cust, slot) {
+    const spots = slot.browseSpots || [slot.browsePos];
+    const from = cust.creature?.position || cust.creature?.group?.position;
+    let best = null, bestD = Infinity;
+    for (const s of spots) {
+      if (this._spotBlocked(s)) continue;
+      const d = from ? from.distanceToSquared(s) : 0;
+      if (d < bestD) { bestD = d; best = s; }
+    }
+    return best || slot.browsePos;
+  }
+
+  // Position in the counter queue (0 = at the head, being served). Everyone
+  // who's committed to a haggle — buyers wanting an item, sellers with an
+  // offer, and whoever's mid-deal — shares one line, ordered by ticket number
+  // so nobody jumps the queue and the rest shuffle up as the head is served.
+  _queueIndexOf(cust) {
+    const q = this.customers
+      .filter((o) => o.queueOrder != null &&
+        (o.state === "want" || o.state === "offer" || o.state === "haggling"))
+      .sort((a, b) => a.queueOrder - b.queueOrder);
+    return q.indexOf(cust);
+  }
+
   // Pick a stocked slot this shopper hasn't inspected yet.
   // null = nothing left to see (decide); undefined = all taken (mill around).
   _pickBrowseSlot(cust) {
@@ -750,15 +1267,19 @@ export class Shop {
       cust.t = 0;
       this.game.net.send({ t: "custWant", id: cust.id, slotIdx: this.slots.indexOf(fav), maxPay: cust.maxPay });
       if (fav.fancy) {
-        // the velvet table: a proper haggle for the best price
+        // the velvet table: a proper haggle for the best price. They grab a
+        // ticket and join the counter queue — the deal opens once they reach
+        // the head of the line, not the instant they decide.
         cust.state = "want";
-        cust.ready = true; // decided — haggle can pop immediately, no walk-up wait
+        cust.ready = false;
+        cust.queueOrder = ++this._queueSeq;
         cust.emote = this.game.hud.emote(cust.creature, "alert", 999);
         this.game.audio.haggle();
       } else {
         // a plain table: they'll amble over and pay full sticker price, no haggle
         cust.state = "autobuy";
         cust.ready = false;
+        cust.buySpot = this._browseSpotFor(cust, fav);
         cust._payT = 0.5;
         cust.emote = this.game.hud.emote(cust.creature, "moneyfly", 999);
       }
@@ -896,7 +1417,8 @@ export class Shop {
           cust.state = cust.mode === "sell" ? "offer" : "roam";
           cust.t = 0;
           if (cust.mode === "sell") {
-            cust.ready = true; // ready to be haggled with the moment they step in
+            cust.ready = false; // must reach the head of the counter queue first
+            cust.queueOrder = ++this._queueSeq;
             if (!cust.emote) cust.emote = game.hud.emote(c, "moneyfly", 999);
           }
         }
@@ -915,6 +1437,7 @@ export class Shop {
           cust.t = 0;
         } else {
           cust.target = slot;
+          cust.browseSpot = this._browseSpotFor(cust, slot);
           cust.seen.add(this.slots.indexOf(slot));
           cust.state = "goto";
         }
@@ -932,7 +1455,7 @@ export class Shop {
         const tgt = cust.target;
         if (!tgt || !tgt.item) {
           cust.state = "roam"; // item vanished — look for another
-        } else if (walkTo(tgt.browsePos, 2.7)) {
+        } else if (walkTo(cust.browseSpot || tgt.browsePos, 2.7)) {
           cust.state = "look";
           cust.t = 0;
           cust.lookT = 0.7 + Math.random() * 1.2; // linger a beat
@@ -962,19 +1485,20 @@ export class Shop {
         break;
       }
       case "want": {
-        // amble back to their pick and wait for the shopkeeper; lose patience.
+        // queue up at the counter and shuffle forward as it clears; the one at
+        // the head is ready to haggle. Lose patience if the wait drags on.
         const slot = cust.slot;
         if (!slot || !slot.item) {
           this._clearEmote(cust);
           cust.state = "leave";
           cust._atDoor = false;
         } else {
-          if (!walkTo(slot.browsePos, 2.4)) {
-            /* still walking over */
-          } else {
-            faceSlot(slot);
-            cust.ready = true; // arrived at their pick — ready to haggle
-          }
+          if (cust.queueOrder == null) cust.queueOrder = ++this._queueSeq;
+          const idx = this._queueIndexOf(cust);
+          const spot = this.queueSpots[Math.min(idx, this.queueSpots.length - 1)];
+          const arrived = walkTo(spot, 2.4);
+          if (arrived) c.heading = Math.PI / 2; // face the counter
+          cust.ready = arrived && idx === 0; // only the head can be served
           if (cust.t > cust.patience) {
             this._clearEmote(cust);
             game.hud.emote(c, "anger", 1.5);
@@ -994,7 +1518,7 @@ export class Shop {
           cust._atDoor = false;
           break;
         }
-        if (walkTo(slot.browsePos, 2.6)) {
+        if (walkTo(cust.buySpot || (cust.buySpot = this._browseSpotFor(cust, slot)), 2.6)) {
           faceSlot(slot);
           cust._payT -= dt;
           if (cust._payT <= 0) {
@@ -1005,12 +1529,14 @@ export class Shop {
         break;
       }
       case "offer": {
-        // a seller: stand at their spot and wait to be haggled with; if the
-        // shopkeeper ignores them long enough, they take their goods and go.
-        if (walkTo(cust.sellSpot)) {
-          c.heading = Math.atan2(-c.position.x, 2 - c.position.z);
-          cust.ready = true; // settled at their spot — ready to be haggled with
-        }
+        // a seller: queue at the counter like the buyers do and wait their turn
+        // to be haggled with; if the wait drags on, they take their goods and go.
+        if (cust.queueOrder == null) cust.queueOrder = ++this._queueSeq;
+        const idx = this._queueIndexOf(cust);
+        const spot = this.queueSpots[Math.min(idx, this.queueSpots.length - 1)];
+        const arrived = walkTo(spot);
+        if (arrived) c.heading = Math.PI / 2; // face the counter
+        cust.ready = arrived && idx === 0; // only the head can be served
         if (cust.t > cust.patience) {
           this._clearEmote(cust);
           game.hud.emote(c, "anger", 1.5);
@@ -1204,34 +1730,17 @@ export class Shop {
     return true;
   }
 
-  /** Nearest customer in "want" state within reach of pos. */
-  wantingCustomerNear(pos, r = 2.2) {
-    let best = null,
-      bd = r;
+  /** The customer at the head of the counter queue, waiting to be served — a
+   *  buyer wanting an item or a seller with an offer. Only the one at the head
+   *  of the line (and settled at the front spot) is flagged `ready`, so this
+   *  hands back whoever the shopkeeper should deal with next, or null. */
+  counterCustomer() {
     for (const cust of this.customers) {
-      if (cust.state !== "want" || !cust.slot || !cust.slot.item) continue;
-      const d = cust.creature.position.distanceTo(pos);
-      if (d < bd) {
-        bd = d;
-        best = cust;
-      }
+      if (!cust.ready) continue;
+      if (cust.state === "want" && cust.slot?.item) return cust;
+      if (cust.state === "offer" && cust.sellItem) return cust;
     }
-    return best;
-  }
-
-  /** Nearest seller (customer in "offer" state) within reach of pos. */
-  sellingCustomerNear(pos, r = 2.2) {
-    let best = null,
-      bd = r;
-    for (const cust of this.customers) {
-      if (cust.state !== "offer" || !cust.sellItem) continue;
-      const d = cust.creature.position.distanceTo(pos);
-      if (d < bd) {
-        bd = d;
-        best = cust;
-      }
-    }
-    return best;
+    return null;
   }
 
   // ------------------------------------------------------------ haggling
@@ -1259,8 +1768,8 @@ export class Shop {
 
     ui = hud.haggle(
       {
-        itemName: item.name, icon: item.icon, base: item.base, mood0: cust.arch.moods,
-        custVariant: variantForSeed(cust.seed),
+        itemName: item.name, icon: item.icon, base: item.base, tier: item.tier, mood0: cust.arch.moods,
+        custVariant: cust.creature?.variant ?? variantForSeed(cust.seed),
         playerVariant: game.player?.variant ?? "a",
       },
       {
@@ -1322,8 +1831,8 @@ export class Shop {
 
     ui = hud.haggle(
       {
-        itemName: item.name, icon: item.icon, base: item.base, mood0: cust.arch.moods, buying: true,
-        custVariant: variantForSeed(cust.seed),
+        itemName: item.name, icon: item.icon, base: item.base, tier: item.tier, mood0: cust.arch.moods, buying: true,
+        custVariant: cust.creature?.variant ?? variantForSeed(cust.seed),
         playerVariant: game.player?.variant ?? "a",
       },
       {
@@ -1419,18 +1928,12 @@ function makeGlow(color = 0xffd67a) {
   return mesh;
 }
 
-// ---- time-of-day light palettes --------------------------------------------
+// ---- light palettes ---------------------------------------------------------
 // `sky`/`ground` tint the hemisphere (ambient) fill, `sun` the warm key light
-// and the god-ray shafts, `bg` the backdrop + fog. The day keys are sampled by
-// `dayProgress` (0 = doors just opened, 1 = dusk) and interpolated between.
+// and the god-ray shafts, `bg` the backdrop + fog. The shop holds a fixed
+// bright-midday look; the dungeon a moodier one.
 const _col = (hex) => new THREE.Color(hex);
-const DAY_KEYS = [
-  { p: 0.0,  sky: _col(0x9db6ff), ground: _col(0x24203a), hemiI: 0.9,  sun: _col(0xfff0d2), sunI: 1.7,  bg: _col(0x24325c), shaft: _col(0xfff2d0) }, // fresh morning
-  { p: 0.45, sky: _col(0xc3c2e6), ground: _col(0x1c1630), hemiI: 0.95, sun: _col(0xffe7b4), sunI: 2.1,  bg: _col(0x2b2848), shaft: _col(0xffe6ad) }, // bright midday
-  { p: 0.8,  sky: _col(0xd8aec0), ground: _col(0x241733), hemiI: 0.72, sun: _col(0xffc079), sunI: 1.85, bg: _col(0x361f3d), shaft: _col(0xffc074) }, // golden afternoon
-  { p: 1.0,  sky: _col(0xdd8f6f), ground: _col(0x2a1230), hemiI: 0.6,  sun: _col(0xff8a48), sunI: 1.5,  bg: _col(0x3d1830), shaft: _col(0xff8f4a) }, // amber dusk
-];
-const NIGHT_PAL   = { sky: _col(0x6a79cc), ground: _col(0x0d0a1e), hemiI: 0.5, sun: _col(0x9fb2ff), sunI: 0.75, bg: _col(0x120a26), shaft: _col(0xaebdff) };
+const SHOP_PAL    = { sky: _col(0xc3c2e6), ground: _col(0x1c1630), hemiI: 0.95, sun: _col(0xffe7b4), sunI: 2.1, bg: _col(0x2b2848), shaft: _col(0xffe6ad) };
 const DUNGEON_PAL = { sky: _col(0xb7a1ff), ground: _col(0x160e28), hemiI: 0.6, sun: _col(0xffdca0), sunI: 1.9,  bg: _col(0x1a1030), shaft: _col(0xffd08a) };
 const _tSky = new THREE.Color();
 const _tGround = new THREE.Color();

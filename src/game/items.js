@@ -19,20 +19,34 @@ const mesh = (geo, mat, x = 0, y = 0, z = 0, rx = 0, rz = 0) => {
   return m;
 };
 
-// `heal` marks a consumable: using it restores that many hearts and removes it from the bag.
+// `heal` marks a consumable: using it restores that many hearts and removes it
+// from the bag. `equip` marks a piece of gear: it can still be sold or shelved
+// like any merchandise, but the player can also slot it into their loadout (see
+// game/gear.js). `equip.slot` decides which of the five body slots it fills; the
+// weapon slot's `type` (sword|bow|staff) also picks the whole attack style.
 export const ITEMS = {
   caveshroom: { name: "Cave Mushroom", icon: "caveshroom", base: 8, tier: 1, heal: 1 },
   jelly:   { name: "Slime Jelly",   icon: "jelly",   base: 12,  tier: 1 },
   herb:    { name: "Moon Herb",     icon: "herb",    base: 16,  tier: 1, heal: 1 },
   bread:   { name: "Honey Bread",   icon: "bread",   base: 14,  tier: 1, heal: 2 },
-  wsword:  { name: "Pine Sword",    icon: "sword",   base: 28,  tier: 1 },
+  wsword:  { name: "Pine Sword",    icon: "sword",   base: 28,  tier: 1,
+    equip: { slot: "weapon", type: "sword", dmgMul: 1.0, blade: 0x9c7b4f, grip: 0x6e5433, len: 0.5,
+      blurb: "Balanced 3-hit melee combo." } },
   potion:  { name: "Red Potion",    icon: "potion",  base: 34,  tier: 2, heal: 4 },
-  ring:    { name: "Copper Ring",   icon: "ring",    base: 48,  tier: 2 },
-  dagger:  { name: "Fang Dagger",   icon: "dagger",  base: 60,  tier: 2 },
+  ring:    { name: "Copper Ring",   icon: "ring",    base: 48,  tier: 2,
+    equip: { slot: "ring", crit: 0.12, blurb: "+12% critical hit chance." } },
+  dagger:  { name: "Fang Dagger",   icon: "dagger",  base: 60,  tier: 2,
+    equip: { slot: "weapon", type: "sword", dmgMul: 0.85, blade: 0xc8cdd6, grip: 0x54324a, len: 0.34,
+      blurb: "Quick, light melee combo (−15% damage)." } },
   lantern: { name: "Wisp Lantern",  icon: "lantern", base: 75,  tier: 2 },
-  amulet:  { name: "Silver Amulet", icon: "amulet",  base: 105, tier: 3 },
-  ssword:  { name: "Steel Sword",   icon: "swords",  base: 140, tier: 3 },
-  tome:    { name: "Spell Tome",    icon: "tome",    base: 170, tier: 3 },
+  amulet:  { name: "Silver Amulet", icon: "amulet",  base: 105, tier: 3,
+    equip: { slot: "ring", crit: 0.08, gold: 0.2, blurb: "+8% crit, +20% gold from loot." } },
+  ssword:  { name: "Steel Sword",   icon: "swords",  base: 140, tier: 3,
+    equip: { slot: "weapon", type: "sword", dmgMul: 1.7, blade: 0xd7dde6, grip: 0x3f5f9e, len: 0.62,
+      blurb: "Same combo, +70% damage." } },
+  tome:    { name: "Spell Tome",    icon: "tome",    base: 170, tier: 3,
+    equip: { slot: "weapon", type: "staff", projDmg: 9, cd: 0.55, projSpeed: 12, pierce: true, splash: 1.3,
+      projColor: 0x8fd8ff, blurb: "Piercing bolts that blast on impact." } },
   gem:     { name: "Dawn Gem",      icon: "gem",     base: 260, tier: 4 },
   fang:    { name: "Dragon Fang",   icon: "fang",    base: 340, tier: 4 },
   crown:   { name: "Lost Crown",    icon: "crown",   base: 450, tier: 4 },
@@ -43,13 +57,31 @@ export const ITEMS = {
   egg:      { name: "Griffon Egg",      icon: "egg",       base: 40,  tier: 2 },
   key:      { name: "Brass Key",        icon: "key",       base: 52,  tier: 2 },
   bomb:     { name: "Blast Bomb",       icon: "bomb",      base: 44,  tier: 2 },
-  shield:   { name: "Kite Shield",      icon: "shield",    base: 120, tier: 3 },
+  shield:   { name: "Kite Shield",      icon: "shield",    base: 120, tier: 3,
+    equip: { slot: "shield", block: 0.35, blurb: "35% chance to fully block a hit." } },
   bell:     { name: "Gold Bell",        icon: "bell",      base: 150, tier: 3 },
   feather:  { name: "Phoenix Feather",  icon: "feather",   base: 160, tier: 3 },
   hourglass:{ name: "Chrono Hourglass", icon: "hourglass", base: 300, tier: 4 },
   star:     { name: "Star Shard",       icon: "star",      base: 380, tier: 4 },
+
+  // ---- gear that only bosses drop: no store to buy it, you win it below ----
+  bow:    { name: "Hunter's Bow",    icon: "bow",   base: 95,  tier: 2,
+    equip: { slot: "weapon", type: "bow", projDmg: 3, cd: 0.34, projSpeed: 15, projColor: 0xbfe0a0,
+      blurb: "Rapid arrows — fight safely from range." } },
+  staff:  { name: "Oak Staff",       icon: "staff", base: 165, tier: 3,
+    equip: { slot: "weapon", type: "staff", projDmg: 6, cd: 0.6, projSpeed: 11, pierce: true, projColor: 0xb98cff,
+      blurb: "Slow bolts that pierce a whole line of foes." } },
+  armor:  { name: "Steel Chestplate", icon: "armor", base: 185, tier: 3,
+    equip: { slot: "chest", maxHp: 4, blurb: "+4 hearts of health." } },
+  boots:  { name: "Swift Boots",     icon: "boots", base: 110, tier: 2,
+    equip: { slot: "boots", speed: 0.2, dodgeCd: 0.25, blurb: "+20% move speed, −25% dodge cooldown." } },
 };
 for (const [id, it] of Object.entries(ITEMS)) it.id = id;
+
+// Gear the bosses hand out as spoils (see dungeon.killEnemy). Every entry is an
+// ITEMS id with an `equip` block. Kept here so the drop table lives next to the
+// catalogue it draws from.
+export const EQUIP_DROPS = ["bow", "staff", "armor", "boots", "ssword", "tome", "shield", "amulet"];
 
 export const LOOT_BY_TIER = [
   [],
@@ -183,6 +215,28 @@ const makers = {
       )
     ),
   star: () => mesh(starGeometry(0.13, 0.055, 5, 0.05), M(0xf6c825), 0, 0.15),
+
+  // ---- gear props (mostly rendered as icon sprites; these back itemMesh) ----
+  bow: () =>
+    group(
+      mesh(new THREE.TorusGeometry(0.12, 0.018, 6, 16, Math.PI * 1.2), M(0x8a5a2e), 0, 0.13, 0, 0, Math.PI * 0.9),
+      mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.22, 4), M(0xe8e0cf), 0.02, 0.13, 0)
+    ),
+  staff: () =>
+    group(
+      mesh(new THREE.CylinderGeometry(0.016, 0.02, 0.3, 8), M(0x6e4a2c), 0, 0.13),
+      mesh(new THREE.IcosahedronGeometry(0.05, 0), M(0x62b8ff), 0, 0.3)
+    ),
+  armor: () =>
+    group(
+      mesh(new THREE.BoxGeometry(0.2, 0.22, 0.11), M(0xb8c0cc), 0, 0.14),
+      mesh(new THREE.BoxGeometry(0.22, 0.05, 0.12), M(0x3f6fae), 0, 0.24)
+    ),
+  boots: () =>
+    group(
+      mesh(new THREE.BoxGeometry(0.08, 0.13, 0.16), M(0x8a5a2e), -0.06, 0.07, 0.02),
+      mesh(new THREE.BoxGeometry(0.08, 0.13, 0.16), M(0x8a5a2e), 0.06, 0.07, 0.02)
+    ),
 };
 
 // A flat, extruded N-point star (used for the Star Shard prop / drop).

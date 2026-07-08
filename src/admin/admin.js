@@ -6,8 +6,8 @@
 // catalogue always reflects the current game — it can't drift.
 import * as THREE from "three";
 
-import { ITEMS, LOOT_BY_TIER, itemSprite } from "../game/items.js";
-import { ENEMY_KINDS, FLOOR_MIX, BOSSES, bossDefFor } from "../game/dungeon.js";
+import { ITEMS, itemSprite, EQUIP_DROPS } from "../game/items.js";
+import { ENEMY_KINDS, DUNGEON_MIX, HOLE_THEMES, DUNGEON_LOOT, BOSSES, bossDefFor, FLOORS_PER_DUNGEON } from "../game/dungeon.js";
 import { HOLE_DEFS } from "../game/sewer.js";
 import { ARCHETYPES } from "../game/shop.js";
 import { Creature } from "../chargen/creature.js";
@@ -39,8 +39,10 @@ function badge(text, kind = "") {
 }
 
 // Render a uniform card. entry = { title, id?, icon?, color?, desc?, badges?,
-// stats?, swatches?, visual? }
+// stats?, swatches?, visual?, tier? } — `tier` paints the card's edge with the
+// item's loot-rarity colour (see admin.css .card--tN).
 function card(entry) {
+  const tierCls = entry.tier ? ` card--t${entry.tier}` : "";
   const head = `
     <div class="card-head">
       ${entry.color != null ? `<span class="card-dot" style="background:${hex(entry.color)}"></span>` : ""}
@@ -59,7 +61,7 @@ function card(entry) {
   const sw = (entry.swatches || []).length
     ? `<div class="swatches">${entry.swatches.map(([l, n]) => swatch(l, n)).join("")}</div>`
     : "";
-  return `<article class="card">${head}${visual}${desc}${stats}${sw}</article>`;
+  return `<article class="card${tierCls}">${head}${visual}${desc}${stats}${sw}</article>`;
 }
 
 // Entries are cards, except `{ section, icon? }` markers which render as a
@@ -191,20 +193,23 @@ function renderLoop() {
 
 const TIER_NAMES = { 1: "Common", 2: "Uncommon", 3: "Rare", 4: "Fabled" };
 
-// Which dungeon floors a given item can drop on (LOOT_BY_TIER is indexed by
-// the loot tier the roll lands in, which tracks floor depth).
-function itemFloors(id) {
-  const tiers = [];
-  LOOT_BY_TIER.forEach((arr, i) => {
-    if (i > 0 && arr.includes(id)) tiers.push(i);
+// Which themed dungeons a given item drops in (from the per-dungeon loot
+// tables plus each monster kind's signature loot list).
+function itemDungeons(id) {
+  const names = [];
+  DUNGEON_LOOT.forEach((table, d) => {
+    const fromKinds = DUNGEON_MIX[d]?.some((mix) => mix.some((k) => ENEMY_KINDS[k]?.loot?.includes(id)));
+    if (table.common.includes(id) || table.rare.includes(id) || fromKinds)
+      names.push(HOLE_DEFS[d]?.name ?? `Dungeon ${d + 1}`);
   });
-  return tiers;
+  return names;
 }
 
 function buildItems() {
   return Object.values(ITEMS).map((it) => ({
     title: it.name,
     id: it.id,
+    tier: it.tier,
     icon: itemIcon(it.icon),
     badges: [
       { text: `${it.base}g`, kind: "price" },
@@ -214,22 +219,160 @@ function buildItems() {
     stats: [
       ["Base value", it.base + "g"],
       ["Tier", `${it.tier} — ${TIER_NAMES[it.tier]}`],
-      ["Drops on tiers", itemFloors(it.id).join(", ") || "—"],
+      ["Drops in", itemDungeons(it.id).join(", ") || "—"],
     ],
   }));
 }
 
+// --- loot table ------------------------------------------------------------
+// A reverse index of every drop table: for each item, where it can turn up and
+// the odds of it showing from that specific source. Every probability is
+// derived straight from the tables the game rolls against (see dungeon.js:
+// openChest / killEnemy), so the catalogue can't drift from the real drops.
+
+// Human-friendly percentage from a 0..1 chance.
+function pctStr(f) {
+  if (f <= 0) return "—";
+  const p = f * 100;
+  if (p < 0.1) return "<0.1%";
+  return (p < 10 ? p.toFixed(1) : Math.round(p)) + "%";
+}
+
+// Chance a freshly-opened chest in themed dungeon `d` holds item `id`, averaged
+// across the dungeon's floors (the rare shelf grows likelier the deeper you go).
+// Mirrors Dungeon.openChest: a primary roll (rare vs common) plus a 60% bonus
+// common drop.
+function chestChance(id, d) {
+  const table = DUNGEON_LOOT[d];
+  if (!table) return 0;
+  const inC = table.common.includes(id);
+  const inR = table.rare.includes(id);
+  if (!inC && !inR) return 0;
+  const nc = table.common.length || 1;
+  const nr = table.rare.length || 1;
+  let sum = 0;
+  for (let lf = 0; lf < FLOORS_PER_DUNGEON; lf++) {
+    const rare = 0.22 + lf * 0.18; // openChest's rare-shelf odds per floor
+    const first = rare * (inR ? 1 / nr : 0) + (1 - rare) * (inC ? 1 / nc : 0);
+    const second = inC ? 0.6 * (1 / nc) : 0; // the bonus second drop (common only)
+    sum += 1 - (1 - first) * (1 - second);
+  }
+  return sum / FLOORS_PER_DUNGEON;
+}
+
+// Chance a monster drops item `id` as its signature loot (killEnemy: dropRate,
+// then 65% of the time it's the kind's own loot, picked evenly).
+function mobSignatureChance(def, id) {
+  if (!def.loot?.includes(id)) return 0;
+  return (def.dropRate ?? 0.6) * 0.65 / def.loot.length;
+}
+
+// Best single-boss chance for item `id` across the four keepers (each fight is
+// one hole). Bosses always drop a crown + a potion, two distinct equipment
+// pieces from EQUIP_DROPS, and a fistful of the hole's rare spoils.
+const EQUIP_PICK_P = 2 / (EQUIP_DROPS.length || 1); // odds a given equip is one of the 2 picks
+function bossChance(id) {
+  const isEquip = EQUIP_DROPS.includes(id);
+  const guaranteed = id === "crown" || id === "potion";
+  let best = 0;
+  BOSSES.forEach((_, hole) => {
+    const parts = [];
+    if (guaranteed) parts.push(1);
+    if (isEquip) parts.push(EQUIP_PICK_P);
+    const table = DUNGEON_LOOT[hole];
+    if (table?.rare.includes(id)) {
+      const k = 3 + hole; // rare spoils rolled from this hole's table
+      parts.push(1 - Math.pow(1 - 1 / (table.rare.length || 1), k));
+    }
+    if (parts.length) best = Math.max(best, 1 - parts.reduce((q, a) => q * (1 - a), 1));
+  });
+  return best;
+}
+
+// Every place item `id` can be found, each with its own drop chance.
+function lootSources(id) {
+  const sources = [];
+  // a monster's signature loot
+  for (const [kind, def] of Object.entries(ENEMY_KINDS)) {
+    if (kind === "boss") continue;
+    const p = mobSignatureChance(def, id);
+    if (p > 0) sources.push({ kind: "mob", where: `${ENEMY_META[kind]?.name ?? kind} loot`, p });
+  }
+  // themed-dungeon chests
+  DUNGEON_LOOT.forEach((_, d) => {
+    const p = chestChance(id, d);
+    if (p > 0) sources.push({ kind: "chest", where: `${HOLE_DEFS[d]?.name ?? `Dungeon ${d + 1}`} chest`, p });
+  });
+  // boss spoils
+  const bp = bossChance(id);
+  if (bp > 0) sources.push({ kind: "boss", where: "Boss spoils", p: bp });
+  return sources.sort((a, b) => b.p - a.p);
+}
+
+function buildLoot() {
+  const items = Object.values(ITEMS)
+    .map((it) => ({ it, src: lootSources(it.id) }))
+    .sort((a, b) => a.it.tier - b.it.tier || a.it.base - b.it.base);
+
+  const rows = items
+    .map(({ it, src }) => {
+      const best = src.length ? src[0].p : 0;
+      const chips = src.length
+        ? src
+            .map((s) => `<span class="loot-src loot-src--${s.kind}">${esc(s.where)} <b>${pctStr(s.p)}</b></span>`)
+            .join("")
+        : `<span class="loot-src loot-src--none">shop / quest only</span>`;
+      return `<tr class="loot-row loot-t${it.tier}">
+        <td class="loot-ic">${itemIcon(it.icon)}</td>
+        <td class="loot-name"><b>${esc(it.name)}</b><span class="loot-tier tier${it.tier}">T${it.tier} · ${TIER_NAMES[it.tier]}</span></td>
+        <td class="loot-pct">${pctStr(best)}</td>
+        <td class="loot-where">${chips}</td>
+        <td class="loot-price">${it.base}g</td>
+      </tr>`;
+    })
+    .join("");
+
+  const html = `
+    <table class="loot-table">
+      <thead>
+        <tr>
+          <th class="loot-ic"></th>
+          <th class="loot-name">Item</th>
+          <th class="loot-pct">Best drop</th>
+          <th class="loot-where">Where it drops</th>
+          <th class="loot-price">Price</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  return { html, n: items.length };
+}
+
 const ENEMY_META = {
-  skitter: { name: "Skitter", icon: icon("spider"), desc: "The dungeon's bread-and-butter critter — a scuttling 4-or-6-legged bug that swarms in the shallow floors." },
+  skitter: { name: "Skitter", icon: icon("spider"), desc: "The Rat Warren's bread-and-butter critter — a scuttling 4-or-6-legged bug that swarms in the shallow floors." },
   slime: { name: "Slime", icon: icon("jelly"), desc: "A wobbling gel blob that hops toward intruders. Slow, but they come in numbers." },
   goblin: { name: "Goblin", icon: icon("goblin"), desc: "A pointy-eared humanoid raider; grows horns and toughens as the floors deepen." },
   wisp: { name: "Wisp", icon: icon("ghost"), desc: "A darting arcane mote — fast and twitchy, floating just off the floor." },
   archer: { name: "Archer", icon: icon("goblin"), desc: "A hooded, robed kiter — hangs back at range and looses fast straight bolts." },
   brute: { name: "Brute", icon: icon("ogre"), desc: "A hulking horned bruiser. Slow but hits twice as hard and soaks up a beating." },
+  puddle: { name: "Puddle", icon: icon("jelly"), desc: "A waterlogged blob of the Flooded Deep. Pounces like a slime — and bursts into two Puddlings when it dies." },
+  puddling: { name: "Puddling", icon: icon("jelly"), desc: "The droplets a slain Puddle splits into: tiny, quick and frail, swarming in to bite." },
+  snapper: { name: "Snapper", icon: icon("spider"), desc: "A four-legged tide crab that circles its prey and darts in with a quick pinch." },
+  angler: { name: "Angler", icon: icon("ghost"), desc: "A deep-water lure light. It marks a splash zone under your feet and erupts a geyser — step off the ring to dodge." },
+  rattler: { name: "Rattler", icon: icon("spider"), desc: "A dry bone-bug of the Hollow — faster and twitchier than the warren's skitters." },
+  gravewisp: { name: "Gravewisp", icon: icon("ghost"), desc: "A pale grave-light caster whose bolts fly noticeably faster than a wisp's orbs." },
+  boneguard: { name: "Boneguard", icon: icon("ogre"), desc: "A bleached ossuary sentinel. Telegraphs a lane of sparks, then hurls itself down it — step out of the lane." },
+  sporeling: { name: "Sporeling", icon: icon("jelly"), desc: "A walking spore sac of the Gloom Drain. Rushes in, swells, and blows itself apart — the ring shows the blast." },
+  gloomcaster: { name: "Gloomcaster", icon: icon("ghost"), desc: "A slippery marsh-light that marks a ripple at your flank, blinks onto it and fires the instant it lands." },
+  mossbrute: { name: "Mossbrute", icon: icon("ogre"), desc: "A moss-grown hulk — the drain's answer to the brute, with a wider slam and more meat on it." },
 };
 
 // Deterministic seed per kind so the preview looks the same on every reload.
-const ENEMY_SEED = { skitter: 7, slime: 12, goblin: 3, wisp: 9, archer: 4, brute: 5 };
+const ENEMY_SEED = {
+  skitter: 7, slime: 12, goblin: 3, wisp: 9, archer: 4, brute: 5,
+  puddle: 6, puddling: 8, snapper: 11, angler: 2,
+  rattler: 13, gravewisp: 5, boneguard: 1, sporeling: 10, gloomcaster: 3, mossbrute: 2,
+};
 
 // Card copy for the per-hole bosses (index matches BOSSES / Sewer.holes).
 const BOSS_META = [
@@ -241,8 +384,10 @@ const BOSS_META = [
 
 function enemyFloors(kind) {
   const floors = [];
-  FLOOR_MIX.forEach((mix, i) => {
-    if (mix.includes(kind)) floors.push(i + 1);
+  DUNGEON_MIX.forEach((mixes, d) => {
+    mixes.forEach((mix, f) => {
+      if (mix.includes(kind)) floors.push(d * mixes.length + f + 1);
+    });
   });
   return floors;
 }
@@ -291,10 +436,10 @@ function buildEnemies() {
         ["HP", def.hp],
         ["Damage", def.dmg],
         ["Speed", def.speed + " m/s"],
-        ["Base windup", def.windup + "s"],
+        ["Base windup", def.windup.toFixed(2) + "s"],
         ["Ranged rotation", (def.rotation ?? ["charge", "burst"]).join(" → ")],
         ["Burst orbs", `${def.burstN ?? 8} (+4 enraged)`],
-        ["Enrage pack", (def.minions ?? ["skitter", "skitter", "slime"]).join(", ")],
+        ["Enrage pack", `${def.minionN ?? 3} × ${(def.minions ?? ["skitter", "skitter", "slime"]).join("/")}`],
         ["Lair", `${hole} — final-floor arena`],
       ],
     });
@@ -346,40 +491,39 @@ function buildCast() {
   return cards;
 }
 
-// Mirror of the dungeon floor palette (dungeon.js `generate()` — kept in sync
-// by hand). Used only to visualise each floor's tile colours here.
-const FLOOR_PALETTE = [
-  [0x8a70b5, 0x715a99],
-  [0x5f93a8, 0x4d7a8c],
-  [0xa8756a, 0x8c5f55],
-  [0x7a75ad, 0x635e94],
-  [0x9c6693, 0x7f5178],
-];
-
 function buildFloors() {
-  return FLOOR_MIX.map((mix, i) => {
-    const floorN = i + 1;
-    const tier = Math.min(floorN, 5) - 1;
-    const [c0, c1] = FLOOR_PALETTE[Math.min(floorN - 1, 4) % 5];
-    const enemyIcons = mix.map((k) => (ENEMY_META[k] ? ENEMY_META[k].name : k)).join(", ");
-    return {
-      title: `Floor ${floorN}`,
-      id: `tier ${tier}`,
-      color: c0,
-      badges: floorN >= 5 ? [{ text: "DEEPEST", kind: "boss" }] : [],
-      desc: `Spawns: ${enemyIcons}.`,
-      stats: [
-        ["Enemy tier", tier],
-        ["Enemies", `≈ ${4 + floorN}–${4 + floorN + 2}`],
-        ["Rooms", `≈ ${5 + Math.min(3, Math.floor(floorN / 2))}–${6 + Math.min(3, Math.floor(floorN / 2))}`],
-        ["Chest loot tier", Math.min(floorN, 4)],
-      ],
-      swatches: [
-        ["tile A", c0],
-        ["tile B", c1],
-      ],
-    };
+  // one card per floor of the full 12-floor descent, grouped by themed
+  // dungeon — mixes and tile palettes come straight from dungeon.js
+  const cards = [];
+  DUNGEON_MIX.forEach((mixes, d) => {
+    const holeName = HOLE_DEFS[d]?.name ?? `Dungeon ${d + 1}`;
+    mixes.forEach((mix, f) => {
+      const floorN = d * mixes.length + f + 1;
+      const tier = Math.min(floorN, 5) - 1;
+      const palettes = HOLE_THEMES[d]?.palettes ?? [[0x8a70b5, 0x715a99]];
+      const [c0, c1] = palettes[Math.min(f, palettes.length - 1)];
+      const enemyIcons = mix.map((k) => (ENEMY_META[k] ? ENEMY_META[k].name : k)).join(", ");
+      const isBoss = f === mixes.length - 1;
+      cards.push({
+        title: `Floor ${floorN} — ${holeName}`,
+        id: `tier ${tier}`,
+        color: c0,
+        badges: isBoss ? [{ text: "BOSS", kind: "boss" }] : [],
+        desc: `Spawns: ${enemyIcons}.${isBoss ? " The sealed arena waits at the far end." : ""}`,
+        stats: [
+          ["Enemy tier", tier],
+          ["Enemies", `≈ ${4 + floorN}–${4 + floorN + 2}`],
+          ["Rooms", `≈ ${5 + Math.min(3, Math.floor(floorN / 2))}–${6 + Math.min(3, Math.floor(floorN / 2))}`],
+          ["Dungeon", holeName],
+        ],
+        swatches: [
+          ["tile A", c0],
+          ["tile B", c1],
+        ],
+      });
+    });
   });
+  return cards;
 }
 
 // --- preview mounting ------------------------------------------------------
@@ -417,6 +561,7 @@ function mountPreviews(root) {
 
 const TABS = [
   { id: "items", icon: "shopping", label: "Merchandise", build: buildItems, unit: "item" },
+  { id: "loot", icon: "chest", label: "Loot", build: buildLoot, unit: "item" },
   { id: "enemies", icon: "ogre", label: "Monsters", build: buildEnemies, unit: "monster" },
   { id: "customers", icon: "faceHappy", label: "Shoppers", build: buildCustomers, unit: "archetype" },
   { id: "cast", icon: "people", label: "Cast", build: buildCast, unit: "character" },
@@ -430,18 +575,24 @@ function render(tabId) {
     el.classList.toggle("active", el.dataset.tab === tab.id);
   });
 
-  const entries = tab.build();
+  // most tabs build an array of card entries; a few (Loot) build a ready-made
+  // block of HTML instead — those return { html, n } so we skip the card grid.
+  const built = tab.build();
+  const isBlock = built && !Array.isArray(built) && built.html != null;
   const body = document.getElementById("admin-body");
-  const n = entries.filter((e) => !e.section).length;
+  const n = isBlock ? built.n : built.filter((e) => !e.section).length;
   body.innerHTML = `
     <div class="section-head">
       <h2>${icon(tab.icon)} ${esc(tab.label)}</h2>
       <span class="count">${n} ${n === 1 ? tab.unit : tab.unit + "s"}</span>
     </div>
-    ${grid(entries)}`;
+    ${isBlock ? built.html : grid(built)}`;
   mountPreviews(body);
 
-  if (location.hash !== "#" + tab.id) history.replaceState(null, "", "#" + tab.id);
+  // NB: index.html sets <base href="/">, so a bare "#id" would resolve against
+  // "/" and drop the /admin/ path — keep the current path explicitly.
+  if (location.hash !== "#" + tab.id)
+    history.replaceState(null, "", location.pathname + location.search + "#" + tab.id);
 }
 
 function mount() {

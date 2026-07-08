@@ -76,6 +76,7 @@ export class BlockyCreature extends THREE.Group {
     this._actions = {};
     this._current = null;
     this._attackDur = (this.clips["attack-melee-right"]?.duration ?? 0.45) * 0.85;
+    this._tossDur = (this.clips["pick-up"]?.duration ?? 0.6) * 0.9;
     this.play("idle", { fade: 0 });
 
     // blob shadow (glued to the floor even when hopping / dying)
@@ -89,10 +90,13 @@ export class BlockyCreature extends THREE.Group {
     this._flashT = 0;
     this._stepT = 0;
     this._primed = false;
+    this._animSpeed = 0; // low-pass filtered speed that drives the walk cycle
+    this._loco = "idle"; // current locomotion clip, kept sticky via hysteresis
 
     // Creature-compatible animator facade
     this.animator = {
       attackT: -1,
+      tossT: -1,
       dead: false,
       onFootstep: null,
       prevPos: new THREE.Vector3(), // game copies position here on teleport
@@ -153,9 +157,10 @@ export class BlockyCreature extends THREE.Group {
     this._nameText = null;
   }
 
-  /** Attach a prop (sword) to the right hand. */
+  /** Attach a prop (sword / bow / staff) to the right hand, replacing any prior. */
   holdItem(obj) {
     if (!this.armR) return;
+    if (this.heldItem) this.heldItem.removeFromParent();
     obj.position.set(0, -1.0, 0.32);
     obj.rotation.set(-0.85, 0, 0.12);
     this.armR.add(obj);
@@ -166,6 +171,15 @@ export class BlockyCreature extends THREE.Group {
     if (this.animator.attackT >= 0 || this.animator.dead) return false;
     this.animator.attackT = 0;
     this.play("attack-melee-right", { loop: false, fade: 0.06, reset: true });
+    return true;
+  }
+
+  /** Quick crouch-and-toss gesture, played when dropping loot. */
+  toss() {
+    if (this.animator.dead || this.animator.attackT >= 0) return false;
+    this.animator.tossT = 0;
+    this._squash.kick(3);
+    this.play("pick-up", { loop: false, fade: 0.08, reset: true });
     return true;
   }
 
@@ -194,8 +208,13 @@ export class BlockyCreature extends THREE.Group {
     }
     _v.subVectors(this.position, this.animator.prevPos);
     _v.y = 0;
-    const speed = _v.length() / Math.max(dt, 1e-4);
+    const rawSpeed = _v.length() / Math.max(dt, 1e-4);
     this.animator.prevPos.copy(this.position);
+    // Low-pass the speed (~80 ms) so remote avatars — whose position arrives as
+    // interpolated network snapshots — don't flip idle/walk on tiny per-frame
+    // wobble. Local movement is already smooth, so the filter is imperceptible.
+    this._animSpeed += (rawSpeed - this._animSpeed) * (1 - Math.exp(-dt / 0.08));
+    const speed = this._animSpeed;
 
     // smooth turn toward heading
     let dh = this.heading + MODEL_YAW - this.rotation.y;
@@ -207,8 +226,22 @@ export class BlockyCreature extends THREE.Group {
       if (this.animator.attackT >= 0) {
         this.animator.attackT += dt / this._attackDur;
         if (this.animator.attackT >= 1) this.animator.attackT = -1;
+      } else if (this.animator.tossT >= 0) {
+        this.animator.tossT += dt / this._tossDur;
+        if (this.animator.tossT >= 1) this.animator.tossT = -1;
       } else {
-        this.play(speed > 4.2 ? "sprint" : speed > 0.35 ? "walk" : "idle");
+        // sticky thresholds (enter high, leave low) so a speed hovering near a
+        // boundary doesn't strobe between two clips
+        let loco = this._loco;
+        if (loco === "idle") { if (speed > 0.55) loco = "walk"; }
+        else if (loco === "walk") {
+          if (speed < 0.25) loco = "idle";
+          else if (speed > 4.6) loco = "sprint";
+        } else if (loco === "sprint") {
+          if (speed < 3.8) loco = "walk";
+        }
+        this._loco = loco;
+        this.play(loco);
       }
       // footsteps while moving
       if (speed > 0.4 && this.animator.onFootstep) {

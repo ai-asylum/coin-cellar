@@ -4,6 +4,7 @@
 // everything else — gait, jiggle, blinking, ragdolling — is automatic.
 import * as THREE from "three";
 import { bakeBody, buildSkeleton } from "./bake.js";
+import { clamp } from "../core/engine.js";
 import { Animator } from "./animator.js";
 import { makeToonMaterial, addOutline, makeBlobShadow } from "../core/toon.js";
 
@@ -21,14 +22,18 @@ export class Creature extends THREE.Group {
     this.bones = buildSkeleton(baked.boneDefs, baked.scale, baked.groundY);
     for (const b of this.bones) b.userData.restY = b.position.y;
 
-    this.bodyMat = makeToonMaterial({ vertexColors: true, rim: 0.45 });
+    this.bodyMat = makeToonMaterial({ vertexColors: true, rim: 0.45, dissolve: true });
     const mesh = new THREE.SkinnedMesh(baked.geometry, this.bodyMat);
     mesh.add(this.bones[0]);
     mesh.bind(new THREE.Skeleton(this.bones));
     mesh.frustumCulled = false; // skinned bounds don't track the ragdoll
     this.mesh = mesh;
     this.add(mesh);
-    this.outline = addOutline(mesh, 0.02 * baked.scale + 0.008);
+    this.outline = addOutline(mesh, 0.02 * baked.scale + 0.008, true);
+    // noise cell size in bake-local (≈ world) units; tie a touch to body scale
+    const dScale = 4.5 / Math.max(baked.scale, 0.5);
+    this.bodyMat.userData.uDissolveScale.value = dScale;
+    this.outline.material.userData.uDissolveScale.value = dScale;
 
     // eyes: two beads + tiny shines, parented to the head bone
     if (spec.face) {
@@ -103,6 +108,8 @@ export class Creature extends THREE.Group {
   die(impulse) {
     this.animator.die(impulse);
     if (this.shadow) this.shadow.visible = false;
+    if (this.faceGroup) this.faceGroup.visible = false; // beads don't dissolve
+    this._deathT = 0;
   }
 
   get dead() {
@@ -127,6 +134,16 @@ export class Creature extends THREE.Group {
     // keep the blob shadow glued to the floor even when we hop/float/die
     if (this.shadow) {
       this.shadow.position.y = 0.015 - this.position.y;
+    }
+    // death: char to black, then dissolve away on a Perlin-noise edge
+    if (this._deathT !== undefined) {
+      this._deathT += dt;
+      const t = this._deathT;
+      const blacken = clamp(t / 0.45, 0, 1);
+      const dissolve = clamp((t - 0.35) / 1.15, 0, 1);
+      this.bodyMat.userData.uBlacken.value = blacken;
+      this.bodyMat.userData.uDissolve.value = dissolve;
+      this.outline.material.userData.uDissolve.value = dissolve;
     }
   }
 

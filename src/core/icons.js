@@ -35,6 +35,7 @@ const COLOR = new Set([
   "lantern", "amulet", "swords", "tome", "gem", "fang", "crown",
   "mushroom", "meat", "egg", "key", "bomb", "shield", "bell", "feather",
   "hourglass", "star",
+  "bow", "staff", "armor", "boots",
 ]);
 
 // ------------------------------------------------------------- mood faces
@@ -107,6 +108,14 @@ const SVG = {
   ghost: `<path d="M6 12a6 6 0 0 1 12 0v7l-2-1.5-2 1.5-2-1.5-2 1.5-2-1.5z" fill="#e8ecff" stroke="#b7bfe0" stroke-width="1" stroke-linejoin="round"/><circle cx="9.8" cy="11.5" r="1.1" fill="#4a4a6a"/><circle cx="14.2" cy="11.5" r="1.1" fill="#4a4a6a"/>`,
   ogre: `<path d="M7 7C6 5 4.5 4.5 4.5 4.5S5 7 6.5 8M17 7c1-2 2.5-2.5 2.5-2.5S19 7 17.5 8" fill="#b8452f" stroke="#8a3423" stroke-width="1" stroke-linejoin="round"/><path d="M12 6c-3.5 0-6 2.8-6 6.5S8.5 20 12 20s6-3.8 6-7.5S15.5 6 12 6z" fill="#d0563a" stroke="#8a3423" stroke-width="1"/><circle cx="9.5" cy="12" r="1.1" fill="#3a140c"/><circle cx="14.5" cy="12" r="1.1" fill="#3a140c"/><path d="M9.5 16h5M10.7 16v1.4M13.3 16v1.4" stroke="#3a140c" stroke-width="1.1" stroke-linecap="round"/>`,
   farmer: `<path d="M8 5a4 4 0 0 1 8 0z" fill="#c98a3a"/><circle cx="12" cy="9.5" r="3.6" fill="#e8b98a" stroke="#b98a5e" stroke-width="1"/><path d="M4.5 20c0-4.2 3.4-6.5 7.5-6.5s7.5 2.3 7.5 6.5z" fill="#6b8f4e" stroke="#4e6c37" stroke-width="1"/><path d="M7 5.5h10" stroke="#a5702f" stroke-width="1.2"/>`,
+
+  // ------------------------------------------------------------ gear slots
+  // Tinted with currentColor so they sit alongside the masked UI glyphs.
+  gear: `<circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M12 3.5v2.4M12 18.1v2.4M20.5 12h-2.4M5.9 12H3.5M18 6l-1.7 1.7M7.7 16.3 6 18M18 18l-1.7-1.7M7.7 7.7 6 6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>`,
+  bow: `<path d="M6 3a13 13 0 0 1 0 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M6 3 6 21" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/><path d="M6 12h13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M19 12l-3-2M19 12l-3 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>`,
+  staff: `<path d="M8 21 16 5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><circle cx="16.6" cy="4" r="2.6" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M16.6 1.2v-.1M19.4 4h.1M16.6 6.6v.1M13.8 4h-.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>`,
+  armor: `<path d="M12 3 5 5.5v5c0 4.6 3 7.8 7 9.5 4-1.7 7-4.9 7-9.5v-5z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M12 3v17M8.5 8h7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>`,
+  boots: `<path d="M8 3v9l-2 1c-1.3.7-2 1.7-2 3v3h13v-2.5a3 3 0 0 0-1.6-2.6L12 12V3z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M4 17h13" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>`,
 
   // fallback
   unknown: `<circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9.2 9.5a2.8 2.8 0 0 1 5.4 1c0 1.8-2.6 2.2-2.6 4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="12" cy="17.4" r="1.1" fill="currentColor"/>`,

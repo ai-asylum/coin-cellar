@@ -1,13 +1,15 @@
 // The sewers under the trapdoor: a single shared chamber every online player
 // walks through on their way down. Four holes gape along the north walkway,
-// each the mouth of its own dungeon (seeded per hole per day, so everyone who
-// jumps into the same hole delves the same layout). A murky canal runs the
-// width of the room; the ladder home is set into the south wall.
+// each a shortcut to the head of a stacked dungeon (floors 1, 4, 7, 10). The
+// first mouth is always open; the deeper three unseal for a few hours once you
+// descend past the boss that guards the dungeon above them. A murky canal runs
+// the width of the room; the ladder home is set into the south wall.
 // Static geometry, built once — nothing here regenerates.
 import * as THREE from "three";
-import { makeToonMaterial } from "../core/toon.js";
+import { makeToonMaterial, feedOccluder } from "../core/toon.js";
 import { makeLightShaft } from "../core/godrays.js";
 import { rng } from "../core/engine.js";
+import { FLOORS_PER_DUNGEON } from "./dungeon.js";
 
 export const SEWER_ORIGIN = new THREE.Vector3(-200, 0, 0);
 
@@ -31,9 +33,12 @@ export class Sewer {
     this.colliders = [];
     this._waterMat = null;
 
-    // holes and the exit ladder, in world coords for the context-action checks
+    // holes and the exit ladder, in world coords for the context-action checks.
+    // Each mouth is a shortcut to the head of its stacked dungeon (floors 1, 4,
+    // 7, 10); the first is always open, the rest are earned by clearing bosses.
     this.holes = HOLE_DEFS.map((h, i) => ({
       id: i, name: h.name, color: h.color,
+      floor: i * FLOORS_PER_DUNGEON + 1,
       pos: new THREE.Vector3(h.x, 0, h.z).add(SEWER_ORIGIN),
     }));
     this.entrancePos = new THREE.Vector3(0, 0, HD - 1.2).add(SEWER_ORIGIN);
@@ -72,6 +77,7 @@ export class Sewer {
     }
     const wallGeo = new THREE.BoxGeometry(2, 2.4, 2);
     const wallMat = makeToonMaterial({ color: 0x3a4640, rim: 0, occlude: true });
+    this._wallMat = wallMat;
     const walls = new THREE.InstancedMesh(wallGeo, wallMat, cells.length);
     const m = new THREE.Matrix4();
     cells.forEach(([x, z], i) => {
@@ -93,7 +99,7 @@ export class Sewer {
 
     // --- the dungeon holes: a dark mouth, a glowing rim, a rising light shaft
     const lidMat = makeToonMaterial({ color: 0x53433a, rim: 0 });
-    const lidTrim = makeToonMaterial({ color: 0x2f2621, rim: 0 });
+    const lidTrim = makeToonMaterial({ color: 0x2f2621, rim: 0, polygonOffset: true });
     for (const hole of this.holes) {
       const local = new THREE.Vector3().copy(hole.pos).sub(O);
       const mouth = new THREE.Mesh(
@@ -103,7 +109,7 @@ export class Sewer {
       mouth.position.copy(local).setY(0.02);
       const rim = new THREE.Mesh(
         new THREE.RingGeometry(1.15, 1.42, 28).rotateX(-Math.PI / 2),
-        new THREE.MeshBasicMaterial({ color: hole.color, transparent: true, opacity: 0.5 })
+        new THREE.MeshBasicMaterial({ color: hole.color, transparent: true, opacity: 0.5, depthWrite: false })
       );
       rim.position.copy(local).setY(0.03);
       this.group.add(mouth, rim);
@@ -131,7 +137,7 @@ export class Sewer {
       lidPivot.add(rng2);
       this.group.add(lidPivot);
       hole.lid = lidPivot;
-      // the first mouth is always open (free); the rest start barred
+      // the first mouth is always open; the rest start barred until earned
       hole.open = hole.id === 0;
       hole._lidAngle = hole.open ? 1 : 0; // 0 = shut over the mouth, 1 = flung open
     }
@@ -169,26 +175,17 @@ export class Sewer {
     }
   }
 
-  // Bar every mouth again — called each time the player drops into the sewer so
-  // reaching a dungeon always costs a fresh toll. The first hole stays open, so
-  // there's always one free dungeon to dive into.
-  resetHoles() {
-    for (const hole of this.holes) hole.open = hole.id === 0;
-  }
-
-  // Unseal a hole's trapdoor (after the toll's been paid) so it can be entered.
-  openHole(id) {
-    const hole = this.holes[id];
-    if (hole) hole.open = true;
-  }
-
   update(dt, elapsed) {
     if (this.game.playerArea !== "sewer") return;
+    // walls between the camera and the player dither away (see-through cutout)
+    feedOccluder(this._wallMat, this.game.player, this.game.engine.camera);
     for (const s of this.shafts) s.userData.update(dt, elapsed);
     // lazy water shimmer
     this._waterMat.opacity = 0.5 + Math.sin(elapsed * 0.9) * 0.06;
-    // ease each grated lid toward its open/shut pose
+    // ease each grated lid toward its open/shut pose — a mouth is open while its
+    // shortcut is unsealed (the game tracks the wall-clock expiry)
     for (const hole of this.holes) {
+      hole.open = this.game._shortcutOpen(hole.id);
       const tgt = hole.open ? 1 : 0;
       hole._lidAngle += (tgt - hole._lidAngle) * Math.min(1, dt * 6);
       if (hole.lid) hole.lid.rotation.x = -hole._lidAngle * 1.9; // swings up & back

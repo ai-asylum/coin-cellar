@@ -114,19 +114,24 @@ export function populateStreet(group, r, { W, backZ, streetHalfX }) {
     return s;
   };
 
-  // street geometry (mirrors Shop._build): road runs from the pavement out to
-  // the far building facade — decor must sit in front of that wall to be seen
+  // street geometry (mirrors Shop._build): the road opens up out front and is
+  // fully walkable now, so trees are kept to the *edges* — banked as a leafy
+  // backdrop behind the row of restored houses, anchoring the far ends, and
+  // flanking the shopfront — never scattered across the open ground where
+  // they'd clutter the road or sprout out of the paving.
   const roadFar = backZ - 9.5;
-  const facadeFront = roadFar - 0.05; // just in front of the facade wall
-
-  // treeline banked against the facade across the whole street width
-  for (let x = -12.5; x <= 12.5; x += 1.7 + r() * 0.7) {
-    add("trees", x + (r() - 0.5) * 0.6, facadeFront + 0.3 + r() * 0.8, 3.2 + r() * 1.6);
+  // the far side of the street is now a continuous row of restoration houses
+  // (see Shop._buildLots), sitting at z ≈ roadFar - 0.9. Bank a treeline just
+  // behind them so it reads as a wooded edge rising over the rooftops.
+  const backdropZ = roadFar - 2.4;
+  for (let x = -21; x <= 21; x += 1.6 + r() * 0.7) {
+    add("trees", x + (r() - 0.5) * 0.6, backdropZ - r() * 0.5, 3.4 + r() * 1.8);
   }
-  // a looser second rank a little nearer, out on the road, for depth
-  for (let x = -12; x <= 12; x += 2.6 + r()) {
-    if (r() < 0.5) continue;
-    add(r() < 0.7 ? "trees" : "smallTrees", x + (r() - 0.5) * 1.2, roadFar + 2.4 + r() * 1.8, 2.4 + r() * 1.2);
+  // a taller clump anchoring each far end of the row, spilling toward the road
+  for (const side of [-1, 1]) {
+    add("trees", side * (21 + r() * 0.9), roadFar - 0.4 + r() * 1.0, 3.6 + r() * 1.4);
+    if (r() < 0.6)
+      add(r() < 0.6 ? "smallTrees" : "bushes", side * (20.2 + r()), roadFar + 1.4 + r() * 1.2, 1.3 + r());
   }
 
   // leafy trees flanking the shopfront, out past the pedestrian lanes so they

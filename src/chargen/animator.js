@@ -70,6 +70,30 @@ export class Animator {
     }));
     this.hopT = 1; // hopper cycle
     this.gaitBlock = -1; // which group is mid-swing
+
+    // Per-bone ragdoll floor height, from the SDF flesh hanging off each
+    // bone. Bones don't necessarily sit inside their flesh (some rigs park
+    // them well above it), so measure against the bind pose: a node may sink
+    // no lower than "rest bone height minus how far its flesh bottom sits
+    // above the ground at rest" — that rests the flesh on the floor.
+    creature.updateMatrixWorld(true);
+    const groundY = spec.groundY ?? 0;
+    const toW = (y) => (y - groundY) * spec.scale; // char space -> world
+    this.boneFloor = bones.map((b, i) => {
+      const restW = b.getWorldPosition(new THREE.Vector3()).y;
+      let floor = 0.05 * spec.scale;
+      for (const part of spec.parts ?? []) {
+        if (part.bone !== i) continue;
+        const bottoms = part.kind === "ellipsoid"
+          ? [toW(part.a[1]) - part.ry * spec.scale]
+          : part.kind === "capsule"
+            ? [toW(part.a[1]) - part.r * spec.scale,
+               toW(part.b[1]) - (part.r2 ?? part.r) * spec.scale]
+            : [toW(part.a[1]) - part.r * spec.scale];
+        for (const bot of bottoms) floor = Math.max(floor, restW - bot);
+      }
+      return floor;
+    });
   }
 
   update(dt, elapsed) {
@@ -324,12 +348,12 @@ export class Animator {
     this.dead = true;
     const bones = this.c.bones;
     this.c.updateMatrixWorld(true);
-    const nodes = bones.map((b) => {
+    const nodes = bones.map((b, i) => {
       const p = b.getWorldPosition(new THREE.Vector3());
       const pp = p.clone();
       if (impulse) pp.sub(_v.copy(impulse).multiplyScalar(0.03 * (0.5 + Math.random())));
       pp.y += 0.01 + Math.random() * 0.02;
-      return { p, pp };
+      return { p, pp, floor: this.boneFloor[i] };
     });
     const cons = [];
     bones.forEach((b, i) => {
@@ -359,9 +383,8 @@ export class Animator {
       n.pp.copy(n.p);
       n.p.add(_v);
       n.p.y -= 14 * dt * dt * 20; // gravity (verlet uses dt^2; scaled for feel)
-      const floor = 0.09 * this.spec.scale;
-      if (n.p.y < floor) {
-        n.p.y = floor;
+      if (n.p.y < n.floor) {
+        n.p.y = n.floor;
         // ground friction
         n.p.x = lerp(n.p.x, n.pp.x, 0.4);
         n.p.z = lerp(n.p.z, n.pp.z, 0.4);

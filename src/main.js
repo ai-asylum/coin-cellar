@@ -57,6 +57,14 @@ async function boot() {
   window.__game = game; // debug/testing handle
 }
 
+// Register the service worker so the game is installable as a PWA and can
+// launch offline once cached. Fire-and-forget after load; failures are silent.
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  });
+}
+
 boot().catch((err) => {
   console.error(err);
   hudRoot.innerHTML = `<div style="color:#ffd; padding:40px; font-size:18px">

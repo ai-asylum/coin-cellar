@@ -3,11 +3,11 @@
 // portal home. Enemies come out of the same blob-bake pipeline as the
 // customers upstairs — skitters, slimes, goblins, wisps, brutes.
 import * as THREE from "three";
-import { makeToonMaterial, makeBlobShadow } from "../core/toon.js";
+import { makeToonMaterial, makeBlobShadow, feedOccluder } from "../core/toon.js";
 import { makeLightShaft } from "../core/godrays.js";
 import { Creature } from "../chargen/creature.js";
-import { goblinSpec, bruteSpec, skitterSpec, slimeSpec, wispSpec, archerSpec, bossSpec } from "../chargen/species.js";
-import { ITEMS, LOOT_BY_TIER, itemSprite } from "./items.js";
+import { goblinSpec, bruteSpec, skitterSpec, slimeSpec, wispSpec, archerSpec, bossSpec, humanoidSpec, hsl } from "../chargen/species.js";
+import { ITEMS, EQUIP_DROPS, itemSprite } from "./items.js";
 import { scatterDungeonDecor, disposeDecor } from "./decor.js";
 import { Projectiles } from "./projectile.js";
 import { rng, pick, clamp, lerp } from "../core/engine.js";
@@ -33,36 +33,133 @@ export const ENEMY_KINDS = {
     },
     hp: 2, dmg: 1, speed: 2.9, aggro: 7, gold: [3, 8],
     behavior: "swarm", windup: 0.28, reach: 1.05, glow: [0.6, 0.15, 0.15],
+    loot: ["egg", "mushroom"],
   },
   // slow but telegraphs a leaping lunge that closes distance fast
   slime: {
     make: (seed, tier) => slimeSpec({ key: `e_sl${tier}_${seed % 5}`, scale: 0.6 + tier * 0.07, hue: (0.36 + (seed % 5) * 0.13) % 1 }),
     hp: 4, dmg: 1, speed: 1.9, aggro: 6, gold: [4, 10],
     behavior: "lunge", windup: 0.5, reach: 1.5, glow: [0.15, 0.55, 0.2],
+    loot: ["jelly", "caveshroom"],
   },
   // circles the player and darts in with a quick slash
   goblin: {
     make: (seed, tier) => goblinSpec(seed % 7, Math.min(tier, 2)),
     hp: 5, dmg: 1, speed: 3.0, aggro: 8, gold: [8, 16],
     behavior: "strafe", windup: 0.34, reach: 1.35, glow: [0.6, 0.2, 0.1],
+    loot: ["meat", "bread"],
   },
   // arcane caster: keeps its distance, telegraphs, hurls a homing-ish orb
   wisp: {
     make: (seed, tier) => wispSpec({ key: `e_wi${tier}_${seed % 4}`, scale: 0.6, hue: (0.55 + (seed % 4) * 0.11) % 1 }),
     hp: 3, dmg: 1, speed: 3.2, aggro: 9, gold: [6, 12],
-    behavior: "caster", windup: 0.55, band: [4.5, 7.5], projSpeed: 6.0, projColor: 0xb98cff, glow: [0.4, 0.25, 0.7],
+    behavior: "caster", windup: 0.55, band: [4.5, 7.5], projSpeed: 3.8, projColor: 0xb98cff, glow: [0.4, 0.25, 0.7],
+    loot: ["herb"],
   },
   // hooded archer: kites at range, telegraphs then flooses a fast straight bolt
   archer: {
     make: (seed, tier) => archerSpec(seed % 6, Math.min(tier, 2)),
     hp: 4, dmg: 1, speed: 2.7, aggro: 10, gold: [10, 20],
-    behavior: "archer", windup: 0.42, band: [5, 9], projSpeed: 10.5, projColor: 0x8fe0ff, glow: [0.15, 0.5, 0.7],
+    behavior: "archer", windup: 0.42, band: [5, 9], projSpeed: 6.5, projColor: 0x8fe0ff, glow: [0.15, 0.5, 0.7],
+    loot: ["bread", "ring"],
   },
   // heavy: slow, but winds up a wide overhead slam that hits everything near it
   brute: {
     make: (seed, tier) => bruteSpec(seed % 5, Math.min(tier, 2)),
     hp: 12, dmg: 2, speed: 1.6, aggro: 7, gold: [25, 45],
     behavior: "slam", windup: 0.72, reach: 2.4, glow: [0.75, 0.1, 0.05],
+    loot: ["fang", "meat"],
+  },
+
+  // ---- Flooded Deep natives (floors 4–6): everything drips ----
+  // big waterlogged blob: same pouncing lunge as a slime, but on death it
+  // bursts into a pair of livelier droplets (see killEnemy's splitInto)
+  puddle: {
+    make: (seed) => slimeSpec({ key: `e_pd_${seed % 5}`, scale: 0.88, hue: 0.55 + (seed % 5) * 0.02 }),
+    hp: 6, dmg: 1, speed: 1.7, aggro: 7, gold: [6, 14],
+    behavior: "lunge", windup: 0.55, reach: 1.6, glow: [0.1, 0.4, 0.75],
+    splitInto: "puddling", loot: ["jelly", "potion"],
+  },
+  // the droplets a puddle splits into: tiny, quick, frail biters
+  puddling: {
+    make: (seed) => slimeSpec({ key: `e_pl_${seed % 5}`, scale: 0.4, hue: 0.58 }),
+    hp: 1, dmg: 1, speed: 3.4, aggro: 9, gold: [1, 3],
+    behavior: "swarm", windup: 0.24, reach: 0.9, glow: [0.15, 0.45, 0.75],
+    loot: ["jelly"], dropRate: 0.15,
+  },
+  // four-legged tide crab: circles and darts in with a quick pinch
+  snapper: {
+    make: (seed) => skitterSpec({ key: `e_sn_4_${seed % 5}`, seed, legsN: 4, scale: 0.78, hue: 0.5 }),
+    hp: 5, dmg: 1, speed: 3.1, aggro: 8, gold: [8, 16],
+    behavior: "strafe", windup: 0.3, reach: 1.2, glow: [0.1, 0.5, 0.6],
+    loot: ["egg", "meat"],
+  },
+  // deep-water lure light: hangs back and erupts a marked geyser under you —
+  // the ring on the floor is the dodge (behavior "geyser")
+  angler: {
+    make: (seed) => wispSpec({ key: `e_an_${seed % 4}`, scale: 0.68, hue: 0.6 }),
+    hp: 4, dmg: 1, speed: 2.6, aggro: 10, gold: [10, 20],
+    behavior: "geyser", windup: 0.85, band: [4, 7], reach: 1.8, glow: [0.1, 0.5, 0.9],
+    loot: ["lantern", "herb"],
+  },
+
+  // ---- Bone Hollow natives (floors 7–9): the ossuary stirs ----
+  // dry bone-bug: faster and twitchier than the warren's skitters
+  rattler: {
+    make: (seed) => skitterSpec({ key: `e_ra_6_${seed % 5}`, seed, legsN: 6, scale: 0.68, hue: 0.12 }),
+    hp: 3, dmg: 1, speed: 3.6, aggro: 9, gold: [6, 12],
+    behavior: "swarm", windup: 0.24, reach: 1.0, glow: [0.8, 0.75, 0.5],
+    loot: ["fang"],
+  },
+  // pale grave-light: a quicker caster whose bolts fly noticeably faster
+  gravewisp: {
+    make: (seed) => wispSpec({ key: `e_gw_${seed % 4}`, scale: 0.64, hue: 0.13 }),
+    hp: 5, dmg: 1, speed: 3.0, aggro: 10, gold: [10, 20],
+    behavior: "caster", windup: 0.5, band: [4.5, 8], projSpeed: 5.2, projColor: 0xffe9a8, glow: [0.85, 0.8, 0.4],
+    loot: ["bell", "herb"],
+  },
+  // bleached ossuary sentinel: telegraphs a lane on the floor, then hurls
+  // itself down it — step out of the lane and it barrels past (behavior "charger")
+  boneguard: {
+    make: (seed, tier) => humanoidSpec({
+      key: `e_bg_${seed % 4}_${Math.min(tier, 2)}`,
+      scale: 1.15 + Math.min(tier, 2) * 0.06, fat: 1.25, headR: 0.22, armR: 0.11,
+      skin: hsl(0.11, 0.18, 0.72), cloth: hsl(0.1, 0.15, 0.62), pants: hsl(0.08, 0.2, 0.3),
+      accent: hsl(0.07, 0.5, 0.35), earType: "none", hat: "horns",
+    }),
+    hp: 9, dmg: 2, speed: 2.0, aggro: 9, gold: [18, 34],
+    behavior: "charger", windup: 0.7, reach: 1.6, glow: [0.9, 0.85, 0.6],
+    loot: ["key", "bomb"],
+  },
+
+  // ---- Gloom Drain natives (floors 10–12): the marsh bites back ----
+  // walking spore sac: rushes in, swells, and blows itself apart — the
+  // expanding ring is the blast radius, and the kill costs it its own life
+  sporeling: {
+    make: (seed) => slimeSpec({ key: `e_sp_${seed % 5}`, scale: 0.52, hue: 0.8 }),
+    hp: 2, dmg: 2, speed: 3.3, aggro: 10, gold: [4, 9],
+    behavior: "bomber", windup: 0.6, reach: 1.9, glow: [0.75, 0.3, 0.9],
+    loot: ["mushroom", "caveshroom"],
+  },
+  // slippery marsh-light: marks a ripple at your flank, blinks onto it and
+  // fires the instant it lands (behavior "blinker")
+  gloomcaster: {
+    make: (seed) => wispSpec({ key: `e_gc_${seed % 4}`, scale: 0.7, hue: 0.75 }),
+    hp: 5, dmg: 1, speed: 3.0, aggro: 11, gold: [12, 24],
+    behavior: "blinker", windup: 0.6, band: [4, 8], projSpeed: 5.5, projColor: 0xd48cff, glow: [0.6, 0.25, 0.85],
+    loot: ["gem", "herb"],
+  },
+  // moss-grown hulk: the drain's answer to the brute, wider slam, more meat
+  mossbrute: {
+    make: (seed, tier) => humanoidSpec({
+      key: `e_mb_${seed % 4}_${Math.min(tier, 2)}`,
+      scale: 1.55, fat: 1.55, headR: 0.2, armR: 0.13,
+      skin: hsl(0.33, 0.35, 0.34), cloth: hsl(0.33, 0.35, 0.34), pants: hsl(0.3, 0.3, 0.22),
+      accent: hsl(0.42, 0.5, 0.5), earType: "none", hat: "horns",
+    }),
+    hp: 14, dmg: 2, speed: 1.6, aggro: 8, gold: [28, 50],
+    behavior: "slam", windup: 0.75, reach: 2.5, glow: [0.4, 0.85, 0.4],
+    loot: ["feather", "fang"],
   },
   // the floor boss: a giant that owns the sealed arena. Huge HP pool and a
   // rotation of telegraphed patterns — a wide ground-shaking slam up close, a
@@ -71,7 +168,7 @@ export const ENEMY_KINDS = {
     make: (seed) => bossSpec(seed),
     hp: 70, dmg: 2, speed: 1.7, aggro: 15, gold: [0, 0],
     behavior: "boss", windup: 0.78, reach: 3.4, glow: [0.95, 0.08, 0.05],
-    projSpeed: 5.5, projColor: 0xff7a4d,
+    projSpeed: 3.6, projColor: 0xff7a4d,
   },
 };
 
@@ -106,7 +203,7 @@ export const BOSSES = [
     hp: 58, speed: 2.25, windup: 0.66, reach: 2.7,
     rotation: ["pounce", "charge", "pounce", "burst"],
     minions: ["skitter", "skitter", "skitter"],
-    projSpeed: 5.0, projColor: 0xffb25a,
+    projSpeed: 3.2, projColor: 0xffb25a,
   },
   { // Flooded Deep — a mountain of ooze: ponderous, huge HP. Its signature
     // DELUGE marks five splash zones (one under your feet) that all erupt at once
@@ -115,13 +212,14 @@ export const BOSSES = [
     make: (seed) => slimeSpec({ key: `boss_fd_${seed % 5}`, scale: 2.3, hue: 0.55 }),
     hp: 92, speed: 1.25, windup: 0.95, reach: 3.2,
     rotation: ["deluge", "burst", "deluge", "charge"],
-    minions: ["slime", "slime", "slime"],
-    burstN: 10, projSpeed: 4.4, projColor: 0x5dd0ff,
+    minions: ["puddling", "puddling", "snapper"],
+    burstN: 10, projSpeed: 2.9, projColor: 0x5dd0ff,
   },
   { // Bone Hollow — the classic: the hulking Ogre King in his ossuary,
     // fighting the original slam / charge / burst book
     name: "Ogre King of the Hollow",
     awaken: "the Ogre King awakens",
+    minions: ["rattler", "rattler", "boneguard"],
   },
   { // Gloom Drain — a swollen marsh-light: nimble and slippery. Its signature
     // BLINK teleports to a ripple marked at your side and spits a quick orb ring
@@ -130,16 +228,51 @@ export const BOSSES = [
     make: (seed) => wispSpec({ key: `boss_gd_${seed % 4}`, scale: 1.9, hue: 0.45 }),
     hp: 62, speed: 2.0, windup: 0.75, reach: 2.4,
     rotation: ["blink", "burst", "blink", "charge"],
-    minions: ["wisp", "skitter", "slime"],
-    projSpeed: 6.4, projColor: 0x6fd6c8,
+    minions: ["gloomcaster", "sporeling", "sporeling"],
+    projSpeed: 4.0, projColor: 0x6fd6c8,
   },
 ];
 
 // The full def for the boss guarding a given hole's dungeon (tutorial cellar
-// and anything out of range fall back to the classic Ogre King).
+// and anything out of range fall back to the classic Ogre King). Every hole
+// deeper, the keeper asks more of you: a fatter HP pool, harder hits, snappier
+// telegraphs, a shorter breather between patterns and a bigger enrage pack —
+// so the four boss fights ramp 1 → 4 even before their unique movesets differ.
 export function bossDefFor(hole) {
-  return { ...ENEMY_KINDS.boss, ...(BOSSES[hole] ?? DEFAULT_BOSS) };
+  const def = { ...ENEMY_KINDS.boss, ...(BOSSES[hole] ?? DEFAULT_BOSS) };
+  const h = clamp(hole ?? 0, 0, N_DUNGEONS - 1);
+  def.hp = Math.round(def.hp * (1 + h * 0.5));
+  def.dmg += h >= 2 ? 1 : 0;
+  def.speed *= 1 + h * 0.07;
+  def.windup = Math.max(0.5, def.windup * (1 - h * 0.07));
+  def.paceMul = 1 - h * 0.09; // gap between attacks tightens with depth
+  def.minionN = 3 + h; // enrage pack grows
+  def.burstN = (def.burstN ?? 8) + h;
+  return def;
 }
+
+// Themed loot per dungeon: what its monsters carry and its chests hold. The
+// per-kind `loot` lists above are each monster's signature drops; these tables
+// back the rest of the rolls so every hole's haul reads distinctly. Index
+// matches Sewer.holes.
+export const DUNGEON_LOOT = [
+  { // Rat Warren — forage and scraps
+    common: ["mushroom", "meat", "bread", "caveshroom", "jelly", "egg"],
+    rare: ["wsword", "ring", "fang"],
+  },
+  { // Flooded Deep — what washes down the drain
+    common: ["jelly", "herb", "egg", "potion"],
+    rare: ["lantern", "feather", "gem"],
+  },
+  { // Bone Hollow — grave goods
+    common: ["fang", "bomb", "key", "ring"],
+    rare: ["bell", "ssword", "crown"],
+  },
+  { // Gloom Drain — marsh treasures
+    common: ["herb", "potion", "gem", "feather"],
+    rare: ["star", "hourglass", "crown"],
+  },
+];
 
 // Visual identity per sewer hole: floor/wall palette (indexed by floor,
 // clamped to the last entry), torch crystal colors, god-ray shaft colors and
@@ -184,15 +317,48 @@ export const HOLE_THEMES = [
   },
 ];
 
-// A dungeon run is now exactly three floors deep; the third holds the boss.
-export const MAX_FLOORS = 3;
-export const FLOOR_MIX = [
-  ["skitter", "slime"],
-  ["skitter", "slime", "goblin"],
-  ["slime", "goblin", "wisp", "archer"],
-  ["goblin", "wisp", "archer", "brute"],
-  ["goblin", "archer", "wisp", "brute", "brute"],
+// Dungeons are stacked: four themed dungeons of three floors each, so the
+// descent runs 1‑12 with a boss guarding every third floor (3, 6, 9, 12). The
+// sewer mouths are shortcuts to the head of each dungeon (floors 1, 4, 7, 10).
+export const FLOORS_PER_DUNGEON = 3;
+export const N_DUNGEONS = 4;
+export const MAX_DEPTH = FLOORS_PER_DUNGEON * N_DUNGEONS; // deepest floor (final boss)
+// Which themed dungeon (0..N_DUNGEONS-1) a floor belongs to.
+export function dungeonIndexFor(floorN) {
+  return clamp(Math.floor((floorN - 1) / FLOORS_PER_DUNGEON), 0, N_DUNGEONS - 1);
+}
+// A boss guards the last floor of every dungeon (every third floor).
+export function isBossFloor(floorN) {
+  return floorN > 0 && floorN % FLOORS_PER_DUNGEON === 0;
+}
+// Each themed dungeon spawns only its own natives — DUNGEON_MIX[dungeon] lists
+// the roster per local floor (1st/2nd/3rd), thickening toward the boss floor.
+export const DUNGEON_MIX = [
+  [ // Rat Warren — the classic starter crawl, exactly the original mixes
+    ["skitter", "slime"],
+    ["skitter", "slime", "goblin"],
+    ["slime", "goblin", "wisp", "archer"],
+  ],
+  [ // Flooded Deep — splitting blobs, tide crabs and geyser lures
+    ["puddle", "snapper"],
+    ["puddle", "snapper", "angler"],
+    ["snapper", "angler", "puddle", "puddle"],
+  ],
+  [ // Bone Hollow — bone-bugs, grave-lights and charging sentinels
+    ["rattler", "gravewisp"],
+    ["rattler", "gravewisp", "boneguard"],
+    ["rattler", "boneguard", "gravewisp", "boneguard"],
+  ],
+  [ // Gloom Drain — walking bombs, blink-casters and moss hulks
+    ["sporeling", "gloomcaster"],
+    ["sporeling", "gloomcaster", "mossbrute"],
+    ["gloomcaster", "sporeling", "mossbrute", "mossbrute"],
+  ],
 ];
+export function floorMixFor(floorN) {
+  const mixes = DUNGEON_MIX[dungeonIndexFor(floorN)] ?? DUNGEON_MIX[0];
+  return mixes[Math.min((floorN - 1) % FLOORS_PER_DUNGEON, mixes.length - 1)];
+}
 
 export class Dungeon {
   constructor(game) {
@@ -220,6 +386,8 @@ export class Dungeon {
     this.bossCenter = null;
     this.boss = null;
     this.keyChestId = -1;
+    // the summoning portal the boss rises out of when the gate is unlocked
+    this._bossPortal = null;
     // return portal home, conjured where the boss falls (world-space anchor)
     this.returnPortal = null;
   }
@@ -239,7 +407,7 @@ export class Dungeon {
     // The final floor is the boss floor: a big sealed arena is reserved along
     // the top of a taller grid, and the normal rooms are packed in below it.
     // (Never on the tutorial floor — it's a single peaceful room.)
-    const isBoss = !tutorial && floorN >= MAX_FLOORS;
+    const isBoss = !tutorial && isBossFloor(floorN);
     this.isBoss = isBoss;
 
     // --- grid: non-overlapping rooms linked by wide L-shaped corridors
@@ -252,8 +420,9 @@ export class Dungeon {
     const rooms = [];
     if (tutorial) {
       // One snug room in the middle of the grid — nothing to fight, just a chest
-      // to crack and the stairs home on the far wall.
-      const w = 7, h = 6;
+      // to crack and the stairs home on the far wall. Kept deliberately tiny so a
+      // new player's whole first delve fits in a couple of steps.
+      const w = 5, h = 5;
       const x = Math.floor((GW - w) / 2), y = Math.floor((GH - h) / 2);
       rooms.push({ x, y, w, h, cx: x + Math.floor(w / 2), cy: y + Math.floor(h / 2) });
       for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) open[yy][xx] = true;
@@ -335,9 +504,11 @@ export class Dungeon {
     const cellPos = (x, y) => new THREE.Vector3((x - GW / 2 + 0.5) * CELL, 0, (y - GH / 2 + 0.5) * CELL);
 
     // --- floor slab (colors come from the hole's theme; tutorial gets the default)
-    const theme = HOLE_THEMES[this.game.sewerHole] ?? DEFAULT_THEME;
+    const theme = tutorial ? DEFAULT_THEME : (HOLE_THEMES[dungeonIndexFor(floorN)] ?? DEFAULT_THEME);
     this.theme = theme;
-    const palette = theme.palettes[Math.min(floorN - 1, theme.palettes.length - 1)];
+    // palette deepens with the floor within its own dungeon (1st/2nd/3rd floor)
+    const localFloor = (floorN - 1) % FLOORS_PER_DUNGEON;
+    const palette = theme.palettes[Math.min(localFloor, theme.palettes.length - 1)];
     const floorTex = makeTilesTexture(palette, seed + floorN);
     // the floor only exists under open (walkable) cells — one merged quad per
     // cell rather than a single slab, so there's no floor hanging out beyond the
@@ -416,20 +587,12 @@ export class Dungeon {
     );
     glow.position.copy(this.stairsPos).setY(0.05);
     this.group.add(glow);
-
-    // --- torches: emissive crystals along room walls (no dynamic lights)
-    for (const room of rooms) {
-      if (r() < 0.7) {
-        const p = cellPos(room.x, room.y);
-        const crystal = new THREE.Mesh(
-          new THREE.ConeGeometry(0.16, 0.55, 5),
-          new THREE.MeshBasicMaterial({ color: pick(r, theme.torch) })
-        );
-        crystal.position.set(p.x + CELL * 0.3, 0.3, p.z + CELL * 0.3);
-        crystal.rotation.z = 0.3;
-        this.group.add(crystal);
-      }
-    }
+    // On the tutorial floor the way home stays hidden until the chest is cracked,
+    // so the first objective is unmistakably "smash the chest". revealStairs()
+    // (called from openChest) brings the stairs + their light shaft back in.
+    this._stairsMeshes = [stairs, glow];
+    this.stairsHidden = tutorial;
+    if (this.stairsHidden) for (const mesh of this._stairsMeshes) mesh.visible = false;
 
     // --- billboard set dressing: mushrooms, stones, dead trees & bones tucked
     // into the rooms (seeded off the same rng so co-op peers match). Skips the
@@ -448,9 +611,12 @@ export class Dungeon {
       shaft.position.set(pos.x, 3.4, pos.z);
       this.group.add(shaft);
       this.shafts.push(shaft);
+      return shaft;
     };
     addShaft(this.entrancePos, { color: 0x9a6dff, length: 4.6, topWidth: 0.6, bottomWidth: 2.6, opacity: 0.4, tilt: 0.28, spin: 0.4, motes: 14 });
-    addShaft(this.stairsPos, { color: 0xff9a4d, length: 4.6, topWidth: 0.55, bottomWidth: 2.4, opacity: 0.34, tilt: 0.24, spin: 1.2, motes: 12 });
+    const stairsShaft = addShaft(this.stairsPos, { color: 0xff9a4d, length: 4.6, topWidth: 0.55, bottomWidth: 2.4, opacity: 0.34, tilt: 0.24, spin: 1.2, motes: 12 });
+    // the stairs' beam is part of the "way home" reveal on the tutorial floor
+    if (this.stairsHidden) { stairsShaft.visible = false; this._stairsMeshes.push(stairsShaft); }
     for (const room of rooms.slice(1, -1)) {
       if (r() < 0.5) {
         const p = cellPos(room.cx, room.cy);
@@ -462,7 +628,7 @@ export class Dungeon {
     // tutorial floor is deliberately monster-free.
     if (!this.game.net.isGuest && !tutorial) {
       const tier = Math.min(floorN, 5) - 1;
-      const mix = FLOOR_MIX[Math.min(tier, FLOOR_MIX.length - 1)];
+      const mix = floorMixFor(floorN);
       const n = 4 + floorN + Math.floor(r() * 3);
       for (let i = 0; i < n; i++) {
         const room = rooms[1 + Math.floor(r() * (rooms.length - 1))];
@@ -481,7 +647,7 @@ export class Dungeon {
     // Disabled on the peaceful tutorial and inside the sealed boss arena so the
     // arena stays a controlled fight. Host-only (guests mirror via eSnap).
     this._spawnTier = Math.min(floorN, 5) - 1;
-    this._spawnMix = FLOOR_MIX[Math.min(this._spawnTier, FLOOR_MIX.length - 1)];
+    this._spawnMix = floorMixFor(floorN);
     this.spawnCap = isBoss || tutorial ? 0 : 6 + floorN * 2;
     this._spawnT = 4 + r() * 4; // first top-up a few seconds in
 
@@ -584,12 +750,49 @@ export class Dungeon {
     this.gateOpen = true;
     this.colliders = this.colliders.filter((c) => !this.gate.colliders.includes(c));
     this.gate.raiseT = 0;
-    if (this.isBoss && !this.boss && !this.game.net.isGuest) {
-      const e = this.spawnEnemy("boss", (this.seed % 100000) + 54321, MAX_FLOORS - 1, this.bossCenter.x, this.bossCenter.z);
-      // a ground-shaking entrance the moment the seal breaks
-      e.creature.animator.squash.kick(6);
-      this.game.particles.burst(_v.copy(this.bossCenter).setY(0.2), { color: 0xff5a3a, n: 24, speed: 5, up: 2.4, life: 0.8, size: 1.3 });
-    }
+    // the boss doesn't just pop in — a summoning portal blooms on the arena
+    // floor and, once it's fully open, the boss heaves out of it (host spawns
+    // the actual enemy; guests mirror the portal FX + receive the boss via net).
+    if (this.isBoss && !this.boss && !this._bossPortal && this.bossCenter) this._summonBoss();
+  }
+
+  /** Bloom a fiery summoning portal at the arena centre and, after a beat, let
+   * the boss rise from it (see the _bossPortal branch in update()). Runs on
+   * host + guest so both see the entrance; only the host spawns the enemy. */
+  _summonBoss() {
+    const lx = this.bossCenter.x - DUNGEON_ORIGIN.x, lz = this.bossCenter.z - DUNGEON_ORIGIN.z;
+    const g = new THREE.Group();
+    g.position.set(lx, 0, lz);
+    const disc = new THREE.Mesh(
+      new THREE.CircleGeometry(2.0, 36).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: 0xff3a24, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false })
+    );
+    disc.position.y = 0.05;
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(2.0, 2.5, 44).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: 0xffb347, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false })
+    );
+    ring.position.y = 0.06;
+    g.add(disc, ring);
+    this.group.add(g);
+    const shaft = makeLightShaft({ color: 0xff5a3a, length: 5.4, topWidth: 0.6, bottomWidth: 3.0, opacity: 0.5, tilt: 0, spin: 2.4, motes: 20 });
+    shaft.position.set(lx, 3.7, lz);
+    this.group.add(shaft);
+    this.shafts.push(shaft);
+    this._bossPortal = { mesh: g, disc, ring, shaft, t: 0, spawned: false };
+    this.game.audio.telegraph?.();
+    this.game.engine.shake(0.25);
+  }
+
+  _disposeBossPortal() {
+    const bp = this._bossPortal;
+    if (!bp) return;
+    bp.disc.material.dispose();
+    bp.ring.material.dispose();
+    bp.mesh.removeFromParent();
+    this.shafts = this.shafts.filter((s) => s !== bp.shaft);
+    bp.shaft.removeFromParent();
+    this._bossPortal = null;
   }
 
   /** True when a world position sits inside the boss arena (camera lock test). */
@@ -600,8 +803,9 @@ export class Dungeon {
 
   /** x/z are WORLD coordinates. */
   spawnEnemy(kind, seed, tier, x, z, id = null, hpOverride = null) {
-    // the boss def is themed per hole (same on host + guest: the hole id is synced)
-    const def = kind === "boss" ? bossDefFor(this.game.sewerHole) : ENEMY_KINDS[kind];
+    // the boss def is themed per dungeon, derived from the current floor (same
+    // on host + guest, since the floor is synced)
+    const def = kind === "boss" ? bossDefFor(dungeonIndexFor(this.floor)) : ENEMY_KINDS[kind];
     const creature = new Creature(def.make(seed, tier));
     creature.position.set(x, 0, z);
     creature.heading = Math.random() * Math.PI * 2;
@@ -643,6 +847,19 @@ export class Dungeon {
   spawnProjectile(x, z, vx, vz, opts) {
     this.projectiles.spawn(x, z, vx, vz, opts);
     this.game.net.send({ t: "proj", x, z, vx, vz, color: opts.color, dmg: opts.dmg, radius: opts.radius, life: opts.life });
+  }
+
+  /** A player bow/staff bolt — collides with enemies rather than players.
+   *  Local-only visually (kept off the wire to spare the co-op switch); damage
+   *  routes through the usual host/guest split when it lands. */
+  spawnPlayerProjectile(x, z, vx, vz, opts = {}) {
+    const p = this.projectiles.spawn(x, z, vx, vz, opts);
+    p.friendly = true;
+    p.crit = !!opts.crit;
+    p.pierce = !!opts.pierce;
+    p.splash = opts.splash || 0;
+    p.hitIds = new Set();
+    return p;
   }
 
   /** Fractional grid cell → group-local position (inverse of worldToCell). */
@@ -689,11 +906,7 @@ export class Dungeon {
 
     // keep the wall-occlusion shader fed with the camera + player torso so
     // walls between them dither away instead of hiding the hero
-    const shader = this._wallMat?.userData.shader;
-    if (shader) {
-      shader.uniforms.uPlayer.value.copy(this.game.player.position).setY(this.game.player.height * 0.6);
-      shader.uniforms.uCamPos.value.copy(this.game.engine.camera.position);
-    }
+    feedOccluder(this._wallMat, this.game.player, this.game.engine.camera);
 
     for (const s of this.shafts) s.userData.update(dt, elapsed);
 
@@ -705,6 +918,34 @@ export class Dungeon {
       rp.ring.material.opacity = 0.6 + Math.sin(elapsed * 3 + 1) * 0.15;
     }
 
+    // the boss summoning portal: bloom open, spit the boss out, then fade away
+    if (this._bossPortal) {
+      const bp = this._bossPortal;
+      bp.t += dt;
+      bp.mesh.rotation.y += dt * 2.6;
+      const grow = Math.min(1, bp.t / 0.5);
+      const s = 0.2 + grow * 0.8;
+      bp.mesh.scale.set(s, 1, s);
+      const puls = 0.5 + Math.sin(elapsed * 12) * 0.22;
+      bp.disc.material.opacity = grow * 0.6 * puls;
+      bp.ring.material.opacity = grow * 0.85;
+      bp.shaft.userData.update(dt, elapsed);
+      if (Math.random() < 0.7)
+        this.game.particles.burst(_v.copy(bp.mesh.position).setY(0.2), { color: 0xff6a3a, n: 3, speed: 1.6, up: 4, life: 0.7, size: 0.85 });
+      // portal fully open — the boss rises out (host authoritative)
+      if (!bp.spawned && bp.t >= 1.4) {
+        bp.spawned = true;
+        if (!this.game.net.isGuest && this.isBoss && !this.boss) {
+          const e = this.spawnEnemy("boss", (this.seed % 100000) + 54321 + this.floor * 991, dungeonIndexFor(this.floor) + 2, this.bossCenter.x, this.bossCenter.z);
+          e.creature.animator.squash.kick(6);
+        }
+        this.game.particles.burst(_v.copy(this.bossCenter).setY(0.2), { color: 0xff5a3a, n: 30, speed: 6, up: 3, life: 0.9, size: 1.4 });
+        this.game.engine.shake(0.4);
+        this.game.audio.kill?.();
+      }
+      if (bp.t >= 2.1) this._disposeBossPortal();
+    }
+
     // the boss gate slides up out of sight once it's been unlocked
     if (this.gate && this.gate.raiseT >= 0) {
       this.gate.raiseT += dt;
@@ -714,7 +955,18 @@ export class Dungeon {
     }
 
     for (const drop of this.drops) {
-      drop.mesh.position.y = 0.35 + Math.sin(elapsed * 3 + drop.phase) * 0.09;
+      if (drop.fly) {
+        const f = drop.fly;
+        f.t += dt;
+        const k = Math.min(1, f.t / f.dur);
+        const e = 1 - (1 - k) * (1 - k); // ease-out toward the resting spot
+        drop.mesh.position.x = f.fromX + (drop.restX - f.fromX) * e;
+        drop.mesh.position.z = f.fromZ + (drop.restZ - f.fromZ) * e;
+        drop.mesh.position.y = 0.35 + Math.sin(k * Math.PI) * f.arc; // popped arc
+        if (k >= 1) drop.fly = null;
+      } else {
+        drop.mesh.position.y = 0.35 + Math.sin(elapsed * 3 + drop.phase) * 0.09;
+      }
     }
 
     const players = this.game.playersInDungeon();
@@ -735,8 +987,11 @@ export class Dungeon {
       this._contactDamage(e, dt, players);
     }
 
-    // projectiles: move everywhere (visuals); the host resolves player hits
+    // projectiles: move everywhere (visuals); the host resolves enemy→player
+    // hits, while friendly bolts→enemy hits resolve for everyone (guests relay
+    // the hit to the host, same as a melee swing)
     this.projectiles.update(dt, elapsed);
+    this._resolveFriendlyProjectiles();
     if (!this.game.net.isGuest) this._resolveProjectiles(players);
   }
 
@@ -840,6 +1095,7 @@ export class Dungeon {
     if (e.atkState === "windup") {
       e.atkT += dt;
       if (e.behavior === "boss") this._bossTelegraphFx(e, e.atkT / e.windupDur, dt);
+      else this._minionTelegraphFx(e, e.atkT / e.windupDur, dt);
       if (target) c.heading = Math.atan2(target.creature.position.x - c.position.x, target.creature.position.z - c.position.z);
       // melee foes lunge along their committed direction during the windup so
       // the blow lands on contact — they visibly charge in and collide instead
@@ -952,8 +1208,25 @@ export class Dungeon {
         } else if (dist > strike - 0.6) c.position.addScaledVector(_d, speed * dt);
         break;
       }
+      case "charger": {
+        // hangs at mid-range, then telegraphs a lane and hurls itself down it
+        c.heading = face;
+        const range = c.radius + target.creature.radius + 5.5;
+        if (dist > range) c.position.addScaledVector(_d, speed * dt);
+        else if (ready) this._beginWindup(e, target);
+        break;
+      }
+      case "bomber": {
+        // a straight rush — it wants to hug you before it blows
+        c.heading = face;
+        if (dist > strike - 0.3) c.position.addScaledVector(_d, speed * dt);
+        else if (ready) this._beginWindup(e, target);
+        break;
+      }
       case "caster":
-      case "archer": {
+      case "archer":
+      case "geyser":
+      case "blinker": {
         c.heading = face;
         const [near, far] = e.def.band;
         if (dist < near) c.position.addScaledVector(_d, -speed * dt);
@@ -1043,6 +1316,32 @@ export class Dungeon {
     }
   }
 
+  // Ground FX for the themed minions' signature attacks (host-side, same
+  // throttle as the boss version): a lane for the charger, a splash ring on
+  // the geyser's mark, a swelling blast ring on the bomber, and the blinker's
+  // arrival ripple. Plain melee/ranged kinds still telegraph with glow alone.
+  _minionTelegraphFx(e, frac, dt) {
+    const b = e.behavior;
+    if (b !== "charger" && b !== "geyser" && b !== "bomber" && b !== "blinker") return;
+    e.telFxT = (e.telFxT ?? 0) - dt;
+    if (e.telFxT > 0) return;
+    e.telFxT = 0.08;
+    const c = e.creature;
+    const P = this.game.particles;
+    if (b === "charger") {
+      for (let i = 1; i <= 6; i++) {
+        _v.set(c.position.x + e.chargeX * i * 1.0, 0.08, c.position.z + e.chargeZ * i * 1.0);
+        P.burst(_v, { color: 0xf5e6b8, n: 1, speed: 0.3, up: 0.5, gravity: 0, life: 0.25, size: 0.7 });
+      }
+    } else if (b === "geyser" && e.markX != null) {
+      P.ring(_v.set(e.markX, 0.08, e.markZ), e.def.reach ?? 1.7, { color: 0x4db9ff, n: 10, life: 0.28, size: 0.8 });
+    } else if (b === "bomber") {
+      P.ring(_v.copy(c.position).setY(0.08), (e.ringRadius + 0.2) * (0.4 + frac * 0.6), { color: 0xd06cff, n: 12, life: 0.26, size: 0.8 });
+    } else if (b === "blinker" && e.markX != null) {
+      P.ring(_v.set(e.markX, 0.08, e.markZ), 0.9 + frac * 0.4, { color: 0xd48cff, n: 10, life: 0.26, size: 0.7 });
+    }
+  }
+
   // begin a telegraphed attack: crouch, glow, warn the ear
   _beginWindup(e, target) {
     const c = e.creature;
@@ -1055,17 +1354,29 @@ export class Dungeon {
     c.animator.squash.kick(-2.5); // anticipation dip
     c.setGlow(def.glow ?? [0.6, 0.2, 0.1]);
     // ranged foes telegraph with the body glow only; melee reaches farther
-    const ranged = e.behavior === "caster" || e.behavior === "archer";
-    // lock a charge direction for melee foes (lunge has its own dash on strike)
-    e.isCharge = !ranged && e.behavior !== "lunge";
-    if (e.isCharge && target) {
+    const ranged = ["caster", "archer", "geyser", "blinker"].includes(e.behavior);
+    // lock a charge direction for melee foes (lunge/charger dash on strike)
+    e.isCharge = !ranged && e.behavior !== "lunge" && e.behavior !== "charger";
+    if ((e.isCharge || e.behavior === "charger") && target) {
       _p.set(target.creature.position.x - c.position.x, 0, target.creature.position.z - c.position.z).normalize();
       e.chargeX = _p.x;
       e.chargeZ = _p.z;
     }
-    e.ringRadius = ranged ? 0 : e.behavior === "slam"
+    e.ringRadius = ranged ? 0 : e.behavior === "slam" || e.behavior === "bomber"
       ? def.reach + c.radius
       : (def.reach ?? 1) + c.radius + (target ? target.creature.radius : 0.34);
+    // signature minion attacks lock their ground mark at windup start, boss-style:
+    // the telegraph shows exactly where the blow lands, and moving off it dodges
+    e.markX = e.markZ = null;
+    if (e.behavior === "geyser" && target) {
+      e.markX = target.creature.position.x;
+      e.markZ = target.creature.position.z;
+    } else if (e.behavior === "blinker" && target) {
+      const t = target.creature.position;
+      const a = Math.random() * Math.PI * 2;
+      e.markX = t.x + Math.sin(a) * 2.4;
+      e.markZ = t.z + Math.cos(a) * 2.4;
+    }
     // the boss telegraphs each pattern differently: its own windup length and
     // a distinct glow colour per attack, all faster once enraged
     if (e.behavior === "boss") {
@@ -1075,7 +1386,8 @@ export class Dungeon {
       // per-attack windups scale off the boss's base windup (stock boss: the
       // original 1.1 / 0.85 / 1.03 beats), so a quick boss telegraphs quicker
       e.windupDur = (def.windup + (BOSS_ATK_WINDUP[atk] ?? 0.25)) * (e.enraged ? 0.8 : 1);
-      e.attackCd = 2.8 + Math.random() * 0.9;
+      // deeper keepers breathe less between patterns (paceMul, see bossDefFor)
+      e.attackCd = (2.8 + Math.random() * 0.9) * (def.paceMul ?? 1);
       if (e.enraged) e.attackCd *= 0.75;
       e.recoverDur = 0.85;
       e.isCharge = false; // patterns move on strike, not during the windup
@@ -1180,6 +1492,66 @@ export class Dungeon {
         game.engine.shake(0.18);
         game.audio.kill();
         game.particles.burst(_v.copy(c.position).setY(0.1), { color: 0xff8a5a, n: 16, speed: 4.2, up: 1.6, life: 0.5, size: 1.1 });
+        break;
+      }
+      case "charger": {
+        // hurl itself down the lane locked at windup start; damage lands on
+        // contact during the dash, so stepping out of the lane dodges it clean
+        if (target) {
+          const dist = c.position.distanceTo(target.creature.position);
+          const leap = (dist + 1.2) * LEAP_K;
+          e.vx = e.chargeX * leap;
+          e.vz = e.chargeZ * leap;
+          c.animator.squash.kick(5);
+          e.lungeHitT = 0.5;
+        }
+        game.audio.hit();
+        game.engine.shake(0.1);
+        break;
+      }
+      case "geyser": {
+        // the marked splash zone erupts — only hits players still on the mark
+        if (e.markX != null) {
+          const r = def.reach ?? 1.7;
+          for (const p of players) {
+            if (Math.hypot(p.creature.position.x - e.markX, p.creature.position.z - e.markZ) <= r + p.creature.radius)
+              game.enemyHitsPlayer(e, p);
+          }
+          game.particles.burst(_v.set(e.markX, 0.1, e.markZ), { color: 0x5dd0ff, n: 16, speed: 3.6, up: 3.6, life: 0.7, size: 1.1 });
+          game.audio.kill();
+        }
+        break;
+      }
+      case "blinker": {
+        // vanish, reappear on the marked ripple and fire the instant it lands
+        if (e.markX != null) {
+          game.particles.burst(_v.copy(c.position).setY(c.height * 0.5), { color: 0xd48cff, n: 10, speed: 3, life: 0.4, size: 0.8 });
+          c.position.set(e.markX, 0, e.markZ);
+          c.animator.prevPos.copy(c.position);
+          game.particles.burst(_v.copy(c.position).setY(c.height * 0.5), { color: 0xd48cff, n: 10, speed: 3, life: 0.4, size: 0.8 });
+          if (target) {
+            _d.set(target.creature.position.x - c.position.x, 0, target.creature.position.z - c.position.z).normalize();
+            c.heading = Math.atan2(_d.x, _d.z);
+            const sp = def.projSpeed;
+            const y = Math.max(0.5, c.height * 0.6);
+            this.spawnProjectile(c.position.x + _d.x * (c.radius + 0.2), c.position.z + _d.z * (c.radius + 0.2), _d.x * sp, _d.z * sp, { color: def.projColor, dmg: def.dmg, radius: 0.26, life: 2.4, y });
+          }
+        }
+        game.audio.shoot();
+        break;
+      }
+      case "bomber": {
+        // blows itself apart — everything inside the swollen ring gets hit,
+        // and the sporeling dies in the blast (its own loot still drops)
+        const r = e.ringRadius + 0.25;
+        for (const p of players) {
+          if (c.position.distanceTo(p.creature.position) <= r + p.creature.radius) game.enemyHitsPlayer(e, p);
+        }
+        game.particles.burst(_v.copy(c.position).setY(0.15), { color: 0xd06cff, n: 22, speed: 5, up: 2.4, life: 0.6, size: 1.2 });
+        game.particles.burst(_v.copy(c.position).setY(0.15), { color: 0x9fe07a, n: 12, speed: 3.4, up: 3, life: 0.7, size: 0.9 });
+        game.engine.shake(0.16);
+        game.audio.kill();
+        this.killEnemy(e, 0, 0);
         break;
       }
       case "boss": {
@@ -1298,9 +1670,54 @@ export class Dungeon {
     return false;
   }
 
+  // Player bow/staff bolts vs. enemies. Non-piercing shots burst on first hit;
+  // staff bolts pierce (tracking who they've already struck) and may splash.
+  _resolveFriendlyProjectiles() {
+    const game = this.game;
+    for (const proj of this.projectiles.list) {
+      if (proj.dead || !proj.friendly) continue;
+      if (this._projHitsWall(proj)) { this._projBurst(proj); continue; }
+      for (const e of this.enemies) {
+        if (e.deadT >= 0 || e.hitCd > 0) continue;
+        if (proj.hitIds && proj.hitIds.has(e.id)) continue;
+        const c = e.creature;
+        const dx = proj.x - c.position.x;
+        const dz = proj.z - c.position.z;
+        const rr = proj.radius + c.radius;
+        if (dx * dx + dz * dz > rr * rr) continue;
+        const nx = -dx / (Math.hypot(dx, dz) || 1);
+        const nz = -dz / (Math.hypot(dx, dz) || 1);
+        if (game.net.isGuest) {
+          c.hurt();
+          game.audio.hit();
+          game.net.send({ t: "hit", id: e.id, dmg: proj.dmg, kx: nx, kz: nz });
+        } else {
+          this.damageEnemy(e, proj.dmg, nx, nz, { crit: proj.crit, knock: 1 });
+          if (proj.splash > 0) this._splashDamage(proj, e);
+        }
+        if (proj.pierce) { proj.hitIds?.add(e.id); continue; }
+        this._projBurst(proj);
+        break;
+      }
+    }
+  }
+
+  // Staff splash: everything near the struck foe takes half damage (host only).
+  _splashDamage(proj, hitEnemy) {
+    const r2 = proj.splash * proj.splash;
+    const half = Math.max(1, Math.round(proj.dmg / 2));
+    for (const e of this.enemies) {
+      if (e === hitEnemy || e.deadT >= 0 || e.hitCd > 0) continue;
+      const dx = e.creature.position.x - hitEnemy.creature.position.x;
+      const dz = e.creature.position.z - hitEnemy.creature.position.z;
+      if (dx * dx + dz * dz > r2) continue;
+      this.damageEnemy(e, half, dx / (Math.hypot(dx, dz) || 1), dz / (Math.hypot(dx, dz) || 1), { knock: 0.6 });
+    }
+  }
+
   _resolveProjectiles(players) {
     for (const proj of this.projectiles.list) {
-      if (proj.dead) continue;
+      if (proj.dead || proj.friendly) continue;
       if (this._projHitsWall(proj)) { this._projBurst(proj); continue; }
       for (const p of players) {
         const pc = p.creature;
@@ -1453,8 +1870,9 @@ export class Dungeon {
     const bp = e.creature.position;
     const r = rng(e.seed + 606);
     const pack = e.def.minions ?? ["skitter", "skitter", "slime"];
-    for (let i = 0; i < 3; i++) {
-      const a = (i / 3) * Math.PI * 2 + r();
+    const n = e.def.minionN ?? 3; // deeper bosses call a bigger pack
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + r();
       this.spawnEnemy(pick(r, pack), Math.floor(r() * 1e6), 1, bp.x + Math.sin(a) * 2.6, bp.z + Math.cos(a) * 2.6);
     }
     game.particles.burst(_v.copy(bp).setY(e.creature.height * 0.5), { color: 0xff3b3b, n: 26, speed: 5.5, up: 2, life: 0.8, size: 1.3 });
@@ -1473,70 +1891,152 @@ export class Dungeon {
     game.net.send({ t: "eDie", id: e.id, kx, kz });
     if (game.net.isGuest) return;
     if (game.today) game.today.slain++;
-    // the boss goes out with a bang: a treasure spill and a victory flourish
+    // split-on-death (puddle → puddlings): the body bursts into livelier bits
+    if (e.def.splitInto && this.active) {
+      const rs = rng(e.seed + 41);
+      for (let i = 0; i < 2; i++) {
+        const a = rs() * Math.PI * 2;
+        const m = this.spawnEnemy(e.def.splitInto, Math.floor(rs() * 1e6), e.tier, e.creature.position.x + Math.sin(a) * 0.55, e.creature.position.z + Math.cos(a) * 0.55);
+        m.hitCd = 0.35; // brief grace so the killing swing can't sweep them too
+        m.creature.animator.squash.kick(5);
+      }
+    }
+    // the boss goes out with a bang: its body blows apart and the treasure it
+    // guarded flies out across the whole arena
     if (e.isBoss) {
       this.boss = null;
+      this._explodeBoss(e);
       game.onBossDefeated?.(e.creature.position);
       const bx = e.creature.position.x, bz = e.creature.position.z;
       const rl = rng(e.seed + 5);
-      // a guaranteed crown, a healing potion, and a fistful of top-tier spoils
-      const spoils = ["crown", "potion", pick(rl, LOOT_BY_TIER[4]), pick(rl, LOOT_BY_TIER[4]), pick(rl, LOOT_BY_TIER[4]), pick(rl, LOOT_BY_TIER[3])];
+      const b = this.bossRoom;
+      // bosses are the only source of gear: two distinct equipment pieces, plus
+      // a guaranteed crown, a healing potion and a fistful of top-tier spoils
+      let g1 = pick(rl, EQUIP_DROPS), g2 = pick(rl, EQUIP_DROPS);
+      while (g2 === g1) g2 = pick(rl, EQUIP_DROPS);
+      // the rest of the hoard is the dungeon's own treasure, and deeper
+      // keepers guard a bigger pile of it
+      const hole = dungeonIndexFor(this.floor);
+      const table = DUNGEON_LOOT[hole] ?? DUNGEON_LOOT[0];
+      const spoils = [g1, g2, "crown", "potion"];
+      for (let i = 0; i < 3 + hole; i++) spoils.push(pick(rl, table.rare));
       spoils.forEach((id, i) => {
-        const a = (i / spoils.length) * Math.PI * 2;
-        this.spawnDrop(id, bx + Math.sin(a) * 1.2, bz + Math.cos(a) * 1.2);
+        // scatter across the arena floor (kept off the walls) — each spoil arcs
+        // out from where the boss fell, so the loot showers across the room
+        let x, z;
+        if (b) {
+          x = b.minX + 1.6 + rl() * (b.maxX - b.minX - 3.2);
+          z = b.minZ + 1.6 + rl() * (b.maxZ - b.minZ - 3.2);
+        } else {
+          const a = (i / spoils.length) * Math.PI * 2;
+          x = bx + Math.sin(a) * 3.4;
+          z = bz + Math.cos(a) * 3.4;
+        }
+        this.spawnDrop(id, x, z, null, { flyFrom: { x: bx, z: bz } });
       });
       return;
     }
-    // loot: enemies only drop merchandise — gold comes solely from selling it
+    // loot: enemies only drop merchandise — gold comes solely from selling it.
+    // Mostly the monster's own signature loot, sometimes the dungeon's themed
+    // table, with rare finds growing likelier toward each hole's boss floor.
     const r = rng(e.seed + 99);
-    if (r() < 0.6) {
-      const tier = clamp(e.tier + 1 + (r() < 0.2 ? 1 : 0), 1, 4);
-      this.spawnDrop(pick(r, LOOT_BY_TIER[tier]), e.creature.position.x, e.creature.position.z);
+    if (r() < (e.def.dropRate ?? 0.6)) {
+      const table = DUNGEON_LOOT[dungeonIndexFor(this.floor)] ?? DUNGEON_LOOT[0];
+      const localFloor = (this.floor - 1) % FLOORS_PER_DUNGEON;
+      const id = e.def.loot && r() < 0.65 ? pick(r, e.def.loot)
+        : r() < 0.12 + localFloor * 0.06 ? pick(r, table.rare)
+        : pick(r, table.common);
+      this.spawnDrop(id, e.creature.position.x, e.creature.position.z);
     }
   }
 
-  /** Conjure a shimmering return portal at world coords (wx,wz) — spawned when
-   * the boss falls so the player can step straight out of the arena and home.
-   * Built identically on host and guest (both run onBossDefeated), so it needs
-   * no dedicated net message to stay in sync. */
-  spawnReturnPortal(wx, wz) {
+  /** Blow the boss apart piece by piece: each body mesh pops in a staggered
+   * burst of debris and vanishes, capped by one big white flash. Cosmetic, so
+   * it runs on host + guest (see the eDie mirror). */
+  _explodeBoss(e) {
+    const game = this.game;
+    const c = e.creature;
+    const parts = [];
+    c.traverse((o) => { if (o.isMesh && o !== c.shadow) parts.push(o); });
+    // hide the blob shadow right away so it doesn't linger under the debris
+    if (c.shadow) c.shadow.visible = false;
+    parts.forEach((mesh, i) => {
+      setTimeout(() => {
+        if (!mesh.parent) return;
+        mesh.getWorldPosition(_p);
+        game.particles.burst(_p, { color: 0xff7a3a, n: 10, speed: 5.5, up: 3.2, life: 0.7, size: 1.05 });
+        game.particles.burst(_p, { color: 0xffe08a, n: 6, speed: 3.6, up: 2.6, life: 0.5, size: 0.8 });
+        mesh.visible = false;
+        game.engine.shake(0.12);
+        game.audio.hit?.();
+      }, i * 85);
+    });
+    // a final concussive flash once the last piece is gone
+    setTimeout(() => {
+      if (!c.parent) return;
+      c.getWorldPosition(_p);
+      _p.y += c.height * 0.5;
+      game.particles.burst(_p, { color: 0xffffff, n: 34, speed: 7.5, up: 3.4, life: 0.85, size: 1.5 });
+      game.particles.burst(_p, { color: 0xff5a3a, n: 20, speed: 5, up: 2.6, life: 0.9, size: 1.2 });
+      game.engine.shake(0.5);
+    }, parts.length * 85 + 80);
+  }
+
+  /** Conjure a shimmering portal at world coords (wx,wz) where the boss fell.
+   * `descend` tints it fiery and marks it as the way DOWN to the next stacked
+   * dungeon; otherwise it's the cool arcane way HOME (final boss only). Built
+   * identically on host and guest (both run onBossDefeated), so it needs no
+   * dedicated net message to stay in sync. */
+  spawnReturnPortal(wx, wz, descend = false) {
     if (this.returnPortal) return;
     const lx = wx - DUNGEON_ORIGIN.x, lz = wz - DUNGEON_ORIGIN.z;
+    const discColor = descend ? 0xff8a3d : 0x5dd0ff;
+    const ringColor = descend ? 0xffd36b : 0x9a6dff;
+    const shaftColor = descend ? 0xff9a4d : 0x7fd8ff;
     const g = new THREE.Group();
     g.position.set(lx, 0, lz);
     // a glowing disc on the floor with a brighter outer ring
     const disc = new THREE.Mesh(
       new THREE.CircleGeometry(1.05, 28).rotateX(-Math.PI / 2),
-      new THREE.MeshBasicMaterial({ color: 0x5dd0ff, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false })
+      new THREE.MeshBasicMaterial({ color: discColor, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false })
     );
     disc.position.y = 0.05;
     const ring = new THREE.Mesh(
       new THREE.RingGeometry(1.05, 1.35, 30).rotateX(-Math.PI / 2),
-      new THREE.MeshBasicMaterial({ color: 0x9a6dff, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false })
+      new THREE.MeshBasicMaterial({ color: ringColor, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false })
     );
     ring.position.y = 0.06;
     g.add(disc, ring);
     this.group.add(g);
-    // a bright column of arcane light rising from the portal (animated via shafts)
-    const shaft = makeLightShaft({ color: 0x7fd8ff, length: 4.8, topWidth: 0.5, bottomWidth: 2.2, opacity: 0.55, tilt: 0, spin: 1.6, motes: 16 });
+    // a bright column of light rising from the portal (animated via shafts)
+    const shaft = makeLightShaft({ color: shaftColor, length: 4.8, topWidth: 0.5, bottomWidth: 2.2, opacity: 0.55, tilt: 0, spin: 1.6, motes: 16 });
     shaft.position.set(lx, 3.4, lz);
     this.group.add(shaft);
     this.shafts.push(shaft);
-    this.returnPortal = { pos: new THREE.Vector3(wx, 0, wz), mesh: g, disc, ring };
+    this.returnPortal = { pos: new THREE.Vector3(wx, 0, wz), mesh: g, disc, ring, descend };
   }
 
-  /** x/z are WORLD coordinates. */
-  spawnDrop(itemId, x, z, id = null) {
+  /** x/z are WORLD coordinates. `opts.flyFrom` ({x,z}) makes the drop arc out
+   * from that point to its resting spot (boss loot spilling across the arena). */
+  spawnDrop(itemId, x, z, id = null, opts = {}) {
     const mesh = itemSprite(itemId);
-    mesh.position.set(x + (Math.random() - 0.5) * 0.6, 0.35, z + (Math.random() - 0.5) * 0.6);
+    const rx = x + (Math.random() - 0.5) * 0.6;
+    const rz = z + (Math.random() - 0.5) * 0.6;
+    mesh.position.set(rx, 0.35, rz);
     mesh.scale.setScalar(1.35);
     const shadow = makeBlobShadow(0.3);
     shadow.position.set(0, -mesh.position.y + 0.02, 0);
     mesh.add(shadow);
     this.game.engine.scene.add(mesh);
-    const drop = { id: id ?? this.game.net.newId(), item: itemId, mesh, phase: Math.random() * 9 };
+    const drop = { id: id ?? this.game.net.newId(), item: itemId, mesh, phase: Math.random() * 9, restX: rx, restZ: rz };
+    if (opts.flyFrom) {
+      drop.fly = { fromX: opts.flyFrom.x, fromZ: opts.flyFrom.z, t: 0, dur: 0.5 + Math.random() * 0.4, arc: 1.6 + Math.random() * 1.4 };
+      mesh.position.set(opts.flyFrom.x, 0.7, opts.flyFrom.z);
+    }
     this.drops.push(drop);
-    this.game.net.send({ t: "drop", id: drop.id, item: itemId, x, z });
+    const msg = { t: "drop", id: drop.id, item: itemId, x, z };
+    if (opts.flyFrom) { msg.fx = opts.flyFrom.x; msg.fz = opts.flyFrom.z; }
+    this.game.net.send(msg);
     return drop;
   }
 
@@ -1545,12 +2045,25 @@ export class Dungeon {
     this.drops = this.drops.filter((d) => d !== drop);
   }
 
+  /** Bring the tutorial's hidden stairs (steps, glow, light shaft) back into
+   * view. No-op once already shown or off the tutorial floor. */
+  revealStairs() {
+    if (!this.stairsHidden) return;
+    this.stairsHidden = false;
+    for (const mesh of this._stairsMeshes || []) mesh.visible = true;
+  }
+
   openChest(chest) {
     if (chest.opened) return null;
     chest.opened = true;
     chest.mesh.children[1].rotation.x = -1.9; // lid flips open
+    // cracking the tutorial chest is what unlocks the way home
+    if (this.tutorial) this.revealStairs();
     const r = rng(this.seed + chest.id * 313);
-    const tier = clamp(Math.min(this.floor, 4), 1, 4);
+    // chest loot draws from the dungeon's own themed table, with the rare
+    // shelf growing likelier the closer the floor sits to the hole's boss
+    const table = DUNGEON_LOOT[dungeonIndexFor(this.floor)] ?? DUNGEON_LOOT[0];
+    const localFloor = (this.floor - 1) % FLOORS_PER_DUNGEON;
     const cx = chest.mesh.position.x + DUNGEON_ORIGIN.x; // chest is group-local
     const cz = chest.mesh.position.z + DUNGEON_ORIGIN.z;
     // the designated key chest guarantees a Brass Key drop — a normal bag item
@@ -1558,7 +2071,7 @@ export class Dungeon {
     // little ordinary loot alongside it, like any other chest.
     if (chest.id === this.keyChestId) {
       this.spawnDrop("key", cx, cz + 0.8);
-      this.spawnDrop(pick(r, LOOT_BY_TIER[Math.max(tier - 1, 1)]), cx + 0.7, cz);
+      this.spawnDrop(pick(r, table.common), cx + 0.7, cz);
       return "key";
     }
     // the FTUE chest always pays out the same two starter wares so the guided
@@ -1568,9 +2081,9 @@ export class Dungeon {
       this.spawnDrop("meat", cx + 0.7, cz);
       return "mushroom";
     }
-    const item = pick(r, LOOT_BY_TIER[tier]);
+    const item = r() < 0.22 + localFloor * 0.18 ? pick(r, table.rare) : pick(r, table.common);
     this.spawnDrop(item, cx, cz + 0.8);
-    if (r() < 0.6) this.spawnDrop(pick(r, LOOT_BY_TIER[Math.max(tier - 1, 1)]), cx + 0.7, cz);
+    if (r() < 0.6) this.spawnDrop(pick(r, table.common), cx + 0.7, cz);
     return item;
   }
 
@@ -1606,6 +2119,7 @@ export class Dungeon {
     this.boss = null;
     this.keyChestId = -1;
     this.isBoss = false;
+    this._bossPortal = null;
     this.returnPortal = null;
   }
 }

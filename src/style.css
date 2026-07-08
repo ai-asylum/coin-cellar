@@ -15,6 +15,12 @@
   --ink: #5a3410;
   --ink-soft: #8a6438;
   --gold: #c8871f;
+  /* loot rarity tiers (1 Common → 4 Fabled): the border colour every item
+     cell wears so rarity reads at a glance, same scale the admin uses. */
+  --tier1: #8f8676;
+  --tier2: #3fa64a;
+  --tier3: #3b78d8;
+  --tier4: #a44bd6;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body { height: 100%; overflow: hidden; background: #2a1c10; }
@@ -126,8 +132,6 @@ button { font-family: inherit; cursor: pointer; }
 }
 #gold-chip.gold-corner .ic { width: 1.5em; height: 1.5em; vertical-align: -0.32em; }
 #gold-chip.gold-corner b { color: #fff; }
-.chip.urgent { border-color: #c0392b; color: #a11; animation: throb 1.2s infinite; }
-@keyframes throb { 50% { transform: scale(1.06); } }
 .chip.bounce { animation: chipbounce 0.35s; }
 @keyframes chipbounce { 30% { transform: scale(1.18); } }
 #hearts {
@@ -148,68 +152,21 @@ button { font-family: inherit; cursor: pointer; }
 }
 .icon-btn:active { transform: scale(0.92); }
 
-/* ============================================================ Majora's-Mask day clock */
-#dayclock {
-  position: absolute;
-  bottom: calc(env(safe-area-inset-bottom) - 2px);
-  left: 50%; transform: translateX(-50%);
-  width: 210px;
-  pointer-events: none;
-  opacity: 0.9;
-  filter: drop-shadow(0 3px 5px rgba(30, 16, 4, 0.5));
-  /* No z-index: sits below the sheets, joystick and action button, which are
-     appended to #hud after this element, so gameplay UI always wins. */
-}
-/* On touch the dial hogs the bottom third — shrink it and drop it flush to the
-   screen edge (the SVG has ~13% empty space below the arc baseline). */
-@media (pointer: coarse) {
-  #dayclock {
-    width: 150px;
-    bottom: calc(env(safe-area-inset-bottom) - 11px);
-  }
-}
-#dayclock svg { display: block; width: 100%; height: auto; overflow: visible; }
-.clk-face { stroke: var(--wood-dark); stroke-width: 4; stroke-linejoin: round; }
-.clk-track { fill: none; stroke: rgba(58, 34, 10, 0.3); stroke-width: 4.5; }
-.clk-arc {
-  fill: none; stroke: #fff2c2; stroke-width: 4.5; stroke-linecap: round;
-  filter: drop-shadow(0 0 3px rgba(255, 236, 170, 0.9));
-  transition: stroke-dashoffset 0.25s linear;
-}
-.clk-tick { stroke: rgba(58, 34, 10, 0.45); stroke-width: 1.3; }
-.clk-tick-major { stroke: rgba(58, 34, 10, 0.75); stroke-width: 2.2; }
-.clk-marker { fill: #ffd24a; stroke: var(--wood-dark); stroke-width: 2; transition: fill 0.6s; }
-#clk-hand { transition: transform 0.25s linear; }
-.clk-daynum {
-  font-family: "Trebuchet MS", system-ui, sans-serif;
-  font-size: 22px; font-weight: 900; fill: var(--parch-hi);
-  text-anchor: middle; dominant-baseline: middle;
-  paint-order: stroke; stroke: var(--wood-dark); stroke-width: 3; stroke-linejoin: round;
-}
-.clk-daylabel {
-  font-size: 8.5px; font-weight: 900; letter-spacing: 2px; fill: var(--parch-hi);
-  text-anchor: middle; dominant-baseline: middle;
-  paint-order: stroke; stroke: var(--wood-dark); stroke-width: 2; stroke-linejoin: round;
-}
-#dayclock.phase-night .clk-face { fill: #24314f; }
-#dayclock.phase-night .clk-arc { stroke: #9fb6e8; }
-#dayclock.phase-night .clk-marker { fill: #cfe0ff; }
-
 /* ============================================================ dungeon minimap */
 #minimap {
   position: absolute;
   left: calc(env(safe-area-inset-left) + 12px);
-  bottom: calc(env(safe-area-inset-bottom) + 104px);
+  top: calc(env(safe-area-inset-top) + 52px);
   transform: scale(1.6);
-  transform-origin: bottom left;
+  transform-origin: top left;
   pointer-events: none;
   opacity: 0.95;
 }
-/* On touch the map is oversized — pull it down into the lower-left corner and
+/* On touch the map is oversized — tuck it into the upper-left corner and
    shrink it so it stops eating the play area. */
 @media (pointer: coarse) {
   #minimap {
-    bottom: calc(env(safe-area-inset-bottom) + 92px);
+    top: calc(env(safe-area-inset-top) + 44px);
     transform: scale(0.9);
   }
 }
@@ -305,6 +262,23 @@ button { font-family: inherit; cursor: pointer; }
 .floaty.gold { color: #ffd34d; }
 .floaty.loot { color: #a8e6b0; font-size: 15px; }
 .floaty.emote { font-size: 26px; animation: emotebob 1s infinite; }
+.bag-full-msg {
+  position: absolute; transform: translate(-50%, 0);
+  background: linear-gradient(rgba(255, 246, 226, 0.97), rgba(236, 211, 160, 0.97));
+  color: #a11; border: 2px solid #c0392b;
+  border-radius: 12px; padding: 5px 12px; font-size: 13px; font-weight: 900;
+  white-space: nowrap; pointer-events: none; z-index: 22;
+  box-shadow: 0 3px 0 var(--wood-dark), inset 0 1px 0 #fff7e4;
+  animation: bagfull 1.5s forwards;
+}
+.bag-full-msg .ic { width: 1.1em; height: 1.1em; vertical-align: -0.2em; }
+@keyframes bagfull {
+  0% { opacity: 0; transform: translate(-50%, -8px) scale(0.8); }
+  12% { opacity: 1; transform: translate(-50%, 0) scale(1.08); }
+  22% { transform: translate(-50%, 0) scale(1); }
+  80% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -6px); }
+}
 .coin-fly {
   position: absolute; transform: translate(-50%, -50%);
   font-size: 22px; pointer-events: none; will-change: transform, opacity;
@@ -433,12 +407,15 @@ button { font-family: inherit; cursor: pointer; }
 @keyframes interactpulse { 50% { box-shadow: 0 4px 0 #1f5236, 0 0 30px rgba(140, 255, 190, 0.85); border-color: #7bf0aa; } }
 @media (pointer: fine) { #interact-btn { display: none !important; } }
 
-/* clear the touch controls out of the way during a cutscene dialogue so the
-   portraits + spoken line have the stage to themselves */
-#hud.dlg-open #joystick,
-#hud.dlg-open #action-btn,
-#hud.dlg-open #dodge-btn,
-#hud.dlg-open #interact-btn { display: none !important; }
+/* clear the touch controls while the backpack panel is open so the loot list
+   (and its click-away backdrop) own the screen — the joystick / action / dodge
+   / interact buttons are appended after #sheet, so they're later siblings */
+@media (pointer: coarse) {
+  #sheet.bag-sheet ~ #joystick,
+  #sheet.bag-sheet ~ #action-btn,
+  #sheet.bag-sheet ~ #dodge-btn,
+  #sheet.bag-sheet ~ #interact-btn { display: none !important; }
+}
 
 /* backpack button — big bag sprite parked on the bottom edge, just inboard of
    the action/dodge cluster (dungeon-only; the bag panel grows out of this icon) */
@@ -483,11 +460,19 @@ button { font-family: inherit; cursor: pointer; }
 }
 
 /* ============================================================ sheets */
+/* click-away backdrop for dismissible sheets (the backpack). Sits full-screen
+   just under #sheet so tapping anywhere outside the panel closes it. */
+#sheet-backdrop {
+  position: absolute; inset: 0; z-index: 18;
+  pointer-events: auto; background: transparent;
+}
+#sheet-backdrop.hidden { display: none; }
 #sheet {
   position: absolute; left: 50%; bottom: calc(14px + env(safe-area-inset-bottom));
   transform: translateX(-50%);
   width: min(430px, calc(100vw - 20px));
   pointer-events: auto;
+  z-index: 19;
 }
 .sheet-card {
   background: linear-gradient(#fbeecb, #eed6a6);
@@ -498,17 +483,6 @@ button { font-family: inherit; cursor: pointer; }
 }
 @keyframes sheetup { from { transform: translateY(30px); opacity: 0; } }
 
-/* ---- centered full-screen recap over a dark backdrop ---- */
-#sheet.recap-sheet {
-  inset: 0; left: 0; bottom: 0;
-  width: 100%; transform: none;
-  display: flex; align-items: center; justify-content: center;
-  padding: 20px; box-sizing: border-box;
-  background: rgba(16, 9, 3, 0.72);
-  backdrop-filter: blur(2px);
-  animation: recapfade 0.22s;
-}
-#sheet.recap-sheet .sheet-card { width: min(430px, calc(100vw - 40px)); }
 @keyframes recapfade { from { opacity: 0; } }
 .sheet-title { display: flex; gap: 10px; align-items: center; font-size: 15px; font-weight: 700; }
 .sheet-title small { color: var(--ink-soft); font-weight: 600; }
@@ -516,69 +490,7 @@ button { font-family: inherit; cursor: pointer; }
 .big-emoji { font-size: 34px; }
 .mood { margin-left: auto; font-size: 30px; }
 
-/* ---- "Good night" day recap ---- */
-.recap-hero { text-align: center; margin: 10px 0 12px; }
-.recap-net {
-  font-size: 32px; font-weight: 900; line-height: 1.05;
-  font-variant-numeric: tabular-nums;
-  text-shadow: 0 2px 0 #fff6e0;
-}
-.recap-net.up { color: var(--wood-dark); }
-.recap-net.down { color: #c0392b; }
-.recap-net small {
-  display: block; font-size: 10px; font-weight: 800; letter-spacing: 0.6px;
-  text-transform: uppercase; color: var(--ink-soft); text-shadow: none; margin-top: 1px;
-}
-.recap-purse { margin-top: 6px; font-size: 13px; font-weight: 800; color: var(--ink); }
-.recap-purse .ic { width: 1.1em; height: 1.1em; vertical-align: -0.2em; }
-.recap-rows { display: flex; flex-direction: column; gap: 6px; }
-.recap-row {
-  display: flex; align-items: center; gap: 10px;
-  background: rgba(255, 255, 255, 0.45);
-  border: 2px solid var(--wood-light); border-radius: 12px;
-  padding: 7px 12px;
-}
-.recap-row .ic { width: 22px; height: 22px; flex: none; color: var(--wood-dark); }
-.recap-label { font-weight: 700; font-size: 13px; color: var(--ink); }
-.recap-val {
-  margin-left: auto; font-weight: 800; font-size: 13px;
-  color: var(--wood-dark); font-variant-numeric: tabular-nums;
-}
-.recap-quiet {
-  text-align: center; font-size: 13px; font-style: italic;
-  color: var(--ink-soft); padding: 6px 0 2px;
-}
-.recap-guild {
-  margin-top: 10px; text-align: center; font-size: 12px; font-weight: 800; color: var(--ink-soft);
-}
-.recap-guild.urgent { color: #c0392b; }
-.recap-guild .ic { width: 1.1em; height: 1.1em; vertical-align: -0.2em; }
-
-/* staggered entrance so the day's tally tots up with a bit of life: the hero
-   number pops, each row slides in behind it, then the footer fades up */
-.recap-sheet .recap-hero { animation: recaphero 0.4s both; }
-@keyframes recaphero { from { transform: scale(0.7); opacity: 0; } 65% { transform: scale(1.07); } }
-.recap-sheet .recap-row {
-  animation: recaprowin 0.34s both;
-  animation-delay: calc(0.14s + var(--i, 0) * 0.07s);
-}
-@keyframes recaprowin { from { transform: translateY(10px); opacity: 0; } }
-.recap-sheet .recap-quiet,
-.recap-sheet .recap-guild { animation: recapfade 0.5s both 0.3s; }
-
-/* ---- landlord cutscene dialogue + the Guild's rent ledger ---- */
-.dlg-card { min-width: min(320px, 78vw); text-align: center; }
-.dlg-name {
-  font-size: 12px; font-weight: 900; letter-spacing: 1.2px;
-  text-transform: uppercase; color: var(--wood-dark);
-}
-.dlg-text { font-size: 17px; font-weight: 700; color: var(--ink); margin: 6px 2px 12px; }
-.rent-row.paid { opacity: 0.62; }
-.rent-row.paid .recap-val { color: var(--ink-soft); }
-.rent-row.due { border-color: #c0392b; }
-.rent-row.due .recap-val { color: #a11; }
-#debt-chip { pointer-events: auto; cursor: pointer; }
-/* a sheet button you can't afford reads as such (rent-pay, unseal-yes, …) */
+/* a sheet button you can't afford reads as such (unseal-yes, …) */
 .sheet-btns .btn:disabled { opacity: 0.5; cursor: default; }
 
 /* ---- Recettear "Capitalism, ho!" haggle panel ---- */
@@ -629,6 +541,47 @@ button { font-family: inherit; cursor: pointer; }
   color: var(--ink); min-height: 42px; text-align: center;
 }
 .hg-speech.pop { animation: chipbounce 0.3s; }
+
+/* ---- in-world dialogue (the Mayor & co.) ---- */
+#dialog {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+  display: flex; align-items: flex-end; gap: 0; padding: 0 14px 14px;
+  pointer-events: auto; cursor: pointer;
+}
+#dialog.hidden { display: none; }
+.dlg-portrait {
+  height: min(82vh, 640px); width: auto; margin-right: -8px;
+  /* sink the bust below the screen edge so only the top half shows */
+  margin-bottom: min(-20vh, -150px);
+  filter: drop-shadow(0 6px 14px rgba(30, 16, 4, 0.45));
+  animation: portraitin 0.28s ease-out; pointer-events: none;
+  align-self: flex-end;
+}
+.dlg-box {
+  flex: 1; margin-bottom: 10px;
+  background: linear-gradient(#fff8e9, #f2ddb4);
+  border: 3px solid var(--wood-light); border-radius: 16px;
+  box-shadow: 0 6px 0 var(--wood-dark), 0 8px 18px rgba(30, 16, 4, 0.35);
+  padding: 12px 16px 10px; animation: portraitin 0.24s ease-out;
+}
+.dlg-name {
+  font-size: 14px; font-weight: 900; letter-spacing: 0.4px; text-transform: uppercase;
+  color: var(--wood-dark); margin-bottom: 4px;
+}
+.dlg-text { font-size: 17px; font-weight: 700; color: var(--ink); line-height: 1.35; min-height: 24px; }
+.dlg-cta {
+  margin-top: 8px; font-size: 12px; font-weight: 800; color: var(--wood);
+  text-align: right; opacity: 0.85; animation: dlgnext 1.1s ease-in-out infinite;
+}
+/* nudge the "▸ next" hint toward the right edge, as if sliding off-screen */
+@keyframes dlgnext {
+  0%, 100% { transform: translateX(0); opacity: 0.85; }
+  60% { transform: translateX(10px); opacity: 1; }
+}
+@media (max-width: 720px) {
+  .dlg-portrait { height: min(56vh, 420px); margin-bottom: min(-14vh, -90px); }
+  .dlg-text { font-size: 15px; }
+}
 .hg-capitalism {
   font-size: 22px; font-weight: 900; color: var(--wood-dark);
   text-shadow: 0 2px 0 #fff6e0, 0 0 14px rgba(200, 135, 31, 0.35);
@@ -695,6 +648,70 @@ button { font-family: inherit; cursor: pointer; }
   animation: bagpop 0.24s cubic-bezier(0.2, 0.9, 0.3, 1.15);
 }
 @keyframes bagpop { from { transform: translateY(20px) scale(0.55); opacity: 0; } }
+
+/* split backpack: a narrow equipment panel on the left, the loot panel on the
+   right. The #sheet itself becomes a transparent flex row; each panel is its
+   own card that pops out of the bag button in the bottom-right corner. */
+#sheet.bag-sheet.bag-split {
+  left: calc(14px + env(safe-area-inset-left));
+  bottom: env(safe-area-inset-bottom);
+  width: auto;
+  display: flex; flex-direction: row; align-items: stretch;
+  justify-content: flex-end; gap: 10px;
+  overflow: visible;
+  background: none; border: none; box-shadow: none; padding: 0;
+  animation: none;
+}
+.bag-panel, .gear-panel {
+  display: flex; flex-direction: column; overflow: hidden;
+  max-height: calc(100dvh - 20px);
+  transform-origin: right bottom;
+  animation: bagpop 0.24s cubic-bezier(0.2, 0.9, 0.3, 1.15);
+}
+.bag-panel { flex: 1 1 auto; min-width: 0; max-width: 320px; }
+.gear-panel { flex: 0 0 auto; width: 124px; }
+.gear-panel-head {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 900; color: var(--ink);
+  text-transform: uppercase; letter-spacing: 0.4px;
+}
+.gear-panel-head .ic { width: 16px; height: 16px; }
+/* compact, single-column paper-doll tuned for the narrow side panel */
+.gear-panel .gear-doll {
+  flex: 1; min-height: 0; overflow-y: auto;
+  flex-direction: column; align-items: stretch; gap: 6px; margin-top: 10px;
+}
+.gear-panel .gear-row { flex-direction: column; gap: 6px; }
+.gear-panel .gear-cell { width: 100%; min-height: 0; padding: 7px 5px 6px; gap: 2px; }
+.gear-panel .gear-cell small { display: none; }
+.gear-panel .gear-cell-ic { width: 34px; height: 34px; }
+.gear-panel .gear-cell-ic .ic { width: 27px; height: 27px; }
+.gear-panel .gear-cell-ic.empty .ic { width: 20px; height: 20px; }
+.gear-panel .gear-cell-name { font-size: 10px; }
+
+/* pack-your-bag: the same split layout, but a centered dialog rather than a
+   corner popover. The equipment panel sits left of the supplies + delve panel. */
+#sheet.pack-split {
+  width: min(560px, calc(100vw - 20px));
+  display: flex; flex-direction: row; align-items: stretch;
+  justify-content: center; gap: 10px;
+  background: none; border: none; box-shadow: none; padding: 0;
+  overflow: visible;
+}
+.pack-panel {
+  flex: 1 1 auto; min-width: 0; max-width: 380px;
+  display: flex; flex-direction: column; overflow: hidden;
+  max-height: calc(100dvh - 20px);
+  animation: sheetup 0.22s;
+}
+.pack-panel .inv-grid {
+  flex: 1; min-height: 0; overflow-y: auto; margin-top: 8px;
+  grid-template-columns: repeat(4, 1fr);
+  align-content: start;
+}
+.pack-panel .inv-item { aspect-ratio: 1; justify-content: center; }
+.pack-panel .sheet-btns { margin-top: auto; padding-top: 12px; }
+
 .bag-head { display: flex; align-items: center; gap: 10px; }
 .bag-emoji {
   flex: none; width: 44px; height: 44px; font-size: 25px;
@@ -740,21 +757,22 @@ button { font-family: inherit; cursor: pointer; }
 }
 .inv-item small { font-size: 9px; line-height: 1.1; }
 .inv-item span { font-size: 10px; color: var(--gold); font-weight: 800; }
-.inv-item.shown { background: linear-gradient(#f6d3b6, #e6a97f); border-color: #a8552f; }
+.inv-item.shown { background: linear-gradient(#f6d3b6, #e6a97f); box-shadow: 0 0 0 2px #a8552f, inset 0 1px 0 #fff7e4; }
 .inv-item.shown span { color: #a8552f; }
-/* pack-a-bag sheet: selected supplies glow gold */
+/* pack-a-bag sheet: selected supplies glow gold (an outer ring so the tier
+   border underneath still reads) */
 .inv-item.sel {
-  border-color: var(--gold); background: linear-gradient(#fff3c9, #f2d98e);
+  background: linear-gradient(#fff3c9, #f2d98e);
   box-shadow: 0 0 0 2px var(--gold), inset 0 1px 0 #fff7e4;
 }
 .inv-item span .ic { width: 1em; height: 1em; vertical-align: middle; }
 .inv-item:active { transform: scale(0.94); }
 @media (pointer: fine) {
   .inv-item:hover {
-    transform: translateY(-2px); border-color: var(--gold);
+    transform: translateY(-2px);
     box-shadow: 0 5px 12px rgba(30, 16, 4, 0.3), inset 0 1px 0 #fff7e4;
   }
-  .bag-row:hover { border-color: var(--gold); }
+  .bag-row:hover { box-shadow: 0 0 0 2px var(--gold), inset 0 1px 0 #fff7e4; }
 }
 .empty { color: var(--ink-soft); grid-column: 1 / -1; text-align: center; padding: 10px; }
 
@@ -778,6 +796,90 @@ button { font-family: inherit; cursor: pointer; }
 .bag-act.drop { background: #d98c6c; }
 .bag-act:active { transform: scale(0.94); }
 .bag-act.ghost { background: transparent; color: var(--ink-soft); font-weight: 600; cursor: default; }
+
+/* pre-delve pack sheet: supplies subheader under the paper-doll */
+.pack-section {
+  margin-top: 14px; font-size: 12px; font-weight: 800; color: var(--ink-soft);
+  text-transform: uppercase; letter-spacing: 0.4px;
+  display: flex; align-items: center; gap: 5px;
+}
+.pack-section .ic { width: 15px; height: 15px; }
+/* the supplies grid shares the sheet's scroll room with the paper-doll above */
+.gear-sheet .inv-grid { flex: 1; min-height: 0; overflow-y: auto; margin-top: 8px; }
+
+/* ============================================================ gear / equipment */
+.gear-sheet { display: flex; flex-direction: column; max-height: min(80vh, 640px); }
+
+/* paper-doll: three body slots up top, two below, Minecraft-style */
+.gear-doll { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-top: 14px; }
+.gear-row { display: flex; gap: 10px; justify-content: center; }
+.gear-cell {
+  pointer-events: auto; cursor: pointer;
+  width: 96px; min-height: 108px;
+  background: linear-gradient(#fdf1d3, #ecd3a0); border: 2px solid var(--wood); border-radius: 14px;
+  padding: 9px 5px 7px; color: var(--ink);
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  box-shadow: inset 0 1px 0 #fff7e4; transition: transform 0.1s, box-shadow 0.1s, border-color 0.1s;
+}
+.gear-cell.filled { background: linear-gradient(#fff3c9, #f2d98e); box-shadow: 0 0 0 2px var(--gold), inset 0 1px 0 #fff7e4; }
+.gear-cell small { font-size: 9px; font-weight: 800; line-height: 1; text-transform: uppercase; letter-spacing: 0.4px; color: var(--ink-soft); }
+.gear-cell-name { font-size: 10.5px; font-weight: 800; line-height: 1.05; text-align: center; }
+.gear-cell-ic {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 46px; height: 46px; border-radius: 10px;
+  background: rgba(110, 69, 38, 0.12); box-shadow: inset 0 1px 3px rgba(60, 34, 12, 0.25);
+}
+.gear-cell-ic .ic { width: 38px; height: 38px; }
+.gear-cell-ic.empty { opacity: 0.5; }
+.gear-cell-ic.empty .ic { width: 26px; height: 26px; }
+.gear-cell:active { transform: scale(0.95); }
+.gear-cell.locked { opacity: 0.4; cursor: default; pointer-events: none; filter: grayscale(0.6); }
+.gear-cell.locked:active { transform: none; }
+
+.gear-summary {
+  margin-top: 12px; padding: 7px 10px; border-radius: 10px;
+  background: rgba(110, 69, 38, 0.14); color: var(--ink);
+  font-size: 12px; font-weight: 700; text-align: center;
+}
+.gear-summary .ic { width: 1em; height: 1em; vertical-align: -0.12em; }
+
+/* per-slot picker rows (styled like "Pack your bag") */
+.gear-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; margin-top: 12px; padding-right: 2px; }
+.gear-opt {
+  pointer-events: auto; cursor: pointer; width: 100%; text-align: left;
+  display: flex; align-items: center; gap: 10px;
+  background: linear-gradient(#fdf1d3, #ecd3a0); border: 2px solid var(--wood); border-radius: 12px; padding: 7px 10px;
+  box-shadow: inset 0 1px 0 #fff7e4; transition: transform 0.1s, border-color 0.1s;
+}
+.gear-opt.equipped { background: linear-gradient(#fff3c9, #f2d98e); box-shadow: 0 0 0 2px var(--gold), inset 0 1px 0 #fff7e4; }
+.gear-opt:active { transform: scale(0.98); }
+.gear-opt-ic { width: 34px; text-align: center; display: inline-flex; justify-content: center; }
+.gear-opt-ic .ic { width: 30px; height: 30px; }
+.gear-opt-txt { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.gear-opt-txt b { font-size: 13px; font-weight: 800; color: var(--ink); }
+.gear-opt-txt small { font-size: 10px; color: var(--ink-soft); font-weight: 600; line-height: 1.2; }
+.gear-opt-act {
+  flex-shrink: 0; border-radius: 10px; padding: 8px 12px;
+  font-size: 12px; font-weight: 800; color: #1c1230;
+  background: #8ec86a; display: inline-flex; align-items: center; gap: 3px;
+}
+.gear-opt-act .ic { width: 1em; height: 1em; }
+.gear-opt-act.off { background: transparent; color: #a8712f; }
+.gear-empty {
+  display: flex; align-items: center; gap: 12px; padding: 16px 14px; color: var(--ink-soft);
+  font-size: 13px; font-weight: 700; text-align: left;
+}
+.gear-empty .ic { width: 34px; height: 34px; opacity: 0.5; flex-shrink: 0; }
+.gear-empty small { font-weight: 600; opacity: 0.85; }
+@media (pointer: fine) { .gear-cell:hover, .gear-opt:hover { box-shadow: 0 0 0 2px var(--gold), inset 0 1px 0 #fff7e4; } }
+
+/* ---- loot rarity: colour every item cell's border by its tier. Placed after
+   the cell rules above so it wins the border-colour by source order; the gold
+   selection/equip highlights use box-shadow rings so they stack on top. ---- */
+.ti-1 { border-color: var(--tier1); }
+.ti-2 { border-color: var(--tier2); }
+.ti-3 { border-color: var(--tier3); }
+.ti-4 { border-color: var(--tier4); }
 
 /* ============================================================ fullscreen gate */
 #fs-gate {

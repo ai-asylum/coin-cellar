@@ -11,6 +11,11 @@
   --accent-d:  #5a34c9;
   --gold:      #ffd27a;
   --radius:    12px;
+  /* loot rarity tiers (1 Common → 4 Fabled) */
+  --tier1:     #9aa4b8;
+  --tier2:     #5cc466;
+  --tier3:     #5b9bf0;
+  --tier4:     #c079ef;
 }
 
 * {
@@ -242,6 +247,13 @@ body {
   transform: translateY(-2px);
 }
 
+/* loot-rarity edge on merchandise cards — an inset bar so hovering (which
+   recolours the border) never wipes the tier cue */
+.card--t1 { box-shadow: inset 4px 0 0 var(--tier1); }
+.card--t2 { box-shadow: inset 4px 0 0 var(--tier2); }
+.card--t3 { box-shadow: inset 4px 0 0 var(--tier3); }
+.card--t4 { box-shadow: inset 4px 0 0 var(--tier4); }
+
 .card-head {
   display: flex;
   align-items: center;
@@ -395,6 +407,90 @@ body {
   opacity: 0.7;
 }
 
+/* ---------- loot table ---------- */
+.loot-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: linear-gradient(180deg, var(--panel) 0%, var(--bg-2) 100%);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  overflow: hidden;
+  font-size: 13.5px;
+}
+.loot-table th,
+.loot-table td {
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--edge);
+}
+.loot-table thead th {
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-dim);
+  background: var(--panel-2);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.loot-row:hover { background: rgba(122, 77, 255, 0.08); }
+.loot-table tbody tr:last-child td { border-bottom: none; }
+
+/* rarity edge down the left of each row */
+.loot-row td:first-child { border-left: 4px solid transparent; }
+.loot-t1 td:first-child { border-left-color: var(--tier1); }
+.loot-t2 td:first-child { border-left-color: var(--tier2); }
+.loot-t3 td:first-child { border-left-color: var(--tier3); }
+.loot-t4 td:first-child { border-left-color: var(--tier4); }
+
+.loot-ic { width: 40px; }
+.loot-ic .ic { width: 30px; height: 30px; }
+.loot-name b { font-weight: 900; display: block; }
+.loot-tier {
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+}
+.loot-tier.tier1 { color: #cfe3ff; }
+.loot-tier.tier2 { color: #a6ffcf; }
+.loot-tier.tier3 { color: #d9b3ff; }
+.loot-tier.tier4 { color: var(--gold); }
+.loot-pct { font-weight: 900; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.loot-price {
+  color: var(--gold);
+  font-weight: 900;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.loot-where { display: flex; flex-wrap: wrap; gap: 6px; }
+.loot-src {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-dim);
+  background: var(--panel-2);
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+.loot-src b { color: var(--ink); font-weight: 900; font-variant-numeric: tabular-nums; }
+.loot-src--chest { border-color: #6b5a26; color: var(--gold); }
+.loot-src--chest b { color: var(--gold); }
+.loot-src--mob { border-color: #6b2a45; color: #ff9dc0; }
+.loot-src--mob b { color: #ff9dc0; }
+.loot-src--boss { border-color: #533a6b; color: #d9b3ff; }
+.loot-src--boss b { color: #d9b3ff; }
+.loot-src--none { opacity: 0.6; font-style: italic; }
+
 @media (max-width: 560px) {
   #admin-app { padding: 18px 14px 48px; }
+  .loot-table { font-size: 12px; }
+  .loot-table th, .loot-table td { padding: 8px 8px; }
 }

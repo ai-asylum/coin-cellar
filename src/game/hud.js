@@ -2,7 +2,7 @@
 // The HUD projects 3D anchors for floating damage numbers / emotes.
 import * as THREE from "three";
 import { portraitDataURL } from "../chargen/portrait.js";
-import { icon, itemIcon, ICONS } from "../core/icons.js";
+import { icon, itemIcon } from "../core/icons.js";
 import { viewport } from "../core/viewport.js";
 
 const _v = new THREE.Vector3();
@@ -15,7 +15,6 @@ export class HUD {
     root.innerHTML = `
       <div id="topbar">
         <div class="chip" id="gold-chip">${icon("coin")} <b id="gold-num">0</b></div>
-        <div class="chip" id="debt-chip">${icon("scroll")} –</div>
         <div class="chip-btns">
           <button class="icon-btn" id="coop-btn">${icon("people")}</button>
           <button class="icon-btn" id="mute-btn">${icon("soundOn")}</button>
@@ -26,7 +25,6 @@ export class HUD {
         <span class="bag-btn-ic">${icon("bag")}</span>
         <span class="bag-btn-key">B</span>
       </button>
-      ${this._clockMarkup()}
       <canvas id="minimap" class="hidden" aria-hidden="true"></canvas>
       <div id="banner" class="hidden"><div id="banner-main"></div><div id="banner-sub"></div></div>
       <div id="bossbar" class="hidden">
@@ -45,8 +43,10 @@ export class HUD {
       </div>
       <div id="interact-hint" class="hidden"></div>
       <div id="hearts" class="hidden"></div>
+      <div id="dialog" class="hidden"></div>
       <div id="portraits"></div>
       <div id="hurt-flash"></div>
+      <div id="sheet-backdrop" class="hidden"></div>
       <div id="sheet" class="hidden"></div>
       <div id="fs-gate" class="hidden">
         <div class="fs-gate-card">
@@ -58,18 +58,6 @@ export class HUD {
     this.root = root;
     this.goldNum = root.querySelector("#gold-num");
     this.goldChip = root.querySelector("#gold-chip");
-    this.clockEl = root.querySelector("#dayclock");
-    this.clockSky = root.querySelector("#clk-sky");
-    this.clockArc = root.querySelector("#clk-arc");
-    this.clockHand = root.querySelector("#clk-hand");
-    this.clockMarker = root.querySelector("#clk-marker");
-    this.clockDayNum = root.querySelector("#clk-daynum");
-    this.clockPhase = root.querySelector("#clk-phase");
-    this.clockGlyph = root.querySelector("#clk-marker-icon .clk-marker-glyph");
-    this._clockGlyphPhase = "day";
-    this._clockDay = 1;
-    this._clockPhaseName = "day";
-    this.debtChip = root.querySelector("#debt-chip");
     this.heartsEl = root.querySelector("#hearts");
     this.bannerEl = root.querySelector("#banner");
     this.bossbarEl = root.querySelector("#bossbar");
@@ -81,7 +69,11 @@ export class HUD {
     this.bossTelFillEl = root.querySelector("#bossbar-tel-fill");
     this._bossTelAtk = null;
     this.sheetEl = root.querySelector("#sheet");
+    this.backdropEl = root.querySelector("#sheet-backdrop");
+    this._onBackdrop = null;
+    this.backdropEl.addEventListener("click", () => this._onBackdrop?.());
     this.portraitsEl = root.querySelector("#portraits");
+    this.dialogEl = root.querySelector("#dialog");
     this.floatiesEl = root.querySelector("#floaties");
     this.hurtFlashEl = root.querySelector("#hurt-flash");
     this.toastWrap = root.querySelector("#toast-wrap");
@@ -108,91 +100,6 @@ export class HUD {
     }
     this._gold = g;
     this.goldNum.textContent = g;
-  }
-
-  // ------------------------------------------------------- Majora clock
-  _clockMarkup() {
-    // Semicircle dial (like Majora's Mask): the sun rises at the left horizon
-    // (dawn), peaks at the top (noon) and sets at the right (dusk). The progress
-    // half-ring has radius 53, so its arc length is π·53 ≈ 166.5.
-    const ticks = Array.from({ length: 9 }, (_, i) => {
-      const th = Math.PI - (i / 8) * Math.PI; // 180° (left) → 0° (right)
-      const major = i % 4 === 0;
-      const r0 = major ? 44 : 47, r1 = 51;
-      return `<line x1="${(70 + Math.cos(th) * r0).toFixed(2)}" y1="${(66 - Math.sin(th) * r0).toFixed(2)}" x2="${(70 + Math.cos(th) * r1).toFixed(2)}" y2="${(66 - Math.sin(th) * r1).toFixed(2)}" class="${major ? "clk-tick-major" : "clk-tick"}"/>`;
-    }).join("");
-    return `
-      <div id="dayclock" class="phase-day">
-        <svg viewBox="0 0 140 76" aria-hidden="true">
-          <defs>
-            <linearGradient id="clk-sky-grad" x1="0" y1="0" x2="0" y2="1">
-              <stop id="clk-sky" offset="0%" stop-color="#ffe9a8"/>
-              <stop offset="100%" stop-color="#e7a13c"/>
-            </linearGradient>
-          </defs>
-          <path class="clk-face" d="M 12 66 A 58 58 0 0 1 128 66 Z" fill="url(#clk-sky-grad)"/>
-          <g class="clk-ticks">${ticks}</g>
-          <path class="clk-track" d="M 17 66 A 53 53 0 0 1 123 66"/>
-          <path id="clk-arc" class="clk-arc" d="M 17 66 A 53 53 0 0 1 123 66"
-                stroke-dasharray="166.5" stroke-dashoffset="166.5"/>
-          <text id="clk-daynum" x="70" y="47" class="clk-daynum">1</text>
-          <text id="clk-phase" x="70" y="60" class="clk-daylabel">DAY</text>
-          <g id="clk-hand" transform="translate(17 66)">
-            <circle id="clk-marker" r="8" class="clk-marker"/>
-            <g id="clk-marker-icon"><g class="clk-marker-glyph" transform="scale(0.3) translate(-12 -12)">${ICONS.sun}</g></g>
-          </g>
-        </svg>
-      </div>`;
-  }
-
-  setDay(day, phase) {
-    this._clockDay = day;
-    this._clockPhaseName = phase;
-    if (this.clockDayNum) this.clockDayNum.textContent = day;
-    if (this.clockPhase) this.clockPhase.textContent = phase === "day" ? "DAY" : "NIGHT";
-    if (this.clockEl) {
-      this.clockEl.classList.toggle("phase-day", phase === "day");
-      this.clockEl.classList.toggle("phase-night", phase !== "day");
-    }
-    // Night has no countdown — park the moon at dusk with the arc filled.
-    if (phase !== "day") this.setDayProgress(1, "night");
-  }
-
-  /**
-   * Advance the Majora's-Mask dial. `frac` is how much of the day has elapsed
-   * (0 at dawn → 1 at dusk). During `night` we show the moon instead of the sun.
-   */
-  setDayProgress(frac, phase = "day") {
-    if (!this.clockArc) return;
-    frac = Math.max(0, Math.min(1, frac));
-    const L = 166.5; // arc length of the r=53 half-ring
-    this.clockArc.style.strokeDashoffset = (L * (1 - frac)).toFixed(2);
-    // Slide the sun/moon along the semicircle: 180° (dawn) → 0° (dusk).
-    const th = Math.PI - frac * Math.PI;
-    const x = 70 + Math.cos(th) * 53;
-    const y = 66 - Math.sin(th) * 53;
-    this.clockHand.setAttribute("transform", `translate(${x.toFixed(2)} ${y.toFixed(2)})`);
-    if (this.clockGlyph && phase !== this._clockGlyphPhase) {
-      this.clockGlyph.innerHTML = phase === "day" ? ICONS.sun : ICONS.moon;
-      this._clockGlyphPhase = phase;
-    }
-    // Warm daylight sky slowly cools toward sunset red as the day burns down.
-    if (this.clockSky && phase === "day") {
-      const t = frac;
-      const g = Math.round(233 - t * 90);
-      const b = Math.round(168 - t * 120);
-      this.clockSky.setAttribute("stop-color", `rgb(255,${Math.max(60, g)},${Math.max(40, b)})`);
-    }
-  }
-
-  setDebt(text, urgent = false) {
-    this.debtChip.innerHTML = `${icon("scroll")} ${text}`;
-    this.debtChip.classList.toggle("urgent", urgent);
-  }
-
-  // Rent only matters back at the shop — hide the debt chip while delving.
-  showDebt(visible) {
-    this.debtChip.classList.toggle("hidden", !visible);
   }
 
   setHearts(hp, max) {
@@ -315,6 +222,31 @@ export class HUD {
     setTimeout(() => el.remove(), 950);
   }
 
+  /** Brief "Bag is full!" nudge, popped by the bag button (or top-centre when
+   * the button's hidden) when loot can't be picked up. */
+  bagFull() {
+    const bag = this.root.querySelector("#bag-btn");
+    const el = document.createElement("div");
+    el.className = "bag-full-msg";
+    el.innerHTML = `${icon("bag")} Bag is full!`;
+    this.floatiesEl.appendChild(el);
+    const rect = bag && !bag.classList.contains("hidden") ? bag.getBoundingClientRect() : null;
+    if (rect) {
+      el.style.left = rect.left + rect.width / 2 + "px";
+      el.style.top = rect.bottom + 10 + "px";
+    } else {
+      el.style.left = "50%";
+      el.style.top = "20%";
+    }
+    // pop the bag button too so the eye goes there
+    if (bag && rect) {
+      bag.classList.remove("pop");
+      void bag.offsetWidth;
+      bag.classList.add("pop");
+    }
+    setTimeout(() => el.remove(), 1500);
+  }
+
   /** Re-trigger the gold chip's little bounce (e.g. as coins land). */
   bumpGold() {
     this.goldChip.classList.remove("bounce");
@@ -360,6 +292,48 @@ export class HUD {
         this.bumpGold();
       };
     }
+  }
+
+  /**
+   * The reverse of flyCoins: when the player spends, coins peel off the gold
+   * counter and fly out toward a 3D world point (whatever's being paid for),
+   * shrinking away as they land on it. `onLand(i)` ticks per coin so the caller
+   * can cascade a coin sound. Falls back to the screen centre when the target
+   * isn't on screen, so a spend always shows *something* leaving the wallet.
+   */
+  spendCoins(worldPos, count = 8, onLand = null) {
+    const rect = this.goldChip.getBoundingClientRect();
+    const start = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    const end = (worldPos && this._project(worldPos)) || { x: viewport.w / 2, y: viewport.h / 2 };
+    const n = Math.max(3, Math.min(Math.round(count), 16));
+    for (let i = 0; i < n; i++) {
+      const coin = document.createElement("div");
+      coin.className = "coin-fly";
+      coin.innerHTML = icon("coin");
+      const sx = start.x + (Math.random() - 0.5) * 22;
+      const sy = start.y + (Math.random() - 0.5) * 16;
+      coin.style.left = sx + "px";
+      coin.style.top = sy + "px";
+      this.floatiesEl.appendChild(coin);
+      const dx = end.x - sx;
+      const dy = end.y - sy;
+      const arc = 45 + Math.random() * 70;
+      const anim = coin.animate(
+        [
+          { transform: "translate(-50%,-50%) scale(0.45)", opacity: 0, offset: 0 },
+          { transform: `translate(calc(-50% + ${dx * 0.3}px), calc(-50% + ${dy * 0.3 - arc}px)) scale(1.15)`, opacity: 1, offset: 0.3 },
+          { transform: `translate(calc(-50% + ${dx * 0.68}px), calc(-50% + ${dy * 0.68 - arc * 0.5}px)) scale(1.0)`, opacity: 1, offset: 0.68 },
+          { transform: `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(0.4)`, opacity: 0, offset: 1 },
+        ],
+        { duration: 520 + Math.random() * 220, delay: i * 45, easing: "cubic-bezier(.45,.05,.55,1)", fill: "forwards" }
+      );
+      anim.onfinish = () => {
+        coin.remove();
+        onLand?.(i);
+      };
+    }
+    // the counter reacts as the coins leave it
+    this.bumpGold();
   }
 
   /**
@@ -429,6 +403,28 @@ export class HUD {
 
   hideGuide() {
     this.guideEl.classList.add("hidden");
+  }
+
+  /** In-world dialogue bar: a character bust on the left (so you can see who's
+   * talking, like the haggle panel) plus a speech box. Non-blocking — the scene
+   * stays visible behind it. Click/tap anywhere on the bar to advance. */
+  speak({ name, portrait, text, cta = "tap to continue", onAdvance } = {}) {
+    const el = this.dialogEl;
+    el.classList.remove("hidden");
+    el.innerHTML = `
+      ${portrait ? `<img class="dlg-portrait" src="${portrait}" alt="">` : ""}
+      <div class="dlg-box">
+        ${name ? `<div class="dlg-name">${name}</div>` : ""}
+        <div class="dlg-text">${text}</div>
+        <div class="dlg-cta">${cta}</div>
+      </div>`;
+    el.onclick = () => onAdvance?.();
+  }
+
+  hideSpeak() {
+    this.dialogEl.classList.add("hidden");
+    this.dialogEl.onclick = null;
+    this.dialogEl.innerHTML = "";
   }
 
   /** Control hint pinned under the context-action focus: a keycap (desktop)
@@ -653,33 +649,19 @@ export class HUD {
   }
 
   // ------------------------------------------------------------- sheets
-  showSheet(html, cls = "") {
+  // `opts.onBackdrop` (optional) makes the sheet dismissible: a full-screen
+  // backdrop is shown behind it and clicking outside the panel fires the cb.
+  showSheet(html, cls = "", opts = {}) {
     // clear any per-sheet anchoring left over from a previous popover so the
     // default bottom-centre layout applies unless something re-anchors it.
     this._clearSheetAnchor();
     this.sheetEl.className = cls;
     this.sheetEl.innerHTML = html;
+    this._onBackdrop = opts.onBackdrop || null;
+    this.backdropEl.classList.toggle("hidden", !this._onBackdrop);
     this._applyBagBtn();
     this._initSheetNav();
     return this.sheetEl;
-  }
-
-  // A single cutscene dialogue beat: one flanking character portrait (reusing
-  // the haggle portrait styling) plus a spoken line, advanced with one button.
-  showDialogue({ name, variant, side = "right", text, btn = "Next", onNext }) {
-    const img = portraitDataURL(variant, side);
-    this.portraitsEl.innerHTML = img
-      ? `<img class="hg-portrait ${side === "right" ? "hg-cust" : "hg-me"}" src="${img}" alt="">`
-      : "";
-    const el = this.showSheet(`
-      <div class="dlg-name">${name}</div>
-      <div class="dlg-text">${text}</div>
-      <div class="sheet-btns"><button class="btn deal" id="dlg-next">${btn}</button></div>
-    `, "sheet-card dlg-card");
-    // clear the touch controls off-screen while the dialogue holds the stage
-    this.root.classList.add("dlg-open");
-    el.querySelector("#dlg-next").onclick = () => onNext?.();
-    return el;
   }
 
   // ---------------------------------------------------------- keyboard nav
@@ -785,7 +767,8 @@ export class HUD {
 
   hideSheet() {
     this._clearSheetAnchor();
-    this.root.classList.remove("dlg-open"); // restore any hidden touch controls
+    this._onBackdrop = null;
+    this.backdropEl.classList.add("hidden");
     this.sheetEl.className = "hidden";
     this.sheetEl.innerHTML = "";
     this.portraitsEl.innerHTML = "";
@@ -825,7 +808,7 @@ export class HUD {
       <div class="hg-eyecatch">
         <div class="hg-eyecatch-label">${buying ? "They're Selling" : "Eyecatch Item"}</div>
         <div class="hg-eyecatch-name">${cfg.itemName}</div>
-        <div class="hg-frame"><span class="big-emoji">${itemIcon(cfg.icon)}</span></div>
+        <div class="hg-frame ti-${cfg.tier ?? 1}"><span class="big-emoji">${itemIcon(cfg.icon)}</span></div>
         <div class="hg-base">Base Price ${cfg.base}</div>
         <div class="mood" id="hg-mood">${icon("faceHappy")}</div>
       </div>

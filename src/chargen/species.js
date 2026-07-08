@@ -25,7 +25,7 @@ class Rig {
   }
 }
 
-function hsl(h, s, l) {
+export function hsl(h, s, l) {
   // small hand-rolled hsl->rgb so specs stay plain arrays
   const a = s * Math.min(l, 1 - l);
   const f = (n) => {
