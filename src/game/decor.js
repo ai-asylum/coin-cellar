@@ -159,15 +159,30 @@ export function populateStreet(group, r, { W, backZ, streetHalfX }) {
 }
 
 // Burst colour for each destructible prop, keyed by catalogue category. Stones
-// are absent on purpose — rocks don't shatter into a puff, they just sit there.
+// shatter into a puff of grey rock-dust now that rocks are breakable (they cough
+// up crystals — see DECOR_LOOT).
 export const DECOR_BURST = {
   trees: 0x5aa84f,
   smallTrees: 0x5aa84f,
   bushes: 0x5fae54,
   flowers: 0x9bd77a,
   mushrooms: 0xd98ab8,
+  stones: 0xa9a2b4,
   dead: 0x8a6a45,
   bones: 0xe8e0c8,
+};
+
+// What each destructible category coughs up when smashed. `chance` is the odds a
+// single smash yields anything at all; `items` is a flat pool the drop is picked
+// from (repeat an id to weight it). This is where moon herb and wild mushrooms
+// live now — foraged from the scenery rather than looted off monsters/chests —
+// and where the rocks pay out their crystals. Categories left out (bones, and
+// the street-only trees/bushes/flowers) smash purely for show. Rolled
+// host-side, so the item ids just need to exist in ITEMS.
+export const DECOR_LOOT = {
+  mushrooms: { chance: 0.6, items: ["mushroom", "mushroom", "caveshroom", "herb"] },
+  dead: { chance: 0.5, items: ["herb", "herb", "mushroom"] },
+  stones: { chance: 0.55, items: ["crystal"] },
 };
 
 // --------------------------------------------------------- dungeon floors
@@ -175,8 +190,9 @@ export const DECOR_BURST = {
 // tucked into room corners, the odd gnarled dead tree against a wall, and a
 // stray bone pile. Seeded off the floor's rng so co-op peers see the same
 // layout, and dimmed to a cool tint so it sits in the cellar's moody light.
-// Returns the list of destructible props (everything but the stones) so the
-// dungeon can let the player smash them into a particle puff.
+// Returns the list of destructible props (every category with a DECOR_BURST
+// colour, which now includes stones) so the dungeon can let the player smash
+// them into a particle puff — and, for some, forage a drop (see DECOR_LOOT).
 const CAVE_TINT = 0xc7c2d4;
 // default mix, matching the classic cellar look; a hole theme can override
 // both the category weights and the tint via opts.theme
@@ -211,8 +227,9 @@ export function scatterDungeonDecor(group, r, rooms, cellPos, opts = {}) {
     const color = DECOR_BURST[cat];
     if (color != null) {
       // hit radius roughly follows the prop's footprint, clamped so tiny
-      // flowers are still swingable and big dead trees aren't a huge target
-      destructibles.push({ group: s, x: wx, z: wz, height, color, radius: clampR(height * 0.4) });
+      // flowers are still swingable and big dead trees aren't a huge target.
+      // `cat` rides along so combat can roll the right drop (see DECOR_LOOT).
+      destructibles.push({ group: s, cat, x: wx, z: wz, height, color, radius: clampR(height * 0.4) });
     }
     return s;
   };

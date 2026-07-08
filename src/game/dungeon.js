@@ -26,7 +26,7 @@ export class Dungeon {
     this.enemies = [];
     this.drops = [];
     this.chests = [];
-    this.decor = []; // destructible billboard props (smashable, no loot)
+    this.decor = []; // destructible billboard props (smashable; some forage a drop)
     this.shafts = []; // god-ray light shafts (animated each frame)
     this.colliders = [];
     this.projectiles = new Projectiles(game.engine.scene);
@@ -266,10 +266,12 @@ export class Dungeon {
     // into the rooms (seeded off the same rng so co-op peers match). Skips the
     // entrance and stairs cells so nothing clutters the arrival/exit spots.
     // group-local props; store their world position so combat can smash them
+    // stable `id` (seeded layout ⇒ same index on every peer) lets a guest tell
+    // the host which prop it smashed so loot is rolled once, host-side
     this.decor = scatterDungeonDecor(this.group, r, rooms, cellPos, {
       skip: [this.entranceCell, this.stairsCell],
       theme: theme.decor,
-    }).map((d) => ({ ...d, wx: d.x + DUNGEON_ORIGIN.x, wz: d.z + DUNGEON_ORIGIN.z }));
+    }).map((d, i) => ({ ...d, id: i, wx: d.x + DUNGEON_ORIGIN.x, wz: d.z + DUNGEON_ORIGIN.z }));
 
     // --- god-ray shafts: light leaking through cracks in the ceiling above.
     // Cool arcane glow over the entrance portal, warm dusk over the stairs,

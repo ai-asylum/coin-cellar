@@ -21,7 +21,7 @@ export const ENEMY_KINDS = {
     },
     hp: 2, dmg: 1, speed: 2.9, aggro: 7, gold: [3, 8],
     behavior: "swarm", windup: 0.28, reach: 1.05, glow: [0.6, 0.15, 0.15],
-    loot: ["egg", "mushroom"],
+    loot: ["egg", "caveshroom"],
   },
   // slow but telegraphs a leaping lunge that closes distance fast
   slime: {
@@ -42,7 +42,7 @@ export const ENEMY_KINDS = {
     make: (seed, tier) => wispSpec({ key: `e_wi${tier}_${seed % 4}`, scale: 0.6, hue: (0.55 + (seed % 4) * 0.11) % 1 }),
     hp: 3, dmg: 1, speed: 3.2, aggro: 9, gold: [6, 12],
     behavior: "caster", windup: 0.55, band: [4.5, 7.5], projSpeed: 3.8, projColor: 0xb98cff, glow: [0.4, 0.25, 0.7],
-    loot: ["herb"],
+    loot: ["lantern"],
   },
   // hooded archer: kites at range, telegraphs then flooses a fast straight bolt
   archer: {
@@ -88,7 +88,7 @@ export const ENEMY_KINDS = {
     make: (seed) => wispSpec({ key: `e_an_${seed % 4}`, scale: 0.68, hue: 0.6 }),
     hp: 4, dmg: 1, speed: 2.6, aggro: 10, gold: [10, 20],
     behavior: "geyser", windup: 0.85, band: [4, 7], reach: 1.8, glow: [0.1, 0.5, 0.9],
-    loot: ["lantern", "herb"],
+    loot: ["lantern", "potion"],
   },
 
   // ---- Bone Hollow natives (floors 7–9): the ossuary stirs ----
@@ -104,7 +104,7 @@ export const ENEMY_KINDS = {
     make: (seed) => wispSpec({ key: `e_gw_${seed % 4}`, scale: 0.64, hue: 0.13 }),
     hp: 5, dmg: 1, speed: 3.0, aggro: 10, gold: [10, 20],
     behavior: "caster", windup: 0.5, band: [4.5, 8], projSpeed: 5.2, projColor: 0xffe9a8, glow: [0.85, 0.8, 0.4],
-    loot: ["bell", "herb"],
+    loot: ["bell", "caveshroom"],
   },
   // bleached ossuary sentinel: telegraphs a lane on the floor, then hurls
   // itself down it — step out of the lane and it barrels past (behavior "charger")
@@ -127,7 +127,7 @@ export const ENEMY_KINDS = {
     make: (seed) => slimeSpec({ key: `e_sp_${seed % 5}`, scale: 0.52, hue: 0.8 }),
     hp: 2, dmg: 2, speed: 3.3, aggro: 10, gold: [4, 9],
     behavior: "bomber", windup: 0.6, reach: 1.9, glow: [0.75, 0.3, 0.9],
-    loot: ["mushroom", "caveshroom"],
+    loot: ["caveshroom"],
   },
   // slippery marsh-light: marks a ripple at your flank, blinks onto it and
   // fires the instant it lands (behavior "blinker")
@@ -135,7 +135,7 @@ export const ENEMY_KINDS = {
     make: (seed) => wispSpec({ key: `e_gc_${seed % 4}`, scale: 0.7, hue: 0.75 }),
     hp: 5, dmg: 1, speed: 3.0, aggro: 11, gold: [12, 24],
     behavior: "blinker", windup: 0.6, band: [4, 8], projSpeed: 5.5, projColor: 0xd48cff, glow: [0.6, 0.25, 0.85],
-    loot: ["gem", "herb"],
+    loot: ["gem", "potion"],
   },
   // moss-grown hulk: the drain's answer to the brute, wider slam, more meat
   mossbrute: {
@@ -244,20 +244,20 @@ export function bossDefFor(hole) {
 // back the rest of the rolls so every hole's haul reads distinctly. Index
 // matches Sewer.holes.
 export const DUNGEON_LOOT = [
-  { // Rat Warren — forage and scraps
-    common: ["mushroom", "meat", "bread", "caveshroom", "jelly", "egg"],
+  { // Rat Warren — forage and scraps (herbs/shrooms come from smashing decor now)
+    common: ["meat", "bread", "caveshroom", "crystal", "jelly", "egg"],
     rare: ["wsword", "ring", "fang"],
   },
   { // Flooded Deep — what washes down the drain
-    common: ["jelly", "herb", "egg", "potion"],
+    common: ["jelly", "crystal", "egg", "potion"],
     rare: ["lantern", "feather", "gem"],
   },
   { // Bone Hollow — grave goods
-    common: ["fang", "bomb", "key", "ring"],
+    common: ["fang", "bomb", "key", "ring", "crystal"],
     rare: ["bell", "ssword", "crown"],
   },
   { // Gloom Drain — marsh treasures
-    common: ["herb", "potion", "gem", "feather"],
+    common: ["potion", "crystal", "gem", "feather"],
     rare: ["star", "hourglass", "crown"],
   },
 ];

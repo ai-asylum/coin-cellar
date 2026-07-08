@@ -6,7 +6,7 @@ import * as THREE from "three";
 import { makeBlobShadow } from "../core/toon.js";
 import { makeLightShaft } from "../core/godrays.js";
 import { EQUIP_DROPS, itemSprite } from "./items.js";
-import { disposeDecor } from "./decor.js";
+import { disposeDecor, DECOR_LOOT } from "./decor.js";
 import { rng, pick } from "../core/engine.js";
 import { DUNGEON_ORIGIN, dungeonIndexFor, DUNGEON_LOOT, FLOORS_PER_DUNGEON } from "./dungeon-data.js";
 
@@ -136,17 +136,20 @@ export const combatMethods = {
       hitAny = true;
       game._openChest(chest);
     }
-    // shatter any destructible scenery in the path — a purely cosmetic puff of
-    // leaves/dust/bone, no loot, and rocks are spared
+    // shatter any destructible scenery in the path — a puff of leaves/dust/bone
+    // that can also forage a drop (herbs, mushrooms, rock crystals)
     if (this._smashDecor(pos, reach)) hitAny = true;
     return hitAny;
   },
 
-  // Smash every destructible prop caught within `reach` of `pos`. Cosmetic only:
-  // bursts particles, plays a crunch, drops nothing. Runs client-side for
-  // everyone (the layout is seeded, so peers agree).
+  // Smash every destructible prop caught within `reach` of `pos`. The burst
+  // (particles + crunch) is cosmetic and runs client-side for everyone (the
+  // layout is seeded, so peers agree). Some props also forage a drop: the host
+  // rolls and spawns it; a guest instead pings the host by the prop's stable id
+  // so the loot is rolled exactly once (see game-net dSmash).
   _smashDecor(pos, reach) {
     if (!this.decor.length) return false;
+    const isGuest = this.game.net.isGuest;
     let hit = false;
     for (let i = this.decor.length - 1; i >= 0; i--) {
       const d = this.decor[i];
@@ -155,9 +158,32 @@ export const combatMethods = {
       if (Math.hypot(dx, dz) > reach + d.radius) continue;
       this.decor.splice(i, 1);
       this._burstDecor(d);
+      if (isGuest) this.game.net.send({ t: "dSmash", id: d.id });
+      else this._dropDecorLoot(d);
       hit = true;
     }
     return hit;
+  },
+
+  // Host-side: a guest smashed a prop — burst its twin here (so it can't be
+  // smashed twice) and roll its drop once. No-op if we already smashed it.
+  smashDecorById(id) {
+    const i = this.decor.findIndex((d) => d.id === id);
+    if (i < 0) return;
+    const d = this.decor[i];
+    this.decor.splice(i, 1);
+    this._burstDecor(d);
+    this._dropDecorLoot(d);
+  },
+
+  // Roll a prop's forage drop from DECOR_LOOT and spawn it where it fell. Seeded
+  // off the prop's stable id so a given prop always yields the same haul.
+  _dropDecorLoot(d) {
+    const table = DECOR_LOOT[d.cat];
+    if (!table) return;
+    const r = rng(this.seed + d.id * 131 + 7);
+    if (r() > table.chance) return;
+    this.spawnDrop(pick(r, table.items), d.wx, d.wz);
   },
 
   // Pop one prop: a two-tone particle spray (its own colour plus a paler mote)
