@@ -90,24 +90,26 @@ export const combatMethods = {
     this.projectiles.remove(proj);
   },
 
-  /** Player attack hits: arc in front of attacker. Returns whether anything was hit. */
-  meleeHit(attacker, dmg, game, opts = {}) {
-    const { range = 1.75, arc = 0.35, crit = false, finisher = false, knock = 1 } = opts;
+  /** The dash's sweep, resolved each frame the dash is live. Contact is
+   * body-to-body (the dash barrels straight through, so there's no frontal arc):
+   * every foe within reach takes the hit — once per dash, deduped via
+   * `opts.hitIds` — and any chest or destructible prop in the path is cracked /
+   * smashed too. Host applies damage; a guest sends the hit and juices locally.
+   * Returns whether anything was struck. */
+  dashHit(attacker, dmg, game, opts = {}) {
+    const { crit = false, knock = 1.4, hitIds = null } = opts;
     const pos = attacker.position;
-    const fwdX = Math.sin(attacker.heading);
-    const fwdZ = Math.cos(attacker.heading);
+    const reach = attacker.radius + 0.5;
     let hitAny = false;
     for (const e of this.enemies) {
       if (e.deadT >= 0 || e.hitCd > 0) continue;
+      if (hitIds && hitIds.has(e.id)) continue;
       const c = e.creature;
       const dx = c.position.x - pos.x;
       const dz = c.position.z - pos.z;
       const dist = Math.hypot(dx, dz);
-      // reach counts both bodies' girth, so a hit lands when the blade would
-      // reasonably reach the foe — not only when centres nearly overlap
-      if (dist > range + c.radius + attacker.radius) continue;
-      const dot = (dx * fwdX + dz * fwdZ) / (dist || 1);
-      if (dot < arc && dist > 1.0) continue;
+      if (dist > reach + c.radius) continue;
+      hitIds && hitIds.add(e.id);
       hitAny = true;
       const nx = dx / (dist || 1);
       const nz = dz / (dist || 1);
@@ -118,42 +120,39 @@ export const combatMethods = {
         game.engine.hitStop(0.05);
         game.net.send({ t: "hit", id: e.id, dmg, kx: nx, kz: nz });
       } else {
-        this.damageEnemy(e, dmg, nx, nz, { crit, finisher, knock });
+        this.damageEnemy(e, dmg, nx, nz, { crit, knock });
       }
     }
-    // the same swing bursts open any treasure chest it sweeps through — there's
-    // no dedicated "open" button any more, you crack them with the blade
+    // burst open any treasure chest the dash barrels through — there's no
+    // dedicated "open" button any more, you crack them with the dash
     for (const chest of this.chests) {
       if (chest.opened) continue;
+      const key = "chest:" + chest.id;
+      if (hitIds && hitIds.has(key)) continue;
       const dx = chest.mesh.position.x + DUNGEON_ORIGIN.x - pos.x;
       const dz = chest.mesh.position.z + DUNGEON_ORIGIN.z - pos.z;
-      const dist = Math.hypot(dx, dz);
-      if (dist > range + attacker.radius + 0.5) continue;
-      const dot = (dx * fwdX + dz * fwdZ) / (dist || 1);
-      if (dot < arc && dist > 1.0) continue;
+      if (Math.hypot(dx, dz) > reach + 0.5) continue;
+      hitIds && hitIds.add(key);
       hitAny = true;
       game._openChest(chest);
     }
-    // the same swing shatters any destructible scenery it sweeps through — a
-    // purely cosmetic puff of leaves/dust/bone, no loot, and rocks are spared
-    if (this._smashDecor(pos, fwdX, fwdZ, range, arc)) hitAny = true;
+    // shatter any destructible scenery in the path — a purely cosmetic puff of
+    // leaves/dust/bone, no loot, and rocks are spared
+    if (this._smashDecor(pos, reach)) hitAny = true;
     return hitAny;
   },
 
-  // Smash every destructible prop caught in the swing's reach + frontal arc.
-  // Cosmetic only: bursts particles, plays a crunch, drops nothing. Runs
-  // client-side for everyone (the layout is seeded, so peers agree).
-  _smashDecor(pos, fwdX, fwdZ, range, arc) {
+  // Smash every destructible prop caught within `reach` of `pos`. Cosmetic only:
+  // bursts particles, plays a crunch, drops nothing. Runs client-side for
+  // everyone (the layout is seeded, so peers agree).
+  _smashDecor(pos, reach) {
     if (!this.decor.length) return false;
     let hit = false;
     for (let i = this.decor.length - 1; i >= 0; i--) {
       const d = this.decor[i];
       const dx = d.wx - pos.x;
       const dz = d.wz - pos.z;
-      const dist = Math.hypot(dx, dz);
-      if (dist > range + d.radius) continue;
-      const dot = (dx * fwdX + dz * fwdZ) / (dist || 1);
-      if (dot < arc && dist > 1.0) continue;
+      if (Math.hypot(dx, dz) > reach + d.radius) continue;
       this.decor.splice(i, 1);
       this._burstDecor(d);
       hit = true;

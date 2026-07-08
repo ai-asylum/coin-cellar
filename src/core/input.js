@@ -1,10 +1,12 @@
-// Unified input: WASD / arrows to move (facing follows movement) + click to
-// attack on desktop; dynamic virtual joystick + context action button on touch.
-// The game reads:
+// Unified input: WASD / arrows to move (facing follows movement); dynamic
+// virtual joystick + context action button on touch. Combat is dash-only, so
+// the action button is a pure context / interact button — the dash (dodge) is
+// the attack. The game reads:
 //   input.move        THREE.Vector2 (len <= 1)
-//   input.actionEdge  true for the frame the action was pressed
+//   input.actionEdge  true for the frame the action/context press fired
+//   input.dodgeEdge   true for the frame a dash was requested
 //   input.onKey       optional (code) => void callback for keyboard shortcuts
-//   input.setActionLabel("swords") to relabel the context button (icon name)
+//   input.setActionLabel(name) to label/show the context button (or null hides)
 import * as THREE from "three";
 import { icon } from "./icons.js";
 import { viewport } from "./viewport.js";
@@ -31,7 +33,7 @@ export class Input {
         this._actionQueued = true;
         this.actionHeld = true;
       }
-      // dodge / roll: Shift, K, or L
+      // dash attack: Shift, K, or L
       if (e.code === "ShiftLeft" || e.code === "ShiftRight" || e.code === "KeyK" || e.code === "KeyL") {
         this._dodgeQueued = true;
       }
@@ -60,11 +62,13 @@ export class Input {
     this._joyOrigin = { x: 0, y: 0 };
     this._joyVec = { x: 0, y: 0 };
 
-    // --- action button (labelled by icon name; see core/icons.js)
+    // --- context / interact button (labelled by icon name; see core/icons.js).
+    // Combat is dash-only, so this never triggers an attack — it fires the
+    // current context action (shop deals, portals, stairs) and hides when idle.
     this.actionBtn = document.createElement("button");
     this.actionBtn.id = "action-btn";
-    this._actionLabel = "swords";
-    this.actionBtn.innerHTML = icon("swords");
+    this._actionLabel = null;
+    this.actionBtn.style.display = "none";
     hudEl.appendChild(this.actionBtn);
     const press = (e) => {
       e.preventDefault();
@@ -77,7 +81,7 @@ export class Input {
     this.actionBtn.addEventListener("mousedown", press);
     this.actionBtn.addEventListener("mouseup", release);
 
-    // --- dodge button (touch): a quick roll with i-frames
+    // --- dash button (touch): the attack — an auto-aiming lunge with i-frames
     this.dodgeBtn = document.createElement("button");
     this.dodgeBtn.id = "dodge-btn";
     this.dodgeBtn.innerHTML = icon("walk");
@@ -110,8 +114,10 @@ export class Input {
     area.addEventListener("touchend", (e) => this._touchEnd(e));
     area.addEventListener("touchcancel", (e) => this._touchEnd(e));
 
-    // --- click-to-attack (desktop). The HUD sits above the canvas with
-    // pointer-events:none, so clicks on buttons never reach here.
+    // --- left click = context action (desktop): advance dialogue, serve at the
+    // counter, fire an interact. Combat is dash-only, so it no longer attacks.
+    // The HUD sits above the canvas with pointer-events:none, so clicks on
+    // buttons never reach here.
     area.addEventListener("mousedown", (e) => {
       if (e.button !== 0) return; // left click only
       this._actionQueued = true;
@@ -120,7 +126,7 @@ export class Input {
     area.addEventListener("mouseup", (e) => {
       if (e.button === 0) this.actionHeld = false;
     });
-    // right mouse button = dodge / roll
+    // right mouse button = dash (the attack)
     area.addEventListener("mousedown", (e) => {
       if (e.button === 2) this._dodgeQueued = true;
     });
@@ -132,12 +138,19 @@ export class Input {
     }
   }
 
+  // Label the context / interact button with an icon name, or pass a falsy name
+  // to hide it (combat is dash-only now, so there's no "attack" label — the
+  // button only appears for a real context action). Touch-only: never forces it
+  // visible on desktop, where CSS keeps it hidden.
   setActionLabel(name, show = true) {
+    const on = !!name;
+    if (this.isTouch) this.actionBtn.style.display = on ? "" : "none";
+    if (!on) { this._actionLabel = null; return; }
     if (this._actionLabel !== name) {
       this._actionLabel = name;
       this.actionBtn.innerHTML = icon(name);
     }
-    this.actionBtn.classList.toggle("pulse", show && name !== "swords");
+    this.actionBtn.classList.toggle("pulse", show);
   }
 
   // Show/hide the touch dodge/roll button. Rolling only exists in the dungeon,

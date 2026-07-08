@@ -489,7 +489,7 @@ export const uiMethods = {
         <button data-a="tut:mayor">${icon("crown")} 6 · Mayor</button>
         <button data-a="tut:restock">${icon("hole")} 7 · Restock</button>
       </div>
-      <div class="admin-hints">keys: <b>WASD</b> move · <b>click/Space</b> attack · <b>E</b> interact · <b>B</b> bag · <b>C</b> friends · <b>M</b> mute</div>
+      <div class="admin-hints">keys: <b>WASD</b> move · <b>Shift/RMB</b> dash-attack · <b>E/Space</b> interact · <b>B</b> bag · <b>C</b> friends · <b>M</b> mute</div>
     `;
     this.hud.root.appendChild(el);
     this.adminEl = el;

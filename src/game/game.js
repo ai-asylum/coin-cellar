@@ -63,24 +63,22 @@ export class Game {
     // whenever the loadout changes.
     this.equipment = starterEquipment();
     this.stats = aggregateStats(this.equipment);
-    this._rangedCd = 0; // cadence gate for bow / staff shots
     this.combo = 0;
     this.gameOver = false; // kept as a universal guard; nothing sets it any more
     this.playerArea = "shop";
     this._invulnT = 0;
-    this._pendingHit = -1;
-    this._pendingHitOpts = null;
-    // melee combo + crits
-    this._comboStep = 0;
-    this._comboT = 0;
+    // crit roll shared by the dash strike (see game-combat)
     this._critChance = 0.18;
-    // dodge roll
+    // dash — the sole attack now: a lunge that damages what it sweeps through
     this._dodgeCd = 0;
     this._dashT = -1;
     this._dashDur = 0.24;
     this._dashSpeed = 13;
     this._dashDX = 0;
     this._dashDZ = 0;
+    this._dashHitIds = null; // foes / chests struck by the current dash (dedupe)
+    this._dashDmg = 0;
+    this._dashCrit = false;
     this._respawnT = -1;
     this._pickupSuppressT = 0;
     this._useFx = []; // in-flight "used an item" flourishes over the player's head
@@ -283,8 +281,6 @@ export class Game {
     }
     this._invulnT -= dt;
     this._dodgeCd -= dt;
-    if (this._rangedCd > 0) this._rangedCd -= dt;
-    if (this._comboT > 0) this._comboT -= dt;
     c.mesh.visible = this._invulnT < 0 || Math.sin(elapsed * 30) > -0.3;
 
     // movement
@@ -307,12 +303,14 @@ export class Game {
     if (this.input.dodgeEdge && !sheetBlocked && (this.playerArea === "dungeon" || this.playerArea === "sewer")) this._dodge();
 
     if (this._dashT >= 0) {
-      // committed roll: ease-out burst along the dash direction
+      // committed dash: ease-out lunge along the dash direction, damaging every
+      // foe / chest / prop it sweeps through (resolved per frame in _dashStrike)
       this._dashT += dt;
       const k = Math.max(0, 1 - this._dashT / this._dashDur);
       const sp = this._dashSpeed * (0.35 + 0.65 * k);
       c.position.x += this._dashDX * sp * dt;
       c.position.z += this._dashDZ * sp * dt;
+      this._dashStrike();
       if (this._dashT >= this._dashDur) this._dashT = -1;
     } else if (!sheetBlocked && (mv.x || mv.y)) {
       const speed = 3.7 * (this.stats.speedMul || 1); // boots / heavy-armour tweak
@@ -320,14 +318,10 @@ export class Game {
       c.position.z += mv.y * speed * dt;
     }
 
-    // facing follows the direction of movement
-    const swinging = c.animator.attackT >= 0 && c.animator.attackT < 0.45;
+    // facing follows the direction of travel — the committed dash direction
+    // while lunging, otherwise the movement input
     if (this._dashT >= 0) {
-      // keep the roll facing its travel direction
       c.heading = Math.atan2(this._dashDX, this._dashDZ);
-    } else if (swinging) {
-      // hold the committed swing direction (set by _attack's aim assist) until
-      // the blow lands, so the hit connects where the swoosh points
     } else if (!sheetBlocked && (mv.x || mv.y)) {
       c.heading = Math.atan2(mv.x, mv.y);
     }
@@ -342,15 +336,6 @@ export class Game {
       c.position.z = clamp(c.position.z, b.minZ, b.maxZ);
     }
 
-    // pending sword hit lands mid-swing (damage / crit / finisher set by _attack)
-    if (this._pendingHit >= 0) {
-      this._pendingHit -= dt;
-      if (this._pendingHit < 0 && this.playerArea === "dungeon") {
-        const o = this._pendingHitOpts || { dmg: 2 };
-        this.dungeon.meleeHit(c, o.dmg, this, o);
-      }
-    }
-
     // auto-pickup drops (world coords)
     if (this.playerArea === "dungeon" && performance.now() >= (this._pickupSuppressT || 0)) {
       for (const drop of [...this.dungeon.drops]) {
@@ -361,20 +346,19 @@ export class Game {
       }
     }
 
-    // context action — and, crucially, keep the swing and the "use this"
-    // press on separate inputs so the two never clash. In the cellar the main
-    // button always swings; portals / stairs / chests answer to E (a dedicated
-    // touch button). Up in the shop there's no combat, so the button just acts.
+    // context action. Combat is dash-only now, so the action button is purely a
+    // context / interact button: it appears for portals / stairs / gates / chests
+    // and the shop's deals, and hides when there's nothing to do. `act.label`
+    // is null when the floor's clear — there's no "swing" fallback any more.
     const act = this._contextAction();
     const inDungeon = this.playerArea === "dungeon";
-    const hasInteract = act.label !== "swords";
-    // On touch there's no separate interact button in the dungeon: the main
-    // action button doubles as the interact (stairs / gate / portal) when you're
-    // standing on one — so changing floors is the same tap as hitting — and
-    // swings otherwise. Desktop still fires those off E.
+    const hasInteract = !!act.label;
+    // On touch the single action button doubles as the dungeon interact (stairs
+    // / gate / portal) when you're standing on one; desktop fires those off E.
     const foldInteract = inDungeon && hasInteract && this.input.isTouch;
     if (inDungeon) {
-      this.input.setActionLabel(foldInteract ? act.label : "swords", foldInteract);
+      // no swings any more, so the action button only shows for a real interact
+      this.input.setActionLabel(foldInteract ? act.label : null, foldInteract);
       this.input.setInteract(act.label, hasInteract && !this.input.isTouch);
     } else {
       this.input.setActionLabel(act.label);
@@ -388,19 +372,16 @@ export class Game {
     // control hint under the highlight ring: keycap + verb on desktop, verb
     // only on touch (the action button itself already pulses there)
     if (act.focus && act.hint && !sheetBlocked && !this.gameOver)
-      // swing actions (chests) answer to the attack button, not E — so drop the
-      // keycap for them and only show it for true E-interacts on desktop
-      this.hud.interactHint(act.focus, act.hint, this.input.isTouch || !hasInteract ? "" : "E");
+      this.hud.interactHint(act.focus, act.hint, this.input.isTouch ? "" : "E");
     else this.hud.hideInteractHint();
     if (!sheetBlocked && this._dashT < 0) {
       // E / interact button (desktop): fire the context action (portal, stairs, …)
-      if (this.input.interactEdge && hasInteract) act.fn();
+      if (this.input.interactEdge && hasInteract && act.fn) act.fn();
       // Space / click / action button: interact when folded (touch, standing on
-      // a stairs / gate / portal), otherwise swing in the cellar, act in the shop
-      if (this.input.actionEdge) {
+      // a stairs / gate / portal), otherwise act in the shop / sewer
+      if (this.input.actionEdge && act.fn) {
         if (foldInteract) act.fn();
-        else if (inDungeon) this._attack();
-        else act.fn();
+        else if (!inDungeon) act.fn();
       }
     }
 
@@ -580,7 +561,7 @@ export class Game {
             return { label: "box", hint: "Stock", fn: () => this._placeMenu(slot), focus: _focus.copy(slot.pos).clone(), color: 0x66ff9e };
         }
       }
-      return { label: "swords", fn: () => this._attack() };
+      return { label: null };
     }
     // sewer: the ladder home and the four dungeon mouths
     if (this.playerArea === "sewer") {
@@ -595,7 +576,7 @@ export class Game {
           return { label: "hole", hint: hole.name, fn: () => this._holePrompt(hole.id), focus: _v.clone().setY(0.06), color: hole.color };
         }
       }
-      return { label: "swords", fn: () => this._attack() };
+      return { label: null };
     }
     // dungeon (positions are group-local, player is world — offset). Leaving
     // the cellar is folded into the stairs prompt now, so there's no separate
@@ -626,16 +607,16 @@ export class Game {
         _v.copy(this.dungeon.stairsPos).add(DUNGEON_ORIGIN);
         if (_v.distanceTo(p) < 1.5) return { label: "arrowDown", hint: "Stairs", fn: () => this._descendPrompt(), focus: _v.clone().setY(0.06), color: 0xb98cff };
       }
-      // chests aren't a button any more — you crack them open with the sword
-      // (handled in dungeon.meleeHit). We still ring the nearest one and prompt
-      // "Hit" so it reads as a target for the swing rather than a walk-up prompt.
+      // chests aren't a button — you crack them open with the dash (handled in
+      // dungeon.dashHit). We just ring the nearest one so it reads as a target
+      // to dash into; there's no button or keycap for it.
       for (const chest of this.dungeon.chests) {
         if (chest.opened) continue;
         _v.copy(chest.mesh.position).add(DUNGEON_ORIGIN);
-        if (_v.distanceTo(p) < 1.7) return { label: "swords", hint: "Hit", fn: () => this._attack(), focus: _v.clone().setY(0.06), color: 0xffd34d };
+        if (_v.distanceTo(p) < 1.7) return { label: null, focus: _v.clone().setY(0.06), color: 0xffd34d };
       }
     }
-    return { label: "swords", fn: () => this._attack() };
+    return { label: null };
   }
 
   // Which display slot the "Stock / Swap" action lands on: the nearest slot the
