@@ -668,6 +668,8 @@ button { font-family: inherit; cursor: pointer; }
   transform-origin: right bottom;
   animation: bagpop 0.24s cubic-bezier(0.2, 0.9, 0.3, 1.15);
 }
+/* a refresh (after use/drop) rebuilds the panels in place — don't re-pop them */
+#sheet.bag-refresh .bag-panel, #sheet.bag-refresh .gear-panel { animation: none; }
 .bag-panel { flex: 1 1 auto; min-width: 0; max-width: 320px; }
 .gear-panel { flex: 0 0 auto; width: 124px; }
 .gear-panel-head {

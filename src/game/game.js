@@ -128,6 +128,11 @@ export class Game {
     this._escOpen = false;
     this.tutorial = null; // first-run onboarding step (see _tutStart); null once done
     this._hadSave = false; // set by _load — suppresses the tutorial for returning players
+    // whether the player has ever felled a boss. Until they have, delving drops
+    // straight into the dungeon (the sewer hub stays hidden); once a boss falls
+    // the sewer opens for good, letting later runs pick a shortcut mouth.
+    // Persisted (see _save/_load).
+    this.bossBeaten = false;
     // which flanking rooms the player has bought their way into (left, right).
     // Persisted; re-applied to the shop right after it's built (see below).
     this.expansionsBought = [false, false];
@@ -146,6 +151,7 @@ export class Game {
     // points the player at the lot he's asked them to rebuild.
     this._mayor = null;
     this._questArrow = null; // { pos: Vector3, text } shown outside the tutorial
+    this._restockNudge = false; // post-Mayor: steer the guide back to the cellar once
 
     this._load();
 
@@ -1227,8 +1233,16 @@ export class Game {
     // outside the first-run tutorial, the same arrow serves the Mayor's quest:
     // point at the lot he's asked us to rebuild until it's restored
     if (!this.tutorial) {
+      const blocked = this.gameOver || this.hud.sheetOpen;
+      // one last post-Mayor nudge: the opener sold thinned the shelves, so point
+      // back at the trapdoor to restock before chasing the rebuild (clears on the
+      // next delve, at which point the lot quest arrow below takes over)
+      if (this._restockNudge && !blocked && this.playerArea === "shop") {
+        this.hud.guide(_v.copy(this.shop.trapdoorPos).setY(1.4), "Restock the inventory");
+        return;
+      }
       const q = this._questArrow;
-      if (q && !this.gameOver && !this.hud.sheetOpen && this.playerArea === "shop")
+      if (q && !blocked && this.playerArea === "shop")
         this.hud.guide(_v.copy(q.pos).setY(1.4), q.text);
       else this.hud.hideGuide();
       return;
@@ -1450,6 +1464,18 @@ export class Game {
       m.standSpot = lot.interactPos.clone().add(_v.set(2.5, 0, 0));
       this._questArrow = { pos: lot.interactPos.clone(), text: `${icon("home")} Rebuild — ${lot.cost}g` };
     }
+    // one last FTUE beat: the opener sold, so nudge the player back down to
+    // restock before chasing the Mayor's rebuild. The real game's open now
+    // (tutorial is null), so this is a lightweight flag that only steers the
+    // guide arrow + a hint; it clears on the next delve, handing the arrow to
+    // the lot quest above.
+    if (!this.net.connected) {
+      this._restockNudge = true;
+      setTimeout(() => {
+        if (this._restockNudge)
+          this.hud.toast(`${icon("hole")} Restock the inventory — head back down to the cellar for more stock`);
+      }, 700);
+    }
   }
 
   _mayorLeave() {
@@ -1595,11 +1621,28 @@ export class Game {
   // keeps the old direct drop: a private single-floor cellar on a random seed,
   // no sewer, no lobby (sewerHole stays -1 so _enterDungeon never joins one).
   _startDelve() {
+    // heading down clears the post-Mayor restock nudge; the first restock skips
+    // both the tutorial cellar and the sewer hub and drops straight into
+    // dungeon 1, so it stays a smooth continuation of the guided loop.
+    const restocking = this._restockNudge;
+    this._restockNudge = false;
     if (this.tutorial) {
       this.sewerHole = -1;
       if (!this.dungeon.active)
         this.dungeon.generate(1, this.day * 1000 + Math.floor(Math.random() * 999), true);
       // plunge down the cellar trapdoor into the private tutorial floor
+      this._beginHoleDive(this.shop.trapdoorPos, () => this._enterDungeon());
+      return;
+    }
+    // before the first boss falls (or on the guided restock), the sewer hub
+    // stays hidden — the trapdoor drops straight into the day's first dungeon
+    // (mouth 0, floors 1-3). Only solo: co-op always routes through the sewer so
+    // host/guest floor sync (delveReq / floor messages) keeps working.
+    if ((restocking || !this.bossBeaten) && !this.net.connected) {
+      const seed = daySeed();
+      this.sewerHole = 0;
+      if (!this.dungeon.active || this.dungeon.floor !== 1)
+        this.dungeon.generate(1, seed);
       this._beginHoleDive(this.shop.trapdoorPos, () => this._enterDungeon());
       return;
     }
@@ -2153,6 +2196,11 @@ export class Game {
     this.engine.shake(0.45);
     const name = this.dungeon.boss?.def?.name ?? bossDefFor(dungeonIndexFor(this.dungeon.floor)).name;
     const final = this.dungeon.floor >= MAX_DEPTH;
+    // first boss ever felled: unseal the sewer hub for all future runs
+    if (!this.bossBeaten) {
+      this.bossBeaten = true;
+      this._save();
+    }
     this.hud.banner(`${icon("crown")} ${name} falls!`, "", 3.4);
     if (pos) {
       this.particles.burst(_v.copy(pos).setY(1), { color: 0xffe08a, n: 30, speed: 5, up: 2.2, life: 1.1, size: 1.3 });
@@ -2480,6 +2528,9 @@ export class Game {
   }
 
   _openBagDungeon() {
+    // Reopening while the bag is already up (after a use/drop) is a refresh, not
+    // a fresh open — skip the pop-out entrance so the panels don't re-scale.
+    const refresh = this.hud.sheetOpen;
     const rows = this.inventory
       .map((id, i) => {
         const it = ITEMS[id];
@@ -2503,7 +2554,7 @@ export class Game {
         ${this._bagHead("sip a potion or drop loot to free space")}
         <div class="bag-list">${rows || "<small class='empty'>empty — go delve!</small>"}</div>
       </div>
-    `, "bag-sheet bag-split", { onBackdrop: () => this.hud.hideSheet() });
+    `, `bag-sheet bag-split${refresh ? " bag-refresh" : ""}`, { onBackdrop: () => this.hud.hideSheet() });
     this._wireGearDoll(el, "inv");
     el.querySelector("#bag-close").onclick = () => this.hud.hideSheet();
     el.querySelectorAll(".bag-act.use").forEach((btn) => {
@@ -2955,6 +3006,7 @@ export class Game {
         <button data-a="tut:stock">${icon("box")} 4 · Stock</button>
         <button data-a="tut:sell">${icon("speak")} 5 · Sell</button>
         <button data-a="tut:mayor">${icon("crown")} 6 · Mayor</button>
+        <button data-a="tut:restock">${icon("hole")} 7 · Restock</button>
       </div>
       <div class="admin-hints">keys: <b>WASD</b> move · <b>click/Space</b> attack · <b>E</b> interact · <b>B</b> bag · <b>C</b> friends · <b>M</b> mute</div>
     `;
@@ -3070,6 +3122,7 @@ export class Game {
     this.tutorial = null; // silence any in-flight step transitions during setup
     this._endMayorScene(); // tear down any in-flight Mayor cutscene
     this._questArrow = null;
+    this._restockNudge = false;
     this.gold = 100;
     this.hud.setGold(this.gold, false);
     for (const c of [...this.shop.customers]) this.shop._removeCustomer(c);
@@ -3135,6 +3188,24 @@ export class Game {
         this.tutorial = null;
         this._mayorIntro();
         return; // _mayorIntro opens its own sheet
+
+      case "restock": {
+        // post-Mayor state: the FTUE proper is done (tutorial null), he's already
+        // picked a lot to rebuild, and the restock nudge is steering the player
+        // back down for more stock (the lot quest arrow waits behind the nudge
+        // until the next delve clears it)
+        toShop();
+        this.shop.doorLocked = false;
+        this.tutorial = null;
+        this._restockNudge = true;
+        const lot = this.shop.lots[this._mayorTargetLot()];
+        if (lot) this._questArrow = { pos: lot.interactPos.clone(), text: `${icon("home")} Rebuild — ${lot.cost}g` };
+        this.player.position.copy(this.shop.trapdoorPos).add(_v.set(1.4, 0, 1.0));
+        this.player.animator.prevPos.copy(this.player.position);
+        this._snapCamera();
+        this.hud.toast(`${icon("hole")} Restock the inventory — head back down to the cellar for more stock`);
+        break;
+      }
     }
     this._save();
   }
@@ -3797,6 +3868,7 @@ export class Game {
       localStorage.setItem(SAVE_KEY, JSON.stringify({
         day: this.day, gold: this.gold, inv: this.inventory, stash: this.stash,
         shortcutUntil: this.shortcutUntil,
+        bossBeaten: this.bossBeaten,
         equipment: this.equipment,
         expansions: this.expansionsBought,
         town: this.townRestored,
@@ -3812,6 +3884,7 @@ export class Game {
         this._hadSave = true;
         this.day = s.day;
         this.gold = s.gold;
+        this.bossBeaten = !!s.bossBeaten;
         // drop any item ids that no longer exist (e.g. renamed/removed items).
         // A run always resumes in the shop, so anything saved in the bag
         // (including legacy saves from before the storeroom) lands in the stash.
@@ -3822,6 +3895,10 @@ export class Game {
           // keep the array shape stable even if N_DUNGEONS ever changes
           for (let i = 1; i < this.shortcutUntil.length; i++)
             this.shortcutUntil[i] = s.shortcutUntil[i] ?? 0;
+          // migrate saves from before bossBeaten existed: any earned deeper
+          // shortcut means a boss has already fallen, so keep the sewer open
+          if (s.bossBeaten === undefined && this.shortcutUntil.some((t) => t > 0))
+            this.bossBeaten = true;
         }
         if (Array.isArray(s.expansions))
           this.expansionsBought = [!!s.expansions[0], !!s.expansions[1]];

@@ -583,7 +583,7 @@ export class Shop {
 
       this.expansions.push({
         side,
-        cost: 2000,
+        cost: side < 0 ? 5000 : 10000,
         unlocked: false,
         floor, litColor,
         walls: dark,

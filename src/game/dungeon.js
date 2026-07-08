@@ -1897,7 +1897,11 @@ export class Dungeon {
       for (let i = 0; i < 2; i++) {
         const a = rs() * Math.PI * 2;
         const m = this.spawnEnemy(e.def.splitInto, Math.floor(rs() * 1e6), e.tier, e.creature.position.x + Math.sin(a) * 0.55, e.creature.position.z + Math.cos(a) * 0.55);
-        m.hitCd = 0.35; // brief grace so the killing swing can't sweep them too
+        // brief grace so the killing swing can't sweep them too — must clear on
+        // a timer (hitCd is never ticked down per-frame; it's only reset here
+        // and after a hit in damageEnemy), or the droplets stay unhittable.
+        m.hitCd = 0.35;
+        setTimeout(() => (m.hitCd = 0), 350);
         m.creature.animator.squash.kick(5);
       }
     }
