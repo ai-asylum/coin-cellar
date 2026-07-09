@@ -57,7 +57,7 @@ export const persistenceMethods = {
           for (let i = 1; i < this.shortcutUntil.length; i++)
             this.shortcutUntil[i] = s.shortcutUntil[i] ?? 0;
           // migrate saves from before bossBeaten existed: any earned deeper
-          // shortcut means a boss has already fallen, so keep the sewer open
+          // shortcut means a boss has already fallen, so keep record of it
           if (s.bossBeaten === undefined && this.shortcutUntil.some((t) => t > 0))
             this.bossBeaten = true;
         }

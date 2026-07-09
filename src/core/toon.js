@@ -79,9 +79,10 @@ export function toonRamp() {
 // `occlude`: when true, fragments that sit on the line between the camera and
 // the tracked point (uPlayer) dither away, so a wall can't hide the player.
 // Feed it live positions every frame via mat.userData.shader.uniforms.
-export function makeToonMaterial({ color = 0xffffff, vertexColors = false, rim = 0.5, rimColor = 0xbfd7ff, occlude = false, dissolve = false, polygonOffset = false } = {}) {
+export function makeToonMaterial({ color = 0xffffff, map = null, vertexColors = false, rim = 0.5, rimColor = 0xbfd7ff, occlude = false, dissolve = false, polygonOffset = false } = {}) {
   const mat = new THREE.MeshToonMaterial({
     color,
+    map,
     gradientMap: toonRamp(),
     vertexColors,
   });

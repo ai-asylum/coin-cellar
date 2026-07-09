@@ -4,7 +4,11 @@ import { AudioBus } from "./core/audio.js";
 import { HUD } from "./game/hud.js";
 import { Game, requestFullscreen } from "./game/game.js";
 import { loadCharacters } from "./chargen/assets.js";
+import { loadDungeonAssets } from "./game/dungeon-assets.js";
 import { icon } from "./core/icons.js";
+import { initAnalytics, track } from "./core/analytics.js";
+
+initAnalytics();
 
 const app = document.getElementById("app");
 const hudRoot = document.getElementById("hud");
@@ -45,7 +49,12 @@ async function boot() {
     const sub = document.getElementById("load-sub");
     if (sub) sub.textContent = `Loading characters… ${done}/${total}`;
   });
+  await loadDungeonAssets((done, total) => {
+    const sub = document.getElementById("load-sub");
+    if (sub) sub.textContent = `Loading dungeon… ${done}/${total}`;
+  });
   await startMenu();
+  track("game_started");
   hudRoot.innerHTML = "";
 
   const engine = new Engine(app);

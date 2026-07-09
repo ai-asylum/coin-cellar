@@ -24,7 +24,7 @@ export const netMethods = {
       stocked: this.shop.slots.map((s) => s.item),
       floor: this.dungeon.active ? this.dungeon.floor : 0,
       seed: this.dungeon.seed ?? 0,
-      hole: this.sewerHole,
+      hole: this.cellarHole,
       gateOpen: this.dungeon.gateOpen,
       shortcuts: this.shortcutUntil,
       town: this.townRestored,
@@ -105,7 +105,7 @@ export const netMethods = {
   },
 
   // Avatars for the lobby crowd (Supabase Realtime): everyone sharing our
-  // current zone — the sewer, or the same hole's dungeon. Purely visual;
+  // current zone — the cellar, or the same hole's dungeon. Purely visual;
   // they use the same snapshot-interpolation trick as the co-op remote.
   _updateLobbyPlayers(dt, elapsed) {
     const av = this._lobbyAvatars;
@@ -130,6 +130,11 @@ export const netMethods = {
       }
       const c = a.creature;
       c.setNameLabel(pl.name || "a wanderer");
+      // a fresh chat line (seq bumped by the lobby handler) pops a bubble
+      if (pl.chat && a.chatSeq !== pl.chatSeq) {
+        c.setChatBubble(pl.chat);
+        a.chatSeq = pl.chatSeq;
+      }
       // hide delvers on other floors of the same hole (identical world coords)
       c.visible = pl.floor === myFloor && !pl.dead;
       if (!c.visible) continue;
@@ -191,7 +196,7 @@ export const netMethods = {
         this.hud.setGold(this.gold, false);
         m.stocked.forEach((item, i) => this._applyStockSlot(i, item));
         if (m.floor > 0) {
-          if (m.hole != null) this.sewerHole = m.hole;
+          if (m.hole != null) this.cellarHole = m.hole;
           D.generate(m.floor, m.seed);
           this._hostDungeonFloor = m.floor;
           if (m.gateOpen) D.openGate();
@@ -241,11 +246,11 @@ export const netMethods = {
         // first delver picks the mouth; once a dungeon is live the pair shares
         // it, so a request for a different mouth just lands in the live one
         if (!D.active) {
-          this.sewerHole = m.hole ?? 0;
-          D.generate(this.sewerHole * FLOORS_PER_DUNGEON + 1, daySeed());
+          this.cellarHole = m.hole ?? 0;
+          D.generate(this.cellarHole * FLOORS_PER_DUNGEON + 1, daySeed());
           this._syncState();
         }
-        this.net.send({ t: "floor", n: D.floor, seed: D.seed, hole: this.sewerHole });
+        this.net.send({ t: "floor", n: D.floor, seed: D.seed, hole: this.cellarHole });
         break;
       }
       case "stairsReq": {
@@ -254,7 +259,7 @@ export const netMethods = {
         if (from >= MAX_DEPTH) return; // 12 is the deepest there is
         const n = from + 1;
         // crossing a boss floor drops into the next stacked dungeon — open its
-        // sewer shortcut (host owns the progression, for host + guest alike)
+        // cellar shortcut (host owns the progression, for host + guest alike)
         if (isBossFloor(from)) this._unlockShortcut(dungeonIndexFor(n));
         const hole = dungeonIndexFor(n);
         // If we're delving too, we can't advance the live dungeon without
@@ -267,7 +272,7 @@ export const netMethods = {
         // minding the shop: the live floor advances and the guest rides along
         D.generate(n, D.seed);
         this._hostDungeonFloor = n;
-        this.sewerHole = hole;
+        this.cellarHole = hole;
         this.net.send({ t: "floor", n, seed: D.seed, hole });
         break;
       }
@@ -296,8 +301,8 @@ export const netMethods = {
         break;
       }
       case "shortcut": {
-        // the host earned (or refreshed) a sewer shortcut — mirror its expiry
-        // so our sewer shows the same open mouths
+        // the host earned (or refreshed) a cellar shortcut — mirror its expiry
+        // so our cellar shows the same open mouths
         if (!Array.isArray(this.shortcutUntil)) this.shortcutUntil = [0, 0, 0, 0];
         this.shortcutUntil[m.id] = m.until;
         break;
@@ -472,7 +477,7 @@ export const netMethods = {
       case "floor": {
         if (!this.net.isGuest) return;
         const wasIn = this.playerArea === "dungeon";
-        if (m.hole != null) this.sewerHole = m.hole;
+        if (m.hole != null) this.cellarHole = m.hole;
 
         // "solo": the host stayed put and waved us on ahead. We lead into a
         // quiet floor the host isn't simulating; the live floor is unchanged.
@@ -491,7 +496,7 @@ export const netMethods = {
         // stay put on our (now quiet) floor and offer to follow via the stairs.
         if (m.lead && wasIn && !this._wantDelve) {
           this._floorDesync = true;
-          this._pendingLead = { n: m.n, seed: m.seed, hole: this.sewerHole };
+          this._pendingLead = { n: m.n, seed: m.seed, hole: this.cellarHole };
           this.hud.banner(`${icon("arrowDown")} Your friend went deeper`, "take the stairs to follow", 2.2);
           break;
         }
@@ -505,7 +510,7 @@ export const netMethods = {
       }
       case "dungeonReset":
         D.dispose();
-        this.sewerHole = -1;
+        this.cellarHole = -1;
         this._floorDesync = false;
         this._pendingLead = null;
         if (this.playerArea === "dungeon") this._returnHome();
@@ -624,7 +629,26 @@ export const netMethods = {
         }
         break;
       }
+      case "chat":
+        // co-op partner said something — pop a bubble over their avatar
+        if (this.remote) this.remote.creature.setChatBubble(String(m.text || ""));
+        break;
     }
+  },
+
+  // Open the chat text box; on submit, show our own bubble and broadcast the
+  // line over both wires (co-op partner + shared-world lobby crowd).
+  _openChat() {
+    if (this.hud.sheetOpen || this.hud.speakOpen || this._adminOpen) return;
+    this.hud.openChat((text) => this._sendChat(text));
+  },
+
+  _sendChat(text) {
+    text = String(text || "").replace(/\s+/g, " ").trim().slice(0, 140);
+    if (!text) return;
+    this.player.setChatBubble(text); // instant local feedback
+    if (this.net.connected) this.net.send({ t: "chat", text });
+    this.lobby.chat(text);
   },
 
   _applyStockSlot(i, item) {

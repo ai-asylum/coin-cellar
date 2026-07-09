@@ -110,9 +110,11 @@ export class AudioBus {
   telegraph() { this._tone({ f: 420, f1: 720, dur: 0.28, type: "triangle", vol: 0.1, slide: true }); }
   shoot() { this._tone({ f: 900, f1: 300, dur: 0.18, type: "sawtooth", vol: 0.13 }); this._noise({ dur: 0.08, vol: 0.1, f: 1800, q: 0.7 }); }
   projHit() { this._noise({ dur: 0.1, vol: 0.28, f: 700, q: 1.2 }); this._tone({ f: 220, f1: 80, dur: 0.12, type: "square", vol: 0.18 }); }
+  // striking something that doesn't give (a pillar): a bright metallic tink
+  clank() { this._noise({ dur: 0.05, vol: 0.3, f: 3200, q: 3 }); this._tone({ f: 1250, f1: 720, dur: 0.09, type: "triangle", vol: 0.14 }); }
   step() { this._noise({ dur: 0.05, vol: 0.05, f: 700, q: 2 }); }
   hop() { this._tone({ f: 300, f1: 500, dur: 0.12, type: "sine", vol: 0.08 }); }
-  // plunging down a sewer hole: a falling whoosh that drops in pitch
+  // plunging down a cellar mouth: a falling whoosh that drops in pitch
   dive() { this._tone({ f: 700, f1: 90, dur: 0.5, type: "sine", vol: 0.16, slide: true }); this._noise({ dur: 0.4, vol: 0.12, f: 500, q: 0.5 }); }
   chest() { [440, 550, 660, 880].forEach((f, i) => this._tone({ f, dur: 0.14, type: "square", vol: 0.16, at: i * 0.09 })); }
   pickup() { this._tone({ f: 880, f1: 1320, dur: 0.1, type: "square", vol: 0.14 }); }

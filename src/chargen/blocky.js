@@ -157,6 +157,31 @@ export class BlockyCreature extends THREE.Group {
     this._nameText = null;
   }
 
+  /**
+   * Pop a speech bubble above the head (chat). Replaces any current bubble and
+   * auto-clears after `dur` seconds (handled in update()). Like the name plate
+   * it's a billboard sprite child, so it follows the character for free.
+   */
+  setChatBubble(text, dur = 6) {
+    text = String(text ?? "").replace(/\s+/g, " ").trim().slice(0, 140);
+    if (!text) return;
+    this._clearChatBubble();
+    const spr = makeBubbleSprite(text);
+    spr.position.y = this.height + 0.6; // sits just above the name plate
+    this.add(spr);
+    this._chatSprite = spr;
+    this._chatUntil = performance.now() + dur * 1000;
+  }
+
+  _clearChatBubble() {
+    if (!this._chatSprite) return;
+    this._chatSprite.material.map?.dispose();
+    this._chatSprite.material.dispose();
+    this.remove(this._chatSprite);
+    this._chatSprite = null;
+    this._chatUntil = 0;
+  }
+
   /** Attach a prop (sword / bow / staff) to the right hand, replacing any prior. */
   holdItem(obj) {
     if (!this.armR) return;
@@ -270,10 +295,13 @@ export class BlockyCreature extends THREE.Group {
 
     this.mixer.update(dt);
     if (this.shadow) this.shadow.position.y = 0.015 - this.position.y;
+
+    if (this._chatSprite && performance.now() > this._chatUntil) this._clearChatBubble();
   }
 
   dispose() {
     this._clearNameLabel();
+    this._clearChatBubble();
     this.mixer.stopAllAction();
     this.mixer.uncacheRoot(this.model);
     // geometry is shared with the cached template — only per-instance
@@ -327,5 +355,69 @@ function makeTextSprite(text) {
   spr.scale.set(worldH * (c.width / c.height), worldH, 1);
   spr.center.set(0.5, 0); // anchor bottom edge at the sprite's position
   spr.renderOrder = 999;
+  return spr;
+}
+
+// A chat speech bubble: word-wrapped white text on a rounded dark panel, baked
+// to a canvas and hung on a billboard sprite (same trick as the name plate, but
+// multi-line and a touch larger). depthTest off so it stays readable.
+function makeBubbleSprite(text) {
+  const font = 40, padX = 24, padY = 16, lineH = Math.round(font * 1.18), maxTextW = 460;
+  const c = document.createElement("canvas");
+  const ctx = c.getContext("2d");
+  const fontSpec = `600 ${font}px system-ui, -apple-system, sans-serif`;
+  ctx.font = fontSpec;
+
+  // greedy word wrap under maxTextW; a single over-long word is hard-broken
+  const lines = [];
+  let line = "";
+  for (const word of text.split(" ")) {
+    const test = line ? line + " " + word : word;
+    if (ctx.measureText(test).width > maxTextW && line) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = test;
+    }
+  }
+  if (line) lines.push(line);
+  if (lines.length > 5) { lines.length = 5; lines[4] = lines[4].replace(/.{0,3}$/, "…"); }
+
+  let widest = 0;
+  for (const l of lines) widest = Math.max(widest, ctx.measureText(l).width);
+  c.width = Math.ceil(Math.min(widest, maxTextW)) + padX * 2;
+  c.height = lines.length * lineH + padY * 2;
+  // resizing the canvas resets 2d state — re-apply
+  ctx.font = fontSpec;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "rgba(20,22,32,0.82)";
+  if (ctx.roundRect) {
+    ctx.beginPath();
+    ctx.roundRect(0, 0, c.width, c.height, 22);
+    ctx.fill();
+  } else {
+    ctx.fillRect(0, 0, c.width, c.height);
+  }
+  const cx = c.width / 2;
+  ctx.lineWidth = 6;
+  ctx.strokeStyle = "rgba(0,0,0,0.5)";
+  for (let i = 0; i < lines.length; i++) {
+    const y = padY + lineH * (i + 0.5);
+    ctx.strokeText(lines[i], cx, y);
+    ctx.fillStyle = "#fff";
+    ctx.fillText(lines[i], cx, y);
+  }
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.minFilter = THREE.LinearFilter;
+  tex.anisotropy = 4;
+  const spr = new THREE.Sprite(
+    new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false })
+  );
+  const k = 0.0044; // px → world scale (keeps one line ≈ 0.32 world units tall)
+  spr.scale.set(c.width * k, c.height * k, 1);
+  spr.center.set(0.5, 0);
+  spr.renderOrder = 1000;
   return spr;
 }

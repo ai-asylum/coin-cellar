@@ -1,6 +1,6 @@
 // The shared-world layer: Supabase Realtime presence + position broadcast.
 // Unlike the PeerJS co-op (2 players, shared economy, host authority), the
-// lobby is purely social — everyone standing in the same zone (the sewer, or
+// lobby is purely social — everyone standing in the same zone (the cellar, or
 // one of its dungeon holes) sees everyone else's avatar move in realtime.
 // No gameplay state crosses this wire: enemies, loot and gold stay local.
 import { createClient } from "@supabase/supabase-js";
@@ -30,7 +30,7 @@ export class Lobby {
     return this.client;
   }
 
-  // Join a zone ("sewer" or "hole:<day>:<k>"), leaving whichever we were in.
+  // Join a zone ("cellar" or "hole:<day>:<k>"), leaving whichever we were in.
   join(zone) {
     if (this.zone === zone) return;
     this.leave();
@@ -61,6 +61,14 @@ export class Lobby {
       pl.dead = !!m.dead;
       pl.atk = !!m.atk;
     });
+    // chat: stash the latest line + a bump counter; the game reads it each frame
+    // and pops a bubble over the sender's avatar when the counter changes.
+    ch.on("broadcast", { event: "chat" }, ({ payload: m }) => {
+      if (this.channel !== ch || !m || m.id === this.id) return;
+      const pl = this._player(m.id);
+      pl.chat = String(m.text || "").slice(0, 140);
+      pl.chatSeq = (pl.chatSeq || 0) + 1;
+    });
     ch.subscribe((status) => {
       if (status === "SUBSCRIBED" && this.channel === ch)
         ch.track({ name: this.game.playerName || "a wanderer" });
@@ -90,6 +98,16 @@ export class Lobby {
 
   get count() {
     return this.players.size;
+  }
+
+  // Broadcast a chat line to everyone in the zone (no-op if not joined).
+  chat(text) {
+    if (!this.channel || this.channel.state !== "joined") return;
+    this.channel.send({
+      type: "broadcast",
+      event: "chat",
+      payload: { id: this.id, text: String(text).slice(0, 140) },
+    });
   }
 
   update(dt) {

@@ -484,7 +484,9 @@ function makeGlow(color = 0xffd67a) {
 // bright-midday look; the dungeon a moodier one.
 const _col = (hex) => new THREE.Color(hex);
 const SHOP_PAL    = { sky: _col(0xc3c2e6), ground: _col(0x1c1630), hemiI: 0.95, sun: _col(0xffe7b4), sunI: 2.1, bg: _col(0x2b2848), shaft: _col(0xffe6ad) };
-const DUNGEON_PAL = { sky: _col(0xb7a1ff), ground: _col(0x160e28), hemiI: 0.6, sun: _col(0xffdca0), sunI: 1.9,  bg: _col(0x1a1030), shaft: _col(0xffd08a) };
+// pitch-black backdrop underground so anything outside the dungeon itself
+// (the void past the walls, the pit under the descent stairs) reads as solid dark
+const DUNGEON_PAL = { sky: _col(0xb7a1ff), ground: _col(0x160e28), hemiI: 0.6, sun: _col(0xffdca0), sunI: 1.9,  bg: _col(0x000000), shaft: _col(0xffd08a) };
 const _tSky = new THREE.Color();
 const _tGround = new THREE.Color();
 const _tSun = new THREE.Color();

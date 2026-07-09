@@ -171,10 +171,10 @@ export const ENEMY_KINDS = {
   },
 };
 
-// Each sewer hole crowns its final floor with its own boss: a themed look
+// Each cellar mouth crowns its final floor with its own boss: a themed look
 // (giant version of a native species), its own stats, attack rotation,
 // enrage minion pack and copy. Entries override the base `boss` kind above;
-// index matches Sewer.holes. All bosses share the "boss" behavior machine
+// index matches Cellar.holes. All bosses share the "boss" behavior machine
 // (slam in reach; charge/burst at range per `rotation`), so guests mirror
 // them with the same kind string — the def resolves from the synced hole id.
 const DEFAULT_BOSS = {
@@ -253,7 +253,7 @@ export function bossDefFor(hole) {
 // Themed loot per dungeon: what its monsters carry and its chests hold. The
 // per-kind `loot` lists above are each monster's signature drops; these tables
 // back the rest of the rolls so every hole's haul reads distinctly. Index
-// matches Sewer.holes.
+// matches Cellar.holes.
 export const DUNGEON_LOOT = [
   { // Rat Warren — forage and scraps (herbs/shrooms come from smashing decor now)
     common: ["meat", "bread", "caveshroom", "crystal", "jelly", "egg"],
@@ -273,10 +273,10 @@ export const DUNGEON_LOOT = [
   },
 ];
 
-// Visual identity per sewer hole: floor/wall palette (indexed by floor,
+// Visual identity per cellar mouth: floor/wall palette (indexed by floor,
 // clamped to the last entry), torch crystal colors, god-ray shaft colors and
-// the set-dressing mix. Index matches Sewer.holes; the tutorial's private
-// cellar (sewerHole -1) falls back to the classic look.
+// the set-dressing mix. Index matches Cellar.holes; the tutorial's private
+// cellar (cellarHole -1) falls back to the classic look.
 export const DEFAULT_THEME = {
   palettes: [
     [0x8a70b5, 0x715a99],
@@ -318,7 +318,7 @@ export const HOLE_THEMES = [
 
 // Dungeons are stacked: four themed dungeons of three floors each, so the
 // descent runs 1‑12 with a boss guarding every third floor (3, 6, 9, 12). The
-// sewer mouths are shortcuts to the head of each dungeon (floors 1, 4, 7, 10).
+// cellar mouths are shortcuts to the head of each dungeon (floors 1, 4, 7, 10).
 export const FLOORS_PER_DUNGEON = 3;
 export const N_DUNGEONS = 4;
 export const MAX_DEPTH = FLOORS_PER_DUNGEON * N_DUNGEONS; // deepest floor (final boss)

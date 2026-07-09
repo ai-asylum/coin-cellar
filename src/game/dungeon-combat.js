@@ -1,5 +1,5 @@
 // Combat resolution: projectile hit tests, melee swings, enemy damage/death,
-// boss enrage/explode, loot drops, chests and portals. Mixed onto
+// boss enrage/explode, loot drops, chests and the boss stairs. Mixed onto
 // Dungeon.prototype via Object.assign in dungeon.js, so every `this._method()`
 // call keeps working.
 import * as THREE from "three";
@@ -9,6 +9,7 @@ import { EQUIP_DROPS, itemSprite } from "./items.js";
 import { disposeDecor, DECOR_LOOT } from "./decor.js";
 import { rng, pick } from "../core/engine.js";
 import { DUNGEON_ORIGIN, dungeonIndexFor, DUNGEON_LOOT, FLOORS_PER_DUNGEON } from "./dungeon-data.js";
+import { makeStairs } from "./dungeon-geometry.js";
 
 const _v = new THREE.Vector3();
 const _p = new THREE.Vector3();
@@ -139,7 +140,30 @@ export const combatMethods = {
     // shatter any destructible scenery in the path — a puff of leaves/dust/bone
     // that can also forage a drop (herbs, mushrooms, rock crystals)
     if (this._smashDecor(pos, reach)) hitAny = true;
+    // structural props (pillars, standing torches) don't give — they spark
+    if (this._sparkStructural(pos, reach, hitIds)) hitAny = true;
     return hitAny;
+  },
+
+  // A dash raking a structural prop: a shower of sparks and a stony clank, but
+  // the prop stands. Purely cosmetic and local (nothing changes state, so co-op
+  // peers need no message). Deduped per dash via `hitIds` so a pass-through
+  // doesn't spark every frame.
+  _sparkStructural(pos, reach, hitIds = null) {
+    let hit = false;
+    for (let i = 0; i < this.structural.length; i++) {
+      const s = this.structural[i];
+      const key = "sp:" + i;
+      if (hitIds && hitIds.has(key)) continue;
+      if (Math.hypot(s.wx - pos.x, s.wz - pos.z) > reach + s.radius) continue;
+      hitIds && hitIds.add(key);
+      _v.set(s.wx, 0.9, s.wz);
+      this.game.particles.burst(_v, { color: 0xffd98a, n: 9, speed: 3.6, up: 1.6, life: 0.35, size: 0.6 });
+      this.game.particles.burst(_v, { color: 0xffffff, n: 4, speed: 2.6, up: 2.0, life: 0.28, size: 0.5 });
+      this.game.audio.clank?.();
+      hit = true;
+    }
+    return hit;
   },
 
   // Smash every destructible prop caught within `reach` of `pos`. The burst
@@ -195,8 +219,10 @@ export const combatMethods = {
     game.particles.burst(_v, { color: d.color, n, speed: 3 + d.height, up: 2 + d.height * 0.8, life: 0.6, size: 0.9 + d.height * 0.2 });
     game.particles.burst(_v, { color: 0xffffff, n: Math.ceil(n * 0.35), speed: 2.4, up: 2.2, life: 0.45, size: 0.7 });
     game.audio.projHit?.();
-    disposeDecor(d.group);
+    disposeDecor(d.group); // sprite materials only — kit models share templates
     d.group.removeFromParent();
+    // a smashed kit prop stops blocking (billboard decor never had a collider)
+    if (d.collider) this.colliders = this.colliders.filter((c) => c !== d.collider);
   },
 
   damageEnemy(e, dmg, kx = 0, kz = 0, opts = {}) {
@@ -356,20 +382,21 @@ export const combatMethods = {
     }, parts.length * 85 + 80);
   },
 
-  /** Conjure a shimmering portal at world coords (wx,wz) where the boss fell.
-   * `descend` tints it fiery and marks it as the way DOWN to the next stacked
-   * dungeon; otherwise it's the cool arcane way HOME (final boss only). Built
+  /** Conjure a flight of stairs at world coords (wx,wz) where the boss fell.
+   * `descend` makes it a fiery down-flight into the next stacked dungeon;
+   * otherwise it's the cool arcane way HOME (final boss only). Built
    * identically on host and guest (both run onBossDefeated), so it needs no
    * dedicated net message to stay in sync. */
-  spawnReturnPortal(wx, wz, descend = false) {
-    if (this.returnPortal) return;
+  spawnBossStairs(wx, wz, descend = false) {
+    if (this.bossStairs) return;
     const lx = wx - DUNGEON_ORIGIN.x, lz = wz - DUNGEON_ORIGIN.z;
     const discColor = descend ? 0xff8a3d : 0x5dd0ff;
     const ringColor = descend ? 0xffd36b : 0x9a6dff;
     const shaftColor = descend ? 0xff9a4d : 0x7fd8ff;
     const g = new THREE.Group();
     g.position.set(lx, 0, lz);
-    // a glowing disc on the floor with a brighter outer ring
+    // the stairs themselves, over a glowing disc with a brighter outer ring
+    g.add(makeStairs(descend ? "down" : "up"));
     const disc = new THREE.Mesh(
       new THREE.CircleGeometry(1.05, 28).rotateX(-Math.PI / 2),
       new THREE.MeshBasicMaterial({ color: discColor, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false })
@@ -382,12 +409,12 @@ export const combatMethods = {
     ring.position.y = 0.06;
     g.add(disc, ring);
     this.group.add(g);
-    // a bright column of light rising from the portal (animated via shafts)
+    // a bright column of light rising from the stairs (animated via shafts)
     const shaft = makeLightShaft({ color: shaftColor, length: 4.8, topWidth: 0.5, bottomWidth: 2.2, opacity: 0.55, tilt: 0, spin: 1.6, motes: 16 });
     shaft.position.set(lx, 3.4, lz);
     this.group.add(shaft);
     this.shafts.push(shaft);
-    this.returnPortal = { pos: new THREE.Vector3(wx, 0, wz), mesh: g, disc, ring, descend };
+    this.bossStairs = { pos: new THREE.Vector3(wx, 0, wz), mesh: g, disc, ring, descend };
   },
 
   /** x/z are WORLD coordinates. `opts.flyFrom` ({x,z}) makes the drop arc out
@@ -436,7 +463,8 @@ export const combatMethods = {
   openChest(chest) {
     if (chest.opened) return null;
     chest.opened = true;
-    chest.mesh.children[1].rotation.x = -1.9; // lid flips open
+    const cover = chest.mesh.userData.cover ?? chest.mesh.children[1];
+    if (cover) cover.rotation[chest.mesh.userData.coverAxis ?? "x"] = -1.9; // lid flips open
     // cracking the tutorial chest is what unlocks the way home
     if (this.tutorial) this.revealStairs();
     const r = rng(this.seed + chest.id * 313);
