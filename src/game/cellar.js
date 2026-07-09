@@ -18,30 +18,33 @@ import { dungeonAssetsReady, dungeonPalette } from "./dungeon-assets.js";
 
 export const CELLAR_ORIGIN = new THREE.Vector3(-200, 0, 0);
 
-// The tutorial cellar's exact footprint: a lone 5×5-cell room. The grid keeps
-// a one-cell solid rim around it so the wall builders see the same open→closed
-// boundaries the dungeon generator produces.
-const GW = 7, GH = 7;
-const ROOM = { x: 1, y: 1, w: 5, h: 5, cx: 3, cy: 3 };
+// The lobby's footprint: a 9×5-cell hall (grown from the tutorial's snug 5×5
+// so the four mouths get room to breathe). The grid keeps a one-cell solid rim
+// around it so the wall builders see the same open→closed boundaries the
+// dungeon generator produces.
+const GW = 11, GH = 7;
+const ROOM = { x: 1, y: 1, w: 9, h: 5, cx: 5, cy: 3 };
 const cellPos = (x, y) => new THREE.Vector3((x - GW / 2 + 0.5) * CELL, 0, (y - GH / 2 + 0.5) * CELL);
 
-// All four mouths lined up in a neat row across the top of the room, evenly
-// spaced (reading order = dungeon index). They sit one cell in from the north
-// wall (gy 2, not 1) so neither the mouth nor the trapdoor lid — which hinges
-// and swings back toward the wall — clips through the wall geometry. Each
-// mouth is a real cut-out floor cell with a sunk stair flight (same descent
-// assembly as the dungeons' down-stairs), so they sit on whole grid cells.
+// All four mouths lined up in a row across the top of the room, distributed
+// space-evenly — one clear floor cell around every mouth (reading order =
+// dungeon index). They sit one cell in from the north wall (gy 2, not 1) so
+// neither the mouth nor the trapdoor lid — which hinges and swings back toward
+// the wall — clips through the wall geometry. Each mouth is a real cut-out
+// floor cell with a sunk stair flight (same descent assembly as the dungeons'
+// down-stairs), so they sit on whole grid cells.
 export const HOLE_DEFS = [
-  { name: "Rat Warren", gx: 1, gy: 2, color: 0x9a6dff },
-  { name: "Flooded Deep", gx: 2, gy: 2, color: 0x5dd0ff },
-  { name: "Bone Hollow", gx: 3, gy: 2, color: 0xff9a5d },
-  { name: "Gloom Drain", gx: 4, gy: 2, color: 0x6fd6c8 },
+  { name: "Rat Warren", gx: 2, gy: 2, color: 0x9a6dff },
+  { name: "Flooded Deep", gx: 4, gy: 2, color: 0x5dd0ff },
+  { name: "Bone Hollow", gx: 6, gy: 2, color: 0xff9a5d },
+  { name: "Gloom Drain", gx: 8, gy: 2, color: 0x6fd6c8 },
 ];
 
-// the tutorial keeps its arrival spot and home stairs on opposite walls of the
-// centre row (entrance = second cell, stairs = fourth) — the lobby mirrors it
-const ENTRANCE_CELL = { x: ROOM.x + 1, y: ROOM.cy };
-const STAIRS_CELL = { x: ROOM.x + ROOM.w - 2, y: ROOM.cy };
+// The home stairs hug the west wall, a row toward the camera; you arrive at
+// their foot (a step clear eastward, so the "go up" prompt isn't primed) as if
+// you'd just walked down them.
+const STAIRS_CELL = { x: ROOM.x, y: ROOM.cy + 1 };
+const ENTRANCE_CELL = { x: ROOM.x + 1, y: ROOM.cy + 1 }; // the arrival spot's skip-list footprint
 
 export class Cellar {
   constructor(game) {
@@ -60,7 +63,9 @@ export class Cellar {
       floor: i * FLOORS_PER_DUNGEON + 1,
       pos: cellPos(h.gx, h.gy).add(CELLAR_ORIGIN),
     }));
-    this.entrancePos = cellPos(ENTRANCE_CELL.x, ENTRANCE_CELL.y).add(CELLAR_ORIGIN);
+    // arrive at the foot of the home stairs: 1.8 east of the flight, just past
+    // the "go up" prompt radius (1.7) so it isn't primed the moment you land
+    this.entrancePos = cellPos(STAIRS_CELL.x, STAIRS_CELL.y).add(CELLAR_ORIGIN).add(new THREE.Vector3(1.8, 0, 0));
     this.exitPos = cellPos(STAIRS_CELL.x, STAIRS_CELL.y).add(CELLAR_ORIGIN);
 
     this._build();
@@ -125,24 +130,22 @@ export class Cellar {
       this.group.add(walls);
     }
 
-    // --- the stairs home, right where the tutorial's revealed stairs stood:
-    // rising toward the far wall under the same warm "way home" beam
+    // --- the stairs home: rising into the west wall under the warm "way home"
+    // beam, nudged flush so the top step touches the wall face. (The old
+    // separate arcane arrival beam is gone — you now arrive at this flight's
+    // foot, and one beam marks the spot.)
     const exitLocal = cellPos(STAIRS_CELL.x, STAIRS_CELL.y);
     const stairs = makeStairs("up");
-    stairs.rotation.y = -Math.PI / 2; // rise toward the far (east) wall
+    stairs.rotation.y = Math.PI / 2; // rise toward the west wall
     stairs.position.copy(exitLocal);
+    stairs.updateMatrixWorld(true);
+    const sb = new THREE.Box3().setFromObject(stairs);
+    stairs.position.x += exitLocal.x - CELL / 2 - sb.min.x; // top step meets the wall
     this.group.add(stairs);
     const homeShaft = makeLightShaft({ color: 0xffd9a0, length: 4.6, topWidth: 0.55, bottomWidth: 2.4, opacity: 0.34, tilt: 0.24, spin: 1.2, motes: 12 });
     homeShaft.position.set(exitLocal.x, 3.4, exitLocal.z);
     this.group.add(homeShaft);
     this.shafts.push(homeShaft);
-
-    // the arrival spot keeps its cool arcane beam, same as every dungeon floor
-    const entranceLocal = cellPos(ENTRANCE_CELL.x, ENTRANCE_CELL.y);
-    const arriveShaft = makeLightShaft({ color: 0x9a6dff, length: 4.6, topWidth: 0.6, bottomWidth: 2.6, opacity: 0.4, tilt: 0.28, spin: 0.4, motes: 14 });
-    arriveShaft.position.set(entranceLocal.x, 3.4, entranceLocal.z);
-    this.group.add(arriveShaft);
-    this.shafts.push(arriveShaft);
 
     // --- the dungeon mouths: a dark maw, a glowing rim, a rising light shaft,
     // one per corner. Scaled down from the old sewer sizing to sit in a cell.
