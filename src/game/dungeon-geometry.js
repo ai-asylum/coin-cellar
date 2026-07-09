@@ -76,6 +76,26 @@ export function makeDescentPit() {
   return g;
 }
 
+// The complete descent assembly: the dark pit shaft filling a cut-out floor
+// cell, with the down flight re-seated centred inside it (its footprint is
+// offset and asymmetric). `lift` raises the flight so its top steps sit up out
+// of the pit — the dungeon default; the cellar mouths pass ~0 so the flight
+// stays flush under their swinging grate lids. Position the returned group at
+// the centre of the cut-out cell.
+export function makeDescent(lift = 0.35) {
+  const g = new THREE.Group();
+  g.add(makeDescentPit());
+  const stairs = makeStairs("down");
+  stairs.rotation.y = Math.PI; // turn the flight to face the camera
+  stairs.updateMatrixWorld(true);
+  const sb = new THREE.Box3().setFromObject(stairs);
+  stairs.position.x -= (sb.min.x + sb.max.x) / 2;
+  stairs.position.z -= (sb.min.z + sb.max.z) / 2;
+  stairs.position.y = lift;
+  g.add(stairs);
+  return g;
+}
+
 // kind: "wood" (default) or "iron". `userData.cover` is the hinged lid so
 // openChest can flip it open regardless of how the mesh is authored.
 export function makeChest(kind = "wood") {

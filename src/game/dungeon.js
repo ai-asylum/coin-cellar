@@ -10,7 +10,7 @@ import { scatterDungeonDecor, disposeDecor } from "./decor.js";
 import { Projectiles } from "./projectile.js";
 import { rng, pick } from "../core/engine.js";
 import { DUNGEON_ORIGIN, isBossFloor, dungeonIndexFor, bossDefFor, ENEMY_KINDS, HOLE_THEMES, DEFAULT_THEME, FLOORS_PER_DUNGEON, floorMixFor } from "./dungeon-data.js";
-import { CELL, makeChest, makeGate, makeFloorGeometry, makeStairs, makeDescentPit, buildAssetFloor, buildAssetWalls, scatterAssetProps, modelCollider } from "./dungeon-geometry.js";
+import { CELL, makeChest, makeGate, makeFloorGeometry, makeStairs, makeDescent, buildAssetFloor, buildAssetWalls, scatterAssetProps, modelCollider } from "./dungeon-geometry.js";
 import { dungeonAssetsReady, dungeonWallMaterial } from "./dungeon-assets.js";
 import { aiMethods } from "./dungeon-ai.js";
 import { combatMethods } from "./dungeon-combat.js";
@@ -268,21 +268,11 @@ export class Dungeon {
     this.stairsCell = stairsCell;
     this.hasDownStairs = hasDown;
     if (this.hasDownStairs) {
-      // the dark shaft that keeps the cut-out cell from reading as a black void
-      const pit = makeDescentPit();
-      pit.position.copy(this.stairsPos);
-      this.group.add(pit);
-      const stairs = makeStairs("down");
-      stairs.rotation.y = Math.PI; // turn the flight to face the camera
-      stairs.position.copy(this.stairsPos);
-      // the flight's footprint is offset (and asymmetric), so re-seat it so it
-      // sits centred inside the pit rather than poking through a wall
-      stairs.updateMatrixWorld(true);
-      const sb = new THREE.Box3().setFromObject(stairs);
-      stairs.position.x -= (sb.min.x + sb.max.x) / 2 - this.stairsPos.x;
-      stairs.position.z -= (sb.min.z + sb.max.z) / 2 - this.stairsPos.z;
-      stairs.position.y = 0.35; // lift the flight so its steps sit up out of the pit
-      this.group.add(stairs);
+      // pit shaft + seated flight over the cut-out cell (shared with the cellar
+      // lobby's trapdoor mouths — see makeDescent)
+      const descent = makeDescent();
+      descent.position.copy(this.stairsPos);
+      this.group.add(descent);
     }
 
     // up-stairs: the way back out. On normal floors they rise at the arrival

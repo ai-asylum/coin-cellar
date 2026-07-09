@@ -12,7 +12,7 @@ import { makeLightShaft } from "../core/godrays.js";
 import { rng } from "../core/engine.js";
 import { FLOORS_PER_DUNGEON } from "./dungeon.js";
 import { DEFAULT_THEME } from "./dungeon-data.js";
-import { CELL, makeStairs, makeFloorGeometry, buildAssetFloor, buildAssetWalls, scatterAssetProps } from "./dungeon-geometry.js";
+import { CELL, makeStairs, makeDescent, makeFloorGeometry, buildAssetFloor, buildAssetWalls, scatterAssetProps } from "./dungeon-geometry.js";
 import { scatterDungeonDecor } from "./decor.js";
 import { dungeonAssetsReady, dungeonPalette } from "./dungeon-assets.js";
 
@@ -28,12 +28,14 @@ const cellPos = (x, y) => new THREE.Vector3((x - GW / 2 + 0.5) * CELL, 0, (y - G
 // All four mouths lined up in a neat row across the top of the room, evenly
 // spaced (reading order = dungeon index). They sit one cell in from the north
 // wall (gy 2, not 1) so neither the mouth nor the trapdoor lid — which hinges
-// and swings back toward the wall — clips through the wall geometry.
+// and swings back toward the wall — clips through the wall geometry. Each
+// mouth is a real cut-out floor cell with a sunk stair flight (same descent
+// assembly as the dungeons' down-stairs), so they sit on whole grid cells.
 export const HOLE_DEFS = [
-  { name: "Rat Warren", gx: 1.5, gy: 2, color: 0x9a6dff },
-  { name: "Flooded Deep", gx: 2.5, gy: 2, color: 0x5dd0ff },
-  { name: "Bone Hollow", gx: 3.5, gy: 2, color: 0xff9a5d },
-  { name: "Gloom Drain", gx: 4.5, gy: 2, color: 0x6fd6c8 },
+  { name: "Rat Warren", gx: 1, gy: 2, color: 0x9a6dff },
+  { name: "Flooded Deep", gx: 2, gy: 2, color: 0x5dd0ff },
+  { name: "Bone Hollow", gx: 3, gy: 2, color: 0xff9a5d },
+  { name: "Gloom Drain", gx: 4, gy: 2, color: 0x6fd6c8 },
 ];
 
 // the tutorial keeps its arrival spot and home stairs on opposite walls of the
@@ -80,7 +82,10 @@ export class Cellar {
     const floorTint = new THREE.Color(palette[1]).lerp(_WHITE, 0.5);
     const wallTint = new THREE.Color(palette[1]).lerp(_WHITE, 0.32);
     if (dungeonAssetsReady()) {
-      this.group.add(buildAssetFloor(open, GW, GH, cellPos, floorTint));
+      // the four mouths are real holes: their cells are cut out of the floor
+      // and each gets the pit-shaft + sunk-flight descent assembly below
+      const floorHoles = new Set(HOLE_DEFS.map((h) => `${h.gx},${h.gy}`));
+      this.group.add(buildAssetFloor(open, GW, GH, cellPos, floorTint, floorHoles));
     } else {
       this.group.add(new THREE.Mesh(
         makeFloorGeometry(open, GW, GH, cellPos),
@@ -145,20 +150,30 @@ export class Cellar {
     const lidTrim = makeToonMaterial({ color: 0x2f2621, rim: 0, polygonOffset: true });
     for (const hole of this.holes) {
       const local = new THREE.Vector3().copy(hole.pos).sub(O);
-      const mouth = new THREE.Mesh(
-        new THREE.CircleGeometry(0.85, 28).rotateX(-Math.PI / 2),
-        new THREE.MeshBasicMaterial({ color: 0x05060a })
-      );
-      mouth.position.copy(local).setY(0.02);
-      this.group.add(mouth);
+      if (dungeonAssetsReady()) {
+        // the same pit + sunk stair flight the dungeons' descent cells use —
+        // flush (no lift) so the closed grate lid swings clear of the steps
+        const descent = makeDescent(0.02);
+        descent.position.copy(local);
+        this.group.add(descent);
+      } else {
+        // no kit → no cut-out cell; keep the old flat dark mouth
+        const mouth = new THREE.Mesh(
+          new THREE.CircleGeometry(0.85, 28).rotateX(-Math.PI / 2),
+          new THREE.MeshBasicMaterial({ color: 0x05060a })
+        );
+        mouth.position.copy(local).setY(0.02);
+        this.group.add(mouth);
+      }
       const shaft = makeLightShaft({ color: hole.color, length: 4.2, topWidth: 0.45, bottomWidth: 1.6, opacity: 0.22, tilt: 0.16, spin: r() * Math.PI, motes: 8 });
       shaft.position.set(local.x, 3.2, local.z);
       this.group.add(shaft);
       this.shafts.push(shaft);
 
       // a heavy grated trapdoor barring the mouth — it hinges on its back edge
-      // and swings up once the player's earned the way into this hole.
-      const lidR = 1.0;
+      // and swings up once the player's earned the way into this hole. Sized
+      // to the full cell so the closed grate seals the cut-out flush.
+      const lidR = CELL / 2;
       const lidPivot = new THREE.Group();
       lidPivot.position.set(local.x, 0.06, local.z - lidR); // hinge on the far edge
       const lid = new THREE.Mesh(new THREE.BoxGeometry(lidR * 2, 0.12, lidR * 2), lidMat);

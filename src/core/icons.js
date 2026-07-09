@@ -31,7 +31,7 @@ const MASK = new Set([
 // verbatim — no mask, no currentColor tint — via `itemIcon()`. The key is the
 // item's `icon` field (see game/items.js); the file is public/items/<key>.png.
 const COLOR = new Set([
-  "caveshroom", "jelly", "herb", "bread", "sword", "potion", "ring", "dagger",
+  "caveshroom", "crystal", "jelly", "herb", "bread", "sword", "potion", "ring", "dagger",
   "lantern", "amulet", "swords", "tome", "gem", "fang", "crown",
   "mushroom", "meat", "egg", "key", "bomb", "shield", "bell", "feather",
   "hourglass", "star", "rathide",

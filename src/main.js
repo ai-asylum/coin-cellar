@@ -68,10 +68,22 @@ async function boot() {
 
 // Register the service worker so the game is installable as a PWA and can
 // launch offline once cached. Fire-and-forget after load; failures are silent.
+//
+// Only do this in production builds. In dev the SW's stale-while-revalidate
+// cache poisons Vite's client/HMR endpoints and asset requests (serving stale
+// code or the HTML shell where JSON is expected), so we instead tear down any
+// SW + caches left over from a previous prod visit on this origin.
 if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("sw.js").catch(() => {});
-  });
+  if (import.meta.env.PROD) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("sw.js").catch(() => {});
+    });
+  } else {
+    navigator.serviceWorker.getRegistrations().then((regs) => {
+      for (const reg of regs) reg.unregister();
+    });
+    if (window.caches) caches.keys().then((keys) => keys.forEach((k) => caches.delete(k)));
+  }
 }
 
 boot().catch((err) => {

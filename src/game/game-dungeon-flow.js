@@ -62,7 +62,9 @@ export const dungeonFlowMethods = {
     this.hud.showGold(true);
     this.hud.setGoldCorner(false); // the cellar's a safe hub — keep gold up top
     if (this.hud.sheetOpen) this.hud.hideSheet();
-    this.player.position.copy(this.cellar.entrancePos).add(_v.set(0, 0, -1.4));
+    // land a step SOUTH of the arrival beam — the trapdoor mouths one row north
+    // are real cut-out pits now, so don't drop the player onto a hole's lip
+    this.player.position.copy(this.cellar.entrancePos).add(_v.set(0, 0, 1.2));
     this.player.animator.prevPos.copy(this.player.position);
     this.audio.stairs();
     this._snapCamera();
