@@ -536,6 +536,22 @@ button { font-family: inherit; cursor: pointer; }
   pointer-events: auto; cursor: pointer;
 }
 #dialog.hidden { display: none; }
+
+/* ---- chat input bar (press T) ---- */
+#chat-bar {
+  position: fixed; left: 50%; bottom: 92px; transform: translateX(-50%);
+  z-index: 45; width: min(520px, 86vw); pointer-events: auto;
+}
+#chat-bar.hidden { display: none; }
+#chat-input {
+  pointer-events: auto; width: 100%; box-sizing: border-box;
+  font-size: 16px; font-weight: 700; color: var(--ink);
+  border-radius: 14px; border: 3px solid var(--wood-light); background: #fff8e9;
+  box-shadow: 0 6px 0 var(--wood-dark), 0 8px 18px rgba(30, 16, 4, 0.35);
+  padding: 10px 14px; outline: none;
+}
+#chat-input:focus { border-color: var(--gold); }
+
 .dlg-portrait {
   height: min(82vh, 640px); width: auto; margin-right: -8px;
   /* sink the bust below the screen edge so only the top half shows */

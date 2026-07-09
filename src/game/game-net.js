@@ -130,6 +130,11 @@ export const netMethods = {
       }
       const c = a.creature;
       c.setNameLabel(pl.name || "a wanderer");
+      // a fresh chat line (seq bumped by the lobby handler) pops a bubble
+      if (pl.chat && a.chatSeq !== pl.chatSeq) {
+        c.setChatBubble(pl.chat);
+        a.chatSeq = pl.chatSeq;
+      }
       // hide delvers on other floors of the same hole (identical world coords)
       c.visible = pl.floor === myFloor && !pl.dead;
       if (!c.visible) continue;
@@ -624,7 +629,26 @@ export const netMethods = {
         }
         break;
       }
+      case "chat":
+        // co-op partner said something — pop a bubble over their avatar
+        if (this.remote) this.remote.creature.setChatBubble(String(m.text || ""));
+        break;
     }
+  },
+
+  // Open the chat text box; on submit, show our own bubble and broadcast the
+  // line over both wires (co-op partner + shared-world lobby crowd).
+  _openChat() {
+    if (this.hud.sheetOpen || this.hud.speakOpen || this._adminOpen) return;
+    this.hud.openChat((text) => this._sendChat(text));
+  },
+
+  _sendChat(text) {
+    text = String(text || "").replace(/\s+/g, " ").trim().slice(0, 140);
+    if (!text) return;
+    this.player.setChatBubble(text); // instant local feedback
+    if (this.net.connected) this.net.send({ t: "chat", text });
+    this.lobby.chat(text);
   },
 
   _applyStockSlot(i, item) {

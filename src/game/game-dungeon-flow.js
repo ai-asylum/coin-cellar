@@ -11,6 +11,7 @@ import { ITEMS } from "./items.js";
 import { equipInfo } from "./gear.js";
 import { DUNGEON_ORIGIN, MAX_DEPTH, FLOORS_PER_DUNGEON, isBossFloor, dungeonIndexFor, bossDefFor } from "./dungeon.js";
 import { daySeed, utcDay } from "./game-util.js";
+import { track } from "../core/analytics.js";
 
 // A cellar shortcut, once earned by descending past a boss, stays unsealed for
 // three hours of real time before it re-locks.
@@ -39,10 +40,7 @@ export const dungeonFlowMethods = {
   // tutorial keeps the old direct drop: a private single-floor cellar on a
   // random seed, no lobby (cellarHole stays -1 so _enterDungeon never joins one).
   _startDelve() {
-    // heading down clears the post-Mayor restock nudge; the first restock skips
-    // both the tutorial cellar and the lobby and drops straight into dungeon 1,
-    // so it stays a smooth continuation of the guided loop.
-    const restocking = this._restockNudge;
+    // heading down clears the post-Mayor restock nudge
     this._restockNudge = false;
     if (this.tutorial) {
       this.cellarHole = -1;
@@ -52,22 +50,8 @@ export const dungeonFlowMethods = {
       this._beginHoleDive(this.shop.trapdoorPos, () => this._enterDungeon());
       return;
     }
-    // the guided restock drops straight into the day's first dungeon (mouth 0,
-    // floors 1-3) so it stays a smooth continuation of the FTUE. Only solo:
-    // co-op always routes through the lobby so host/guest floor sync
-    // (delveReq / floor messages) keeps working.
-    if (restocking && !this.net.connected) {
-      const seed = daySeed();
-      this.cellarHole = 0;
-      // regenerate unless a real (non-tutorial) floor 1 is already live — after
-      // the FTUE the private tutorial cellar is still active on floor 1, so the
-      // restock delve must rebuild it as the actual Rat Warren dungeon.
-      if (!this.dungeon.active || this.dungeon.floor !== 1 || this.dungeon.tutorial)
-        this.dungeon.generate(1, seed);
-      this._beginHoleDive(this.shop.trapdoorPos, () => this._enterDungeon());
-      return;
-    }
-    // drop down the shop trapdoor into the shared cellar lobby — dive in first
+    // always drop down the shop trapdoor into the shared cellar lobby, then let
+    // the player pick a mouth there — no shortcut straight into dungeon 1
     this._beginHoleDive(this.shop.trapdoorPos, () => this._enterCellar());
   },
 
@@ -406,6 +390,12 @@ export const dungeonFlowMethods = {
       bossFloor ? 2.6 : 1.6
     );
     this._tutAdvance("delve");
+    track("dungeon_entered", {
+      floor: this.dungeon.floor,
+      place,
+      boss_floor: bossFloor,
+      coop: this.net.connected,
+    });
   },
 
   _returnHome() {
@@ -428,6 +418,7 @@ export const dungeonFlowMethods = {
     this._snapCamera();
     this.hud.banner(`${icon("shop")} Back to the shop`, "", 1.4);
     this._tutAdvance("return");
+    track("returned_home", { deepest: this.today?.deepest ?? 0, gold: this.gold });
     this._save();
   },
 

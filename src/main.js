@@ -6,6 +6,9 @@ import { Game, requestFullscreen } from "./game/game.js";
 import { loadCharacters } from "./chargen/assets.js";
 import { loadDungeonAssets } from "./game/dungeon-assets.js";
 import { icon } from "./core/icons.js";
+import { initAnalytics, track } from "./core/analytics.js";
+
+initAnalytics();
 
 const app = document.getElementById("app");
 const hudRoot = document.getElementById("hud");
@@ -51,6 +54,7 @@ async function boot() {
     if (sub) sub.textContent = `Loading dungeon… ${done}/${total}`;
   });
   await startMenu();
+  track("game_started");
   hudRoot.innerHTML = "";
 
   const engine = new Engine(app);

@@ -43,6 +43,9 @@ export class HUD {
       </div>
       <div id="interact-hint" class="hidden"></div>
       <div id="hearts" class="hidden"></div>
+      <div id="chat-bar" class="hidden">
+        <input id="chat-input" type="text" maxlength="140" autocomplete="off" autocapitalize="sentences" placeholder="Say something\u2026" />
+      </div>
       <div id="dialog" class="hidden"></div>
       <div id="portraits"></div>
       <div id="hurt-flash"></div>
@@ -73,6 +76,10 @@ export class HUD {
     this._onBackdrop = null;
     this.backdropEl.addEventListener("click", () => this._onBackdrop?.());
     this.portraitsEl = root.querySelector("#portraits");
+    this.chatBarEl = root.querySelector("#chat-bar");
+    this.chatInputEl = root.querySelector("#chat-input");
+    this._onChatSubmit = null;
+    this._wireChatInput();
     this.dialogEl = root.querySelector("#dialog");
     this.speakOpen = false;
     this._onAdvance = null;
@@ -92,6 +99,43 @@ export class HUD {
     this._bannerT = null;
     this._tracked = [];
     this._gold = 0;
+  }
+
+  _wireChatInput() {
+    const inp = this.chatInputEl;
+    // keep game shortcuts / movement from firing while typing
+    inp.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Enter") {
+        const text = inp.value.trim();
+        const cb = this._onChatSubmit; // grab before closeChat() clears it
+        this.closeChat();
+        if (text) cb?.(text);
+      } else if (e.key === "Escape") {
+        this.closeChat();
+      }
+    });
+    // clicking away (e.g. tapping the world) dismisses the empty box on mobile
+    inp.addEventListener("blur", () => { if (this.chatOpen && !inp.value.trim()) this.closeChat(); });
+  }
+
+  get chatOpen() { return !this.chatBarEl.classList.contains("hidden"); }
+
+  /** Open the chat text box. `onSubmit(text)` fires when the player hits Enter. */
+  openChat(onSubmit) {
+    if (this.chatOpen) return;
+    this._onChatSubmit = onSubmit;
+    this.chatInputEl.value = "";
+    this.chatBarEl.classList.remove("hidden");
+    // focus on the next tick so the 't' that opened it isn't typed into the box
+    setTimeout(() => this.chatInputEl.focus(), 0);
+  }
+
+  closeChat() {
+    if (!this.chatOpen) return;
+    this.chatBarEl.classList.add("hidden");
+    this.chatInputEl.blur();
+    this._onChatSubmit = null;
   }
 
   setGold(g, animate = true) {

@@ -6,6 +6,7 @@ import * as THREE from "three";
 import { icon, itemIcon } from "../core/icons.js";
 import { ITEMS } from "./items.js";
 import { ARCHETYPES } from "./shop.js";
+import { track } from "../core/analytics.js";
 
 // per-call scratch vectors (duplicated from game.js — these are transient)
 const _v = new THREE.Vector3();
@@ -154,6 +155,7 @@ export const economyMethods = {
       this._tutAdvance("sell");
       this._syncStock();
       this._save();
+      track("item_sold", { price, grade, combo: this.combo, haggled: true });
       if (cust.isMayor) this._mayorFromCustomer(cust);
     } else {
       this.combo = 0;
@@ -183,6 +185,7 @@ export const economyMethods = {
     this._tutAdvance("sell");
     this._syncStock();
     this._save();
+    track("item_sold", { price, grade: "good", combo: 0, haggled: false });
     if (cust.isMayor) this._mayorFromCustomer(cust);
   },
 

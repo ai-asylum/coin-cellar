@@ -5,6 +5,7 @@ import { BlockyCreature } from "../chargen/blocky.js";
 import { portraitDataURL } from "../chargen/portrait.js";
 import { icon } from "../core/icons.js";
 import { DUNGEON_ORIGIN } from "./dungeon.js";
+import { track } from "../core/analytics.js";
 
 // The Mayor NPC: a fixed character variant (so his walking body matches the
 // dialogue bust), and his short spiel. One sentence per bubble — he offers the
@@ -61,6 +62,8 @@ export const narrativeMethods = {
     if (this.tutorial !== step) return;
     const order = ["delve", "loot", "return", "stock", "sell"];
     this.tutorial = order[order.indexOf(step) + 1] || null;
+    // advancing past the last step (the first sale) closes the FTUE loop
+    if (!this.tutorial) track("ftue_completed", { day: this.day, gold: this.gold });
     // reaching the sell step means the first table's just been stocked — send in
     // the Mayor (disguised as an ordinary shopper) to buy that first item. Once
     // the sale lands he reveals himself, so there's no separate walk-in here.

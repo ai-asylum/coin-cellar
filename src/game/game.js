@@ -288,7 +288,7 @@ export class Game {
     const mv = this.input.move;
     // A sheet or a live dialogue bubble both freeze the player: no walking,
     // no swinging, no context-interacts until it's dismissed.
-    const sheetBlocked = this.hud.sheetOpen || this.hud.speakOpen;
+    const sheetBlocked = this.hud.sheetOpen || this.hud.speakOpen || this.hud.chatOpen;
 
     // A live dialogue bubble eats the action press to advance itself: a click
     // anywhere on screen, Space/Enter, or the on-screen action button. The
@@ -492,6 +492,7 @@ export class Game {
       case "KeyB":
       case "KeyI": return this._toggleBag();
       case "KeyC": return this._friendSheet();
+      case "KeyT": return this._openChat();
       case "KeyM": return document.getElementById("mute-btn").click();
       // NB: E / F (interact) are read as an input edge in _updatePlayer so they
       // stay separate from the Space/click attack — see the action routing there.
