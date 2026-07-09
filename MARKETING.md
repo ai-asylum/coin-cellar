@@ -15,6 +15,16 @@ The fake door is **generated** from `store/fakedoor.config.json` (+ `icon.webp` 
 GitHub Action renders the `store/*` pages and commits them back to this repo.
 Don't hand-edit the generated HTML.
 
+Playables are built with **`ai-asylum/playable-kit`** (vendored as
+`vendor/playable-kit-*.tgz`): the game keeps only its asset manifest in
+`scripts/build-playable.mjs` (+ a small `vite.playable.config`), and
+`npm run build:playable` assembles the committed `ads/playable/*.html`.
+**Don't hand-edit a kit-built playable** — edit the source and rebuild. CI
+(`.github/workflows/playable.yml`) rebuilds it on every main push (recommitting
+if stale) and behaviorally smoke-tests it: it must boot, render a canvas, and
+make no requests beyond `mraid.js` + Google Fonts. Repos with hand-authored
+single-file playables run the smoke test only (`build:playable` is a no-op).
+
 Build or validate them with the **`fake-door-readiness`** skill (`edi` plugin,
 `ai-asylum/plugins`). Canonical rules + detail:
 `ai-asylum/team-dashboard` `docs/marketing-readiness.md`.
