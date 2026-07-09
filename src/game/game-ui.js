@@ -475,6 +475,7 @@ export const uiMethods = {
         <button data-a="clearbag">${icon("trash")} Empty bag</button>
         <button data-a="delve">${icon("hole")} Delve</button>
         <button data-a="floor">${icon("arrowDown")} Next floor</button>
+        <button data-a="tpexit">${icon("hole")} TP to exit</button>
         <button data-a="key">${itemIcon("key")} Give key</button>
         <button data-a="kill">${icon("skull")} Kill enemies</button>
         <button data-a="reset" class="danger">${icon("recycle")} Wipe save</button>
@@ -562,6 +563,22 @@ export const uiMethods = {
           else this._descend();
         } else this.hud.toast("Delve first!");
         break;
+      case "tpexit": {
+        // hop straight to the floor's way onward — the descent stairs, the boss
+        // stairs once conjured, or the gate / up-stairs where nothing else leads
+        // deeper. Lands a step to the side so the prompt isn't primed on arrival.
+        if (this.playerArea !== "dungeon" || !this.dungeon.active) { this.hud.toast("Delve first!"); break; }
+        const D = this.dungeon;
+        if (D.bossStairs) _v.copy(D.bossStairs.pos);
+        else if (D.hasDownStairs) _v.copy(D.stairsPos).add(DUNGEON_ORIGIN);
+        else if (D.gatePos) _v.copy(D.gatePos).add(DUNGEON_ORIGIN);
+        else _v.copy(D.upStairsPos).add(DUNGEON_ORIGIN);
+        this.player.position.set(_v.x + 1.5, 0, _v.z + 1.1);
+        this.player.animator.prevPos.copy(this.player.position);
+        this._snapCamera();
+        this.hud.toast(`${icon("hole")} Teleported to the exit`);
+        break;
+      }
       case "key":
         // into the bag while delving, into the storeroom back home
         if (this.playerArea !== "dungeon") {

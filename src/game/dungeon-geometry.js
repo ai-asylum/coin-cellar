@@ -20,12 +20,20 @@ export function makeStairs(dir = "down", color = 0x2a2038) {
   if (dungeonAssetsReady()) {
     const g = new THREE.Group();
     const stair = cloneModel("stair");
-    if (dir === "down") stair.rotation.y = Math.PI;
+    if (dir === "down") {
+      stair.rotation.y = Math.PI;
+      // the pit under the descent is a whole floor tile (CELL × CELL), but at
+      // the default prop scale the flight only covered ~1.5×1.2 of it, leaving
+      // a black gap ringing the steps. Stretch its footprint to span the full
+      // cell (raw kit model is 5 wide × 4 deep) so flight and hole meet flush.
+      stair.scale.set(CELL / 5, stair.scale.y, CELL / 4);
+    }
     const box = new THREE.Box3().setFromObject(stair);
     // "down": top step drops to y=0 and the flight sinks into the pit below.
-    // "up": the model's pivot sits mid-height, so its base is below y=0 (buried
-    // under the floor slab) — lift it so the bottom step rests flush on the floor.
-    stair.position.y = dir === "down" ? -box.max.y : -box.min.y;
+    // "up": seat the base on the floor, then lift it clear of the floor plane —
+    // at floor level the surrounding tiles (which top out at ~0.03, and up to
+    // ~0.32 for the rocky variant) render over and cover the low steps.
+    stair.position.y = dir === "down" ? -box.max.y : -box.min.y + 0.35;
     g.add(stair);
     return g;
   }
@@ -269,25 +277,38 @@ const _ORIGIN0 = { x: 0, z: 0 };
 // while the mesh is still unparented (so its bounds land in group-local space),
 // then offset by the area origin. `shrink` trims the box a hair so you can brush
 // past edges. Used for every solid kit model (props + chests).
+const _COLLIDER_MAX = CELL * 0.5; // never wall off more than a single cell
 export function modelCollider(mesh, origin = _ORIGIN0, shrink = 0.85) {
   mesh.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(mesh);
+  const clamp = (v) => Math.min(_COLLIDER_MAX, Math.max(0.2, v * shrink));
   return {
     x: (box.min.x + box.max.x) / 2 + origin.x,
     z: (box.min.z + box.max.z) / 2 + origin.z,
-    hw: Math.max(0.2, ((box.max.x - box.min.x) / 2) * shrink),
-    hd: Math.max(0.2, ((box.max.z - box.min.z) / 2) * shrink),
+    hw: clamp((box.max.x - box.min.x) / 2),
+    hd: clamp((box.max.z - box.min.z) / 2),
+    h: box.max.y - box.min.y, // model height (smash-burst sizing; ignored by physics)
   };
 }
 
 // floor clutter that hugs a room's inner corners (never blocks the walkway).
-// Returns the world-space colliders for every prop it drops so the caller can
-// fold them into the floor's collider list (player/enemies/shots all block).
+// Returns a record per placed prop — its mesh, world-space collider, smash-burst
+// colour and whether it's structural — so the caller can fold the colliders into
+// the floor's list and wire the smashable ones into the decor pipeline.
 const _CLUTTER = ["barrel", "barrelSmall", "box", "boxSmall", "crates", "table", "rubble", "coins", "pillar", "floorTorch"];
+// structural pieces hold the ceiling up: struck, they spark and clank but never
+// break. Everything else in the clutter list smashes like the billboard decor.
+const _STRUCTURAL = new Set(["pillar", "floorTorch"]);
+// smash-burst colour per prop (wood browns, gold for the coin stack, stone grey)
+const _KIT_BURST = {
+  barrel: 0x8a5a33, barrelSmall: 0x8a5a33, table: 0x8a5a33,
+  box: 0xa8794a, boxSmall: 0xa8794a, crates: 0xa8794a,
+  rubble: 0xa9a2b4, coins: 0xf0c04a,
+};
 export function scatterAssetProps(group, r, rooms, cellPos, opts = {}) {
   if (!dungeonAssetsReady()) return [];
   const { skip = [], open = null, origin = _ORIGIN0 } = opts;
-  const colliders = [];
+  const props = [];
   const blocked = (cx, cy) => skip.some((s) => Math.abs(s.x - cx) < 1.5 && Math.abs(s.y - cy) < 1.5);
   // a prop's footprint mustn't land on a walk target (stairs/entrance/mouths)
   const nearSkip = (gx, gy) => skip.some((s) => Math.abs(s.x - gx) < 1.2 && Math.abs(s.y - gy) < 1.2);
@@ -297,7 +318,8 @@ export function scatterAssetProps(group, r, rooms, cellPos, opts = {}) {
     const p = cellPos(gx, gy);
     m.position.set(p.x, 0, p.z);
     m.rotation.y = rot;
-    colliders.push(modelCollider(m, origin)); // fit before parenting (group-local)
+    const collider = modelCollider(m, origin); // fit before parenting (group-local)
+    props.push({ name, mesh: m, collider, structural: _STRUCTURAL.has(name), color: _KIT_BURST[name] ?? 0xa8794a });
     group.add(m);
   };
   for (const room of rooms) {
@@ -323,7 +345,7 @@ export function scatterAssetProps(group, r, rooms, cellPos, opts = {}) {
     // (mounted on already-solid wall cells, so no extra collider needed)
     if (open && r() < 0.7) mountWallDecor(group, r, room, cellPos, open, nearSkip);
   }
-  return colliders;
+  return props;
 }
 
 // Hang a torch/banner on one of a room's solid perimeter walls, facing inward.

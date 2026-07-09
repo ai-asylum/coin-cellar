@@ -127,12 +127,6 @@ export class Cellar {
     stairs.rotation.y = -Math.PI / 2; // rise toward the far (east) wall
     stairs.position.copy(exitLocal);
     this.group.add(stairs);
-    const glow = new THREE.Mesh(
-      new THREE.CircleGeometry(0.7, 20).rotateX(-Math.PI / 2),
-      new THREE.MeshBasicMaterial({ color: 0x8fd0ff, transparent: true, opacity: 0.4 })
-    );
-    glow.position.copy(exitLocal).setY(0.05);
-    this.group.add(glow);
     const homeShaft = makeLightShaft({ color: 0xffd9a0, length: 4.6, topWidth: 0.55, bottomWidth: 2.4, opacity: 0.34, tilt: 0.24, spin: 1.2, motes: 12 });
     homeShaft.position.set(exitLocal.x, 3.4, exitLocal.z);
     this.group.add(homeShaft);
@@ -190,8 +184,10 @@ export class Cellar {
     // props plus the kit's barrels and crates, kept clear of every walk target
     const skip = [ENTRANCE_CELL, STAIRS_CELL, ...HOLE_DEFS.map((h) => ({ x: h.gx, y: h.gy }))];
     scatterDungeonDecor(this.group, r, [ROOM], cellPos, { skip, theme: DEFAULT_THEME.decor });
-    const propColliders = scatterAssetProps(this.group, r, [ROOM], cellPos, { skip, origin: CELLAR_ORIGIN });
-    for (const c of propColliders) this.colliders.push(c);
+    // the lobby is a safe hub with no combat, so its props stay static — only
+    // their solid footprints matter here
+    for (const pr of scatterAssetProps(this.group, r, [ROOM], cellPos, { skip, origin: CELLAR_ORIGIN }))
+      this.colliders.push(pr.collider);
   }
 
   update(dt, elapsed) {

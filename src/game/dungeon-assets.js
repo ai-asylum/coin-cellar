@@ -36,9 +36,13 @@ export const MODEL_SCALE = 0.6;
 //  - the wall model runs along +X; rotate it 90° so at rotation 0 it runs N–S
 //    (buildAssetWalls places panels on that assumption)
 //  - the stairway is 5 units tall; shrink it so it fits a single cell as a prop
+//  - rubble_large is a ~8-unit debris field; at the normal 0.6 scale it spans
+//    ~5 units (two cells), so it overflowed its cell and its collider became a
+//    giant invisible wall. Shrink it to sit inside a single cell.
 const XFORM = {
   wallFull: { rotY: Math.PI / 2 },
   stair: { scale: 0.3 },
+  rubble: { scale: 0.18 },
 };
 
 // logical name -> THREE.Group template (already scaled/rotated)

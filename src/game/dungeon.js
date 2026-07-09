@@ -27,7 +27,8 @@ export class Dungeon {
     this.enemies = [];
     this.drops = [];
     this.chests = [];
-    this.decor = []; // destructible billboard props (smashable; some forage a drop)
+    this.decor = []; // destructible props — billboards + smashable kit models
+    this.structural = []; // unbreakable kit props (pillars); spark when struck
     this.shafts = []; // god-ray light shafts (animated each frame)
     this.colliders = [];
     this.projectiles = new Projectiles(game.engine.scene);
@@ -319,8 +320,26 @@ export class Dungeon {
     // freestanding kit props (barrels/crates/braziers) tucked against the walls,
     // plus torches/banners mounted on the rooms' perimeter walls. Their solid
     // footprints join the floor's colliders so nothing walks through them.
-    const propColliders = scatterAssetProps(this.group, r, rooms, cellPos, { skip: [this.entranceCell, this.stairsCell], open, GW, GH, origin: DUNGEON_ORIGIN });
-    for (const c of propColliders) this.colliders.push(c);
+    // Smashables join the decor pipeline (ids continue past the billboards, and
+    // both are seeded, so co-op peers agree); structural pieces (pillars,
+    // standing torches) go on `structural` and only spark when struck.
+    const props = scatterAssetProps(this.group, r, rooms, cellPos, { skip: [this.entranceCell, this.stairsCell], open, GW, GH, origin: DUNGEON_ORIGIN });
+    this.structural = [];
+    for (const pr of props) {
+      this.colliders.push(pr.collider);
+      const wx = pr.collider.x, wz = pr.collider.z;
+      const radius = Math.max(pr.collider.hw, pr.collider.hd);
+      if (pr.structural) {
+        this.structural.push({ wx, wz, radius });
+      } else {
+        this.decor.push({
+          group: pr.mesh, cat: "kit", id: this.decor.length,
+          x: wx - DUNGEON_ORIGIN.x, z: wz - DUNGEON_ORIGIN.z, wx, wz,
+          height: Math.min(1.6, pr.collider.h ?? 1), color: pr.color, radius,
+          collider: pr.collider, // freed on smash so the spot stops blocking
+        });
+      }
+    }
 
     // --- god-ray shafts: light leaking through cracks in the ceiling above.
     // Cool arcane glow over the up-stairs at the entrance, warm dusk over the
@@ -764,6 +783,7 @@ export class Dungeon {
     this.drops = [];
     this.chests = [];
     this.decor = [];
+    this.structural = [];
     for (const s of this.shafts) s.userData.dispose();
     this.shafts = [];
     this.colliders = [];

@@ -140,7 +140,30 @@ export const combatMethods = {
     // shatter any destructible scenery in the path — a puff of leaves/dust/bone
     // that can also forage a drop (herbs, mushrooms, rock crystals)
     if (this._smashDecor(pos, reach)) hitAny = true;
+    // structural props (pillars, standing torches) don't give — they spark
+    if (this._sparkStructural(pos, reach, hitIds)) hitAny = true;
     return hitAny;
+  },
+
+  // A dash raking a structural prop: a shower of sparks and a stony clank, but
+  // the prop stands. Purely cosmetic and local (nothing changes state, so co-op
+  // peers need no message). Deduped per dash via `hitIds` so a pass-through
+  // doesn't spark every frame.
+  _sparkStructural(pos, reach, hitIds = null) {
+    let hit = false;
+    for (let i = 0; i < this.structural.length; i++) {
+      const s = this.structural[i];
+      const key = "sp:" + i;
+      if (hitIds && hitIds.has(key)) continue;
+      if (Math.hypot(s.wx - pos.x, s.wz - pos.z) > reach + s.radius) continue;
+      hitIds && hitIds.add(key);
+      _v.set(s.wx, 0.9, s.wz);
+      this.game.particles.burst(_v, { color: 0xffd98a, n: 9, speed: 3.6, up: 1.6, life: 0.35, size: 0.6 });
+      this.game.particles.burst(_v, { color: 0xffffff, n: 4, speed: 2.6, up: 2.0, life: 0.28, size: 0.5 });
+      this.game.audio.clank?.();
+      hit = true;
+    }
+    return hit;
   },
 
   // Smash every destructible prop caught within `reach` of `pos`. The burst
@@ -196,8 +219,10 @@ export const combatMethods = {
     game.particles.burst(_v, { color: d.color, n, speed: 3 + d.height, up: 2 + d.height * 0.8, life: 0.6, size: 0.9 + d.height * 0.2 });
     game.particles.burst(_v, { color: 0xffffff, n: Math.ceil(n * 0.35), speed: 2.4, up: 2.2, life: 0.45, size: 0.7 });
     game.audio.projHit?.();
-    disposeDecor(d.group);
+    disposeDecor(d.group); // sprite materials only — kit models share templates
     d.group.removeFromParent();
+    // a smashed kit prop stops blocking (billboard decor never had a collider)
+    if (d.collider) this.colliders = this.colliders.filter((c) => c !== d.collider);
   },
 
   damageEnemy(e, dmg, kx = 0, kz = 0, opts = {}) {
