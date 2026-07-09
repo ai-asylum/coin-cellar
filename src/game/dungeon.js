@@ -1,6 +1,6 @@
 // The dungeon under the shop. Seeded procedural floors (rooms + L-shaped
 // corridors on a grid), instanced walls, chests, a stairway down and a
-// portal home. Enemies come out of the same blob-bake pipeline as the
+// stairway back up. Enemies come out of the same blob-bake pipeline as the
 // customers upstairs — skitters, slimes, goblins, wisps, brutes.
 import * as THREE from "three";
 import { makeToonMaterial, feedOccluder } from "../core/toon.js";
@@ -10,7 +10,8 @@ import { scatterDungeonDecor, disposeDecor } from "./decor.js";
 import { Projectiles } from "./projectile.js";
 import { rng, pick } from "../core/engine.js";
 import { DUNGEON_ORIGIN, isBossFloor, dungeonIndexFor, bossDefFor, ENEMY_KINDS, HOLE_THEMES, DEFAULT_THEME, FLOORS_PER_DUNGEON, floorMixFor } from "./dungeon-data.js";
-import { CELL, makeChest, makeGate, makeFloorGeometry } from "./dungeon-geometry.js";
+import { CELL, makeChest, makeGate, makeFloorGeometry, makeStairs, buildAssetFloor, buildAssetWalls, scatterAssetProps } from "./dungeon-geometry.js";
+import { dungeonAssetsReady, dungeonWallMaterial } from "./dungeon-assets.js";
 import { aiMethods } from "./dungeon-ai.js";
 import { combatMethods } from "./dungeon-combat.js";
 
@@ -42,8 +43,9 @@ export class Dungeon {
     this.keyChestId = -1;
     // the summoning portal the boss rises out of when the gate is unlocked
     this._bossPortal = null;
-    // return portal home, conjured where the boss falls (world-space anchor)
-    this.returnPortal = null;
+    // stairs conjured where the boss falls: down to the next stacked dungeon,
+    // or (final boss) straight home (world-space anchor)
+    this.bossStairs = null;
   }
 
   /** Build floor n from a seed (deterministic — co-op peers share the seed).
@@ -178,13 +180,21 @@ export class Dungeon {
     // palette deepens with the floor within its own dungeon (1st/2nd/3rd floor)
     const localFloor = (floorN - 1) % FLOORS_PER_DUNGEON;
     const palette = theme.palettes[Math.min(localFloor, theme.palettes.length - 1)];
-    // the floor only exists under open (walkable) cells — one merged quad per
-    // cell rather than a single slab, so there's no floor hanging out beyond the
-    // walls. Flat theme color for now (checkerboard texture removed).
-    this._floorMesh = new THREE.Mesh(
-      makeFloorGeometry(open, GW, GH, cellPos),
-      new THREE.MeshToonMaterial({ color: new THREE.Color(palette[1]) })
-    );
+    // the floor only exists under open (walkable) cells. With the kit loaded it's
+    // one stone tile per cell (instanced); otherwise a merged quad per cell. A
+    // light tint off the theme palette keeps each dungeon's identity on the
+    // shared stone texture. (wallTint runs a touch darker for depth.)
+    const _WHITE = new THREE.Color(0xffffff);
+    const floorTint = new THREE.Color(palette[1]).lerp(_WHITE, 0.5);
+    const wallTint = new THREE.Color(palette[1]).lerp(_WHITE, 0.32);
+    if (dungeonAssetsReady()) {
+      this._floorMesh = buildAssetFloor(open, GW, GH, cellPos, floorTint);
+    } else {
+      this._floorMesh = new THREE.Mesh(
+        makeFloorGeometry(open, GW, GH, cellPos),
+        new THREE.MeshToonMaterial({ color: new THREE.Color(palette[1]) })
+      );
+    }
     this.group.add(this._floorMesh);
 
     // --- instanced walls on closed cells that touch open cells
@@ -202,24 +212,36 @@ export class Dungeon {
           this.colliders.push({ x: p.x + DUNGEON_ORIGIN.x, z: p.z + DUNGEON_ORIGIN.z, hw: CELL / 2, hd: CELL / 2 });
         }
       }
-    const wallGeo = new THREE.BoxGeometry(CELL, 1.7, CELL);
-    const wallMat = makeToonMaterial({ color: new THREE.Color(palette[1]).multiplyScalar(0.55).getHex(), rim: 0, occlude: true });
-    this._wallMat = wallMat;
-    this._wallMesh = new THREE.InstancedMesh(wallGeo, wallMat, wallCells.length);
-    const m = new THREE.Matrix4();
-    wallCells.forEach(([x, y], i) => {
-      const p = cellPos(x, y);
-      const jitter = 0.92 + rng(seed + x * 31 + y * 57)() * 0.18;
-      m.makeScale(1, jitter, 1);
-      m.setPosition(p.x, 0.85 * jitter, p.z);
-      this._wallMesh.setMatrixAt(i, m);
-    });
-    this.group.add(this._wallMesh);
+    // With the kit loaded, line each open→closed boundary with stone panels;
+    // otherwise fall back to the jittered instanced boxes. Either way the
+    // colliders above (cell-based) do the actual blocking.
+    if (dungeonAssetsReady()) {
+      const walls = buildAssetWalls(open, GW, GH, cellPos, wallTint);
+      this._wallMesh = walls.mesh;
+      this._wallMat = walls.mat;
+      this.group.add(this._wallMesh);
+    } else {
+      const wallGeo = new THREE.BoxGeometry(CELL, 1.7, CELL);
+      const wallMat = makeToonMaterial({ color: new THREE.Color(palette[1]).multiplyScalar(0.55).getHex(), rim: 0, occlude: true });
+      this._wallMat = wallMat;
+      this._wallMesh = new THREE.InstancedMesh(wallGeo, wallMat, wallCells.length);
+      const m = new THREE.Matrix4();
+      wallCells.forEach(([x, y], i) => {
+        const p = cellPos(x, y);
+        const jitter = 0.92 + rng(seed + x * 31 + y * 57)() * 0.18;
+        m.makeScale(1, jitter, 1);
+        m.setPosition(p.x, 0.85 * jitter, p.z);
+        this._wallMesh.setMatrixAt(i, m);
+      });
+      this.group.add(this._wallMesh);
+    }
 
-    // --- entrance (room 0) is just the arrival spot now (marked by its light
-    // shaft below) — leaving the cellar happens at the stairs prompt instead of
-    // a return circle. & stairs down (last room). On the tutorial floor the lone
-    // room holds both, tucked against opposite walls so there's room to breathe.
+    // --- two flights of stairs now, one up and one down. The up-stairs stand
+    // at the arrival spot (room 0) and lead back out of the cellar; the
+    // down-stairs go in the room farthest from the entrance for a longer
+    // descent (never on boss floors — the way deeper there opens past the
+    // boss). On the tutorial floor the lone room holds the arrival spot and the
+    // up-stairs against opposite walls so there's room to breathe.
     const rm0 = rooms[0];
     const entranceCell = tutorial ? { x: rm0.x + 1, y: rm0.cy } : { x: rm0.cx, y: rm0.cy };
     this.entrancePos = cellPos(entranceCell.x, entranceCell.y);
@@ -227,7 +249,7 @@ export class Dungeon {
     // start with the entrance room revealed
     this.reveal(this.entrancePos.x + DUNGEON_ORIGIN.x, this.entrancePos.z + DUNGEON_ORIGIN.z);
 
-    // stairs go in the room farthest from the entrance for a longer descent
+    // down-stairs go in the room farthest from the entrance for a longer descent
     let last = rooms[0], far = -1;
     for (const room of rooms) {
       const d = Math.abs(room.cx - rooms[0].cx) + Math.abs(room.cy - rooms[0].cy);
@@ -236,29 +258,37 @@ export class Dungeon {
     const stairsCell = tutorial ? { x: rm0.x + rm0.w - 2, y: rm0.cy } : { x: last.cx, y: last.cy };
     this.stairsPos = cellPos(stairsCell.x, stairsCell.y);
     this.stairsCell = stairsCell;
-    const stairs = new THREE.Group();
-    for (let i = 0; i < 4; i++) {
-      const step = new THREE.Mesh(
-        new THREE.BoxGeometry(1.5 - i * 0.28, 0.42, 1.5 - i * 0.28),
-        makeToonMaterial({ color: 0x2a2038, rim: 0 })
+    this.hasDownStairs = !tutorial && !isBoss;
+    if (this.hasDownStairs) {
+      const stairs = makeStairs("down");
+      stairs.position.copy(this.stairsPos);
+      this.group.add(stairs);
+      const glow = new THREE.Mesh(
+        new THREE.CircleGeometry(0.7, 20).rotateX(-Math.PI / 2),
+        new THREE.MeshBasicMaterial({ color: 0xff8a3d, transparent: true, opacity: 0.4 })
       );
-      // lift slightly so the top step's face doesn't sit coplanar with the
-      // floor slab (y=0), which caused z-fighting on the descent
-      step.position.y = -0.19 - i * 0.16;
-      stairs.add(step);
+      glow.position.copy(this.stairsPos).setY(0.05);
+      this.group.add(glow);
     }
-    stairs.position.copy(this.stairsPos);
-    this.group.add(stairs);
-    const glow = new THREE.Mesh(
+
+    // up-stairs: the way back out. On normal floors they rise at the arrival
+    // spot; on the tutorial floor they take the far wall instead and stay
+    // hidden until the chest is cracked, so the first objective is unmistakably
+    // "smash the chest" — revealStairs() (called from openChest) brings the
+    // stairs + their light shaft back in.
+    this.upStairsPos = tutorial ? this.stairsPos.clone() : this.entrancePos.clone();
+    this.upStairsCell = tutorial ? stairsCell : entranceCell;
+    const upStairs = makeStairs("up");
+    upStairs.position.copy(this.upStairsPos);
+    if (tutorial) upStairs.rotation.y = -Math.PI / 2; // rise toward the far wall
+    this.group.add(upStairs);
+    const upGlow = new THREE.Mesh(
       new THREE.CircleGeometry(0.7, 20).rotateX(-Math.PI / 2),
-      new THREE.MeshBasicMaterial({ color: 0xff8a3d, transparent: true, opacity: 0.4 })
+      new THREE.MeshBasicMaterial({ color: 0x8fd0ff, transparent: true, opacity: 0.4 })
     );
-    glow.position.copy(this.stairsPos).setY(0.05);
-    this.group.add(glow);
-    // On the tutorial floor the way home stays hidden until the chest is cracked,
-    // so the first objective is unmistakably "smash the chest". revealStairs()
-    // (called from openChest) brings the stairs + their light shaft back in.
-    this._stairsMeshes = [stairs, glow];
+    upGlow.position.copy(this.upStairsPos).setY(0.05);
+    this.group.add(upGlow);
+    this._stairsMeshes = [upStairs, upGlow];
     this.stairsHidden = tutorial;
     if (this.stairsHidden) for (const mesh of this._stairsMeshes) mesh.visible = false;
 
@@ -273,9 +303,12 @@ export class Dungeon {
       theme: theme.decor,
     }).map((d, i) => ({ ...d, id: i, wx: d.x + DUNGEON_ORIGIN.x, wz: d.z + DUNGEON_ORIGIN.z }));
 
+    // freestanding kit props (barrels/crates/braziers) tucked against the walls
+    scatterAssetProps(this.group, r, rooms, cellPos, { skip: [this.entranceCell, this.stairsCell] });
+
     // --- god-ray shafts: light leaking through cracks in the ceiling above.
-    // Cool arcane glow over the entrance portal, warm dusk over the stairs,
-    // and a couple of pale beams scattered through the deeper rooms.
+    // Cool arcane glow over the up-stairs at the entrance, warm dusk over the
+    // down-stairs, and a couple of pale beams scattered through deeper rooms.
     const addShaft = (pos, opts) => {
       const shaft = makeLightShaft(opts);
       shaft.position.set(pos.x, 3.4, pos.z);
@@ -284,9 +317,15 @@ export class Dungeon {
       return shaft;
     };
     addShaft(this.entrancePos, { color: 0x9a6dff, length: 4.6, topWidth: 0.6, bottomWidth: 2.6, opacity: 0.4, tilt: 0.28, spin: 0.4, motes: 14 });
-    const stairsShaft = addShaft(this.stairsPos, { color: 0xff9a4d, length: 4.6, topWidth: 0.55, bottomWidth: 2.4, opacity: 0.34, tilt: 0.24, spin: 1.2, motes: 12 });
-    // the stairs' beam is part of the "way home" reveal on the tutorial floor
-    if (this.stairsHidden) { stairsShaft.visible = false; this._stairsMeshes.push(stairsShaft); }
+    if (this.hasDownStairs)
+      addShaft(this.stairsPos, { color: 0xff9a4d, length: 4.6, topWidth: 0.55, bottomWidth: 2.4, opacity: 0.34, tilt: 0.24, spin: 1.2, motes: 12 });
+    // the tutorial's up-stairs get a warm "way home" beam that's part of the
+    // chest-crack reveal
+    if (tutorial) {
+      const homeShaft = addShaft(this.upStairsPos, { color: 0xffd9a0, length: 4.6, topWidth: 0.55, bottomWidth: 2.4, opacity: 0.34, tilt: 0.24, spin: 1.2, motes: 12 });
+      homeShaft.visible = false;
+      this._stairsMeshes.push(homeShaft);
+    }
     for (const room of rooms.slice(1, -1)) {
       if (r() < 0.5) {
         const p = cellPos(room.cx, room.cy);
@@ -580,12 +619,11 @@ export class Dungeon {
 
     for (const s of this.shafts) s.userData.update(dt, elapsed);
 
-    // the return portal pulses and slowly spins once it's been conjured
-    if (this.returnPortal) {
-      const rp = this.returnPortal;
-      rp.mesh.rotation.y += dt * 0.7;
-      rp.disc.material.opacity = 0.45 + Math.sin(elapsed * 3) * 0.15;
-      rp.ring.material.opacity = 0.6 + Math.sin(elapsed * 3 + 1) * 0.15;
+    // the boss stairs' floor glow pulses once they've been conjured
+    if (this.bossStairs) {
+      const bs = this.bossStairs;
+      bs.disc.material.opacity = 0.45 + Math.sin(elapsed * 3) * 0.15;
+      bs.ring.material.opacity = 0.6 + Math.sin(elapsed * 3 + 1) * 0.15;
     }
 
     // the boss summoning portal: bloom open, spit the boss out, then fade away
@@ -711,6 +749,15 @@ export class Dungeon {
     this.shafts = [];
     this.colliders = [];
     disposeDecor(this.group); // free the billboard scenery's sprite materials
+    // free this floor's baked instanced geometry (walls + floor tiles) so a long
+    // descent doesn't pile up GPU buffers; the shared wall material is reused
+    const sharedWall = dungeonWallMaterial();
+    this.group.traverse((o) => {
+      if (o.isInstancedMesh) {
+        o.geometry.dispose();
+        if (o.material && o.material !== sharedWall) o.material.dispose();
+      }
+    });
     this.group.clear();
     this.active = false;
     this.group.visible = false;
@@ -724,19 +771,19 @@ export class Dungeon {
     this.keyChestId = -1;
     this.isBoss = false;
     this._bossPortal = null;
-    this.returnPortal = null;
+    this.bossStairs = null;
   }
 }
 
 // AI (enemy update loop, telegraphs, attack state machine) and combat
-// (projectiles, damage, loot, chests, portals) live in sibling modules and are
-// mixed onto the prototype so every `this._method()` call keeps working.
+// (projectiles, damage, loot, chests, boss stairs) live in sibling modules and
+// are mixed onto the prototype so every `this._method()` call keeps working.
 Object.assign(Dungeon.prototype, aiMethods, combatMethods);
 
 const _v = new THREE.Vector3();
 
 // Re-export the public data API so existing import sites (game.js, admin.js,
-// sewer.js) keep working unchanged after the split.
+// cellar.js) keep working unchanged after the split.
 export {
   DUNGEON_ORIGIN, MAX_DEPTH, FLOORS_PER_DUNGEON, N_DUNGEONS, isBossFloor,
   dungeonIndexFor, bossDefFor, BOSS_ATK_GLOW, ENEMY_KINDS, DUNGEON_MIX,

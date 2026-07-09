@@ -8,7 +8,7 @@ import { clamp, lerp } from "../core/engine.js";
 import { BlockyCreature } from "../chargen/blocky.js";
 import { Shop } from "./shop.js";
 import { Dungeon, DUNGEON_ORIGIN } from "./dungeon.js";
-import { Sewer } from "./sewer.js";
+import { Cellar } from "./cellar.js";
 import { ITEMS, itemSprite } from "./items.js";
 import { starterEquipment, aggregateStats, weaponMesh } from "./gear.js";
 import { Particles } from "./particles.js";
@@ -45,7 +45,7 @@ export class Game {
     // --- state
     this.day = 1; // run counter — bumps each fresh delve, feeds dungeon variety
     this.gold = 100;
-    // sewer shortcuts: epoch ms each deeper mouth (index 1..N-1) re-locks; index
+    // cellar shortcuts: epoch ms each deeper mouth (index 1..N-1) re-locks; index
     // 0 is the always-open entrance. Earned by descending past each boss, they
     // let you drop straight to floors 4/7/10. Persisted (wall-clock TTL).
     this.shortcutUntil = [0, 0, 0, 0];
@@ -98,9 +98,8 @@ export class Game {
     this._escOpen = false;
     this.tutorial = null; // first-run onboarding step (see _tutStart); null once done
     this._hadSave = false; // set by _load — suppresses the tutorial for returning players
-    // whether the player has ever felled a boss. Until they have, delving drops
-    // straight into the dungeon (the sewer hub stays hidden); once a boss falls
-    // the sewer opens for good, letting later runs pick a shortcut mouth.
+    // whether the player has ever felled a boss. Kept for save migration (a
+    // pre-bossBeaten save with earned shortcuts implies a fallen boss).
     // Persisted (see _save/_load).
     this.bossBeaten = false;
     // which flanking rooms the player has bought their way into (left, right).
@@ -158,11 +157,11 @@ export class Game {
     this.tablesRepaired[0] = true;
     this.tablesRepaired.forEach((done, i) => { if (done) this.shop.repairTable(i, true); });
     this.dungeon = new Dungeon(this);
-    this.sewer = new Sewer(this);
-    // the shared-world lobby (Supabase Realtime): joined while in the sewer or
+    this.cellar = new Cellar(this);
+    // the shared-world lobby (Supabase Realtime): joined while in the cellar or
     // down a hole, so strangers' avatars show up alongside the co-op partner
     this.lobby = new Lobby(this);
-    this.sewerHole = -1; // which sewer hole the current dungeon hangs under
+    this.cellarHole = -1; // which cellar mouth the current dungeon hangs under
     this._lobbyAvatars = new Map(); // lobby player id -> {creature, wasAtk}
 
     // --- player
@@ -208,7 +207,7 @@ export class Game {
     this._updateMayor(dt, elapsed);
     this._updateClerk(dt, elapsed);
     this.dungeon.update(dt, elapsed);
-    this.sewer.update(dt, elapsed);
+    this.cellar.update(dt, elapsed);
     this.particles.update(dt);
     this.slash.update(dt);
     this.remoteSlash.update(dt);
@@ -223,20 +222,20 @@ export class Game {
     // and locks onto the arena's centre once inside the boss room (fixed cam)
     const p = this.player.position;
     const inDungeon = this.playerArea === "dungeon";
-    const inSewer = this.playerArea === "sewer";
+    const inCellar = this.playerArea === "cellar";
     const inBoss = inDungeon && this.dungeon.active && this.dungeon.inBossRoom(p);
     // in the shop/town the camera locks onto whichever room the player stands in
     // (like the classic fixed shop framing); out on the street it follows them.
-    const zone = !inDungeon && !inSewer && !inBoss ? this.shop.zoneCenter(p) : null;
+    const zone = !inDungeon && !inCellar && !inBoss ? this.shop.zoneCenter(p) : null;
     const camTarget = inBoss ? this.dungeon.bossCenter
-      : inDungeon || inSewer ? p
+      : inDungeon || inCellar ? p
       : zone ? _townCenter.set(zone.cx, 0, zone.cz)
       : p;
-    const camOffset = inBoss ? _camBoss : inDungeon ? _camDungeon : inSewer ? _camSewer
+    const camOffset = inBoss ? _camBoss : inDungeon ? _camDungeon : inCellar ? _camCellar
       : zone ? _camShop : _camStreet;
     this.engine.camTarget.lerp(camTarget, 1 - Math.pow(0.001, dt));
     this.engine.camOffset.lerp(camOffset, 1 - Math.pow(0.1, dt));
-    this.audio.setMood(this.gameOver ? null : inDungeon || inSewer ? "dungeon" : "shop");
+    this.audio.setMood(this.gameOver ? null : inDungeon || inCellar ? "dungeon" : "shop");
 
     // boss health bar: pinned up while the boss lives and you're in the cellar
     const boss = this.dungeon.boss;
@@ -336,7 +335,7 @@ export class Game {
       c.heading = Math.atan2(mv.x, mv.y);
     }
     const colliders = this.playerArea === "shop" ? this.shop.playerColliders
-      : this.playerArea === "sewer" ? this.sewer.colliders : this.dungeon.colliders;
+      : this.playerArea === "cellar" ? this.cellar.colliders : this.dungeon.colliders;
     this.collide(c.position, c.radius * 0.8, colliders);
     if (this.playerArea === "shop") {
       // town-wide fence: walls (colliders) do the real containment; this just
@@ -589,12 +588,12 @@ export class Game {
       }
       return { label: null };
     }
-    // sewer: the ladder home and the four dungeon mouths
-    if (this.playerArea === "sewer") {
-      _v.copy(this.sewer.exitPos);
+    // cellar lobby: the stairs up to the shop and the four dungeon mouths
+    if (this.playerArea === "cellar") {
+      _v.copy(this.cellar.exitPos);
       if (_v.distanceTo(p) < 1.7)
-        return { label: "home", hint: "Back to shop", fn: () => this._returnHome(), focus: _v.clone().setY(0.06), color: 0x8fd0ff };
-      for (const hole of this.sewer.holes) {
+        return { label: "home", hint: "Go up", fn: () => this._returnHome(), focus: _v.clone().setY(0.06), color: 0x8fd0ff };
+      for (const hole of this.cellar.holes) {
         _v.copy(hole.pos);
         if (_v.distanceTo(p) < 1.8) {
           if (!this._shortcutOpen(hole.id))
@@ -604,19 +603,19 @@ export class Game {
       }
       return { label: null };
     }
-    // dungeon (positions are group-local, player is world — offset). Leaving
-    // the cellar is folded into the stairs prompt now, so there's no separate
-    // return circle at the entrance.
+    // dungeon (positions are group-local, player is world — offset). Every
+    // floor has two flights of stairs now: up at the arrival spot, down in the
+    // farthest room — no choice sheet, each flight goes where it goes.
     if (this.dungeon.active) {
-      // the portal left behind by the fallen boss: it either drops deeper into
-      // the next stacked dungeon, or (final boss) is the way straight home
-      if (this.dungeon.returnPortal) {
-        const rp = this.dungeon.returnPortal;
-        _v.copy(rp.pos);
+      // the stairs left behind by the fallen boss: they either drop deeper into
+      // the next stacked dungeon, or (final boss) are the way straight home
+      if (this.dungeon.bossStairs) {
+        const bs = this.dungeon.bossStairs;
+        _v.copy(bs.pos);
         if (_v.distanceTo(p) < 1.7) {
-          if (rp.descend)
+          if (bs.descend)
             return { label: "arrowDown", hint: "Descend", fn: () => this._descend(), focus: _v.clone().setY(0.06), color: 0xff8a3d };
-          return { label: "home", hint: "Return", fn: () => this._returnHome(), focus: _v.clone().setY(0.06), color: 0x7fd8ff };
+          return { label: "home", hint: "Go up", fn: () => this._returnHome(), focus: _v.clone().setY(0.06), color: 0x7fd8ff };
         }
       }
       // the sealed boss door: opens a choice — breach it (with a key) or turn
@@ -628,11 +627,18 @@ export class Game {
           return { label: has ? "skull" : "warning", hint: "Boss door", fn: () => this._gatePrompt(), focus: _v.clone().setY(0.06), color: has ? 0xff5a5a : 0x9aa0aa };
         }
       }
-      // stairs stay inert (and invisible) on the tutorial floor until the chest
-      // is cracked — see Dungeon.revealStairs
+      // the up-stairs lead back out (the tutorial's stay inert and invisible
+      // until the chest is cracked — see Dungeon.revealStairs). In the tutorial
+      // "out" is straight home; everywhere else too — the bag deposits itself.
       if (!this.dungeon.stairsHidden) {
+        _v.copy(this.dungeon.upStairsPos).add(DUNGEON_ORIGIN);
+        if (_v.distanceTo(p) < 1.5) return { label: "home", hint: "Go up", fn: () => this._returnHome(), focus: _v.clone().setY(0.06), color: 0x8fd0ff };
+      }
+      // the down-stairs press on (absent on boss floors — the way deeper there
+      // is the stairs the boss leaves behind)
+      if (this.dungeon.hasDownStairs) {
         _v.copy(this.dungeon.stairsPos).add(DUNGEON_ORIGIN);
-        if (_v.distanceTo(p) < 1.5) return { label: "arrowDown", hint: "Stairs", fn: () => this._descendPrompt(), focus: _v.clone().setY(0.06), color: 0xb98cff };
+        if (_v.distanceTo(p) < 1.5) return { label: "arrowDown", hint: "Descend", fn: () => this._descend(), focus: _v.clone().setY(0.06), color: 0xff8a3d };
       }
       // chests aren't a button — you crack them open with the dash (handled in
       // dungeon.dashHit). We just ring the nearest one so it reads as a target
@@ -689,9 +695,9 @@ export class Game {
   // jump the camera straight to the current area's framing (no glide)
   _snapCamera() {
     const area = this.playerArea;
-    if (area === "dungeon" || area === "sewer") {
+    if (area === "dungeon" || area === "cellar") {
       this.engine.camTarget.copy(this.player.position);
-      this.engine.camOffset.copy(area === "dungeon" ? _camDungeon : _camSewer);
+      this.engine.camOffset.copy(area === "dungeon" ? _camDungeon : _camCellar);
       return;
     }
     const zone = this.shop.zoneCenter(this.player.position);
@@ -1030,7 +1036,8 @@ const _v2 = new THREE.Vector3();
 const _focus = new THREE.Vector3();
 const _camShop = new THREE.Vector3(0, 10.2, 8.6);
 const _camDungeon = new THREE.Vector3(0, 8.4, 8.2);
-const _camSewer = new THREE.Vector3(0, 9.6, 8.6);
+// the cellar lobby is the tutorial cellar — frame it exactly like a dungeon floor
+const _camCellar = new THREE.Vector3(0, 8.4, 8.2);
 // pulled back + higher so the whole boss arena stays framed while the cam is fixed
 const _camBoss = new THREE.Vector3(0, 13.5, 10);
 // out on the street the camera follows the player, pulled back a touch higher

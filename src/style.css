@@ -376,7 +376,7 @@ button { font-family: inherit; cursor: pointer; }
 /* (the old dodge button was removed — the primary #action-btn is now the attack
    button while delving; see input.js / game.js) */
 
-/* interact button — portals / stairs. Sits just above the attack / action
+/* interact button — stairs / mouths. Sits just above the attack / action
    button. Shown only while something's in reach (toggled from
    input.setInteract), so it never shares a press with the attack button. */
 #interact-btn {

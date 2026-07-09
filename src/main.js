@@ -4,6 +4,7 @@ import { AudioBus } from "./core/audio.js";
 import { HUD } from "./game/hud.js";
 import { Game, requestFullscreen } from "./game/game.js";
 import { loadCharacters } from "./chargen/assets.js";
+import { loadDungeonAssets } from "./game/dungeon-assets.js";
 import { icon } from "./core/icons.js";
 
 const app = document.getElementById("app");
@@ -44,6 +45,10 @@ async function boot() {
   await loadCharacters((done, total) => {
     const sub = document.getElementById("load-sub");
     if (sub) sub.textContent = `Loading characters… ${done}/${total}`;
+  });
+  await loadDungeonAssets((done, total) => {
+    const sub = document.getElementById("load-sub");
+    if (sub) sub.textContent = `Loading dungeon… ${done}/${total}`;
   });
   await startMenu();
   hudRoot.innerHTML = "";

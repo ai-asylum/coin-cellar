@@ -1,5 +1,5 @@
-// Delve flow: the trapdoor, the shared sewer hub and its holes, sewer
-// shortcuts, the pre-delve pack menu, the hole-dive cutscene, entering /
+// Delve flow: the trapdoor, the shared cellar lobby and its trapdoor mouths,
+// cellar shortcuts, the pre-delve pack menu, the hole-dive cutscene, entering /
 // leaving dungeons, descending floors and the boss-gate cluster. Attached to
 // Game.prototype via Object.assign, so `this` is the live Game instance. NB:
 // `_snapCamera` stays in game.js (it drives the retained update()/camera
@@ -12,7 +12,7 @@ import { equipInfo } from "./gear.js";
 import { DUNGEON_ORIGIN, MAX_DEPTH, FLOORS_PER_DUNGEON, isBossFloor, dungeonIndexFor, bossDefFor } from "./dungeon.js";
 import { daySeed, utcDay } from "./game-util.js";
 
-// A sewer shortcut, once earned by descending past a boss, stays unsealed for
+// A cellar shortcut, once earned by descending past a boss, stays unsealed for
 // three hours of real time before it re-locks.
 const SHORTCUT_TTL_MS = 3 * 60 * 60 * 1000;
 const LEVEL_INVULN = 1.8; // damage-immunity grace when arriving on a new floor
@@ -34,31 +34,31 @@ export const dungeonFlowMethods = {
     this._startDelve();
   },
 
-  // Dropping through the trapdoor lands in the shared sewer now, not straight
-  // in a dungeon — the holes down there are the real entrances. The tutorial
-  // keeps the old direct drop: a private single-floor cellar on a random seed,
-  // no sewer, no lobby (sewerHole stays -1 so _enterDungeon never joins one).
+  // Dropping through the trapdoor lands in the shared cellar lobby — the old
+  // tutorial cellar, whose trapdoor mouths are the real dungeon entrances. The
+  // tutorial keeps the old direct drop: a private single-floor cellar on a
+  // random seed, no lobby (cellarHole stays -1 so _enterDungeon never joins one).
   _startDelve() {
     // heading down clears the post-Mayor restock nudge; the first restock skips
-    // both the tutorial cellar and the sewer hub and drops straight into
-    // dungeon 1, so it stays a smooth continuation of the guided loop.
+    // both the tutorial cellar and the lobby and drops straight into dungeon 1,
+    // so it stays a smooth continuation of the guided loop.
     const restocking = this._restockNudge;
     this._restockNudge = false;
     if (this.tutorial) {
-      this.sewerHole = -1;
+      this.cellarHole = -1;
       if (!this.dungeon.active)
         this.dungeon.generate(1, this.day * 1000 + Math.floor(Math.random() * 999), true);
       // plunge down the cellar trapdoor into the private tutorial floor
       this._beginHoleDive(this.shop.trapdoorPos, () => this._enterDungeon());
       return;
     }
-    // before the first boss falls (or on the guided restock), the sewer hub
-    // stays hidden — the trapdoor drops straight into the day's first dungeon
-    // (mouth 0, floors 1-3). Only solo: co-op always routes through the sewer so
-    // host/guest floor sync (delveReq / floor messages) keeps working.
-    if ((restocking || !this.bossBeaten) && !this.net.connected) {
+    // the guided restock drops straight into the day's first dungeon (mouth 0,
+    // floors 1-3) so it stays a smooth continuation of the FTUE. Only solo:
+    // co-op always routes through the lobby so host/guest floor sync
+    // (delveReq / floor messages) keeps working.
+    if (restocking && !this.net.connected) {
       const seed = daySeed();
-      this.sewerHole = 0;
+      this.cellarHole = 0;
       // regenerate unless a real (non-tutorial) floor 1 is already live — after
       // the FTUE the private tutorial cellar is still active on floor 1, so the
       // restock delve must rebuild it as the actual Rat Warren dungeon.
@@ -67,30 +67,30 @@ export const dungeonFlowMethods = {
       this._beginHoleDive(this.shop.trapdoorPos, () => this._enterDungeon());
       return;
     }
-    // drop down the cellar trapdoor into the shared sewer — dive in first
-    this._beginHoleDive(this.shop.trapdoorPos, () => this._enterSewer());
+    // drop down the shop trapdoor into the shared cellar lobby — dive in first
+    this._beginHoleDive(this.shop.trapdoorPos, () => this._enterCellar());
   },
 
-  _enterSewer() {
-    this.playerArea = "sewer";
+  _enterCellar() {
+    this.playerArea = "cellar";
     this.hud.showHearts(false);
     this.hud.showBag(true);
     this.hud.showGold(true);
-    this.hud.setGoldCorner(false); // the sewer's a safe hub — keep gold up top
+    this.hud.setGoldCorner(false); // the cellar's a safe hub — keep gold up top
     if (this.hud.sheetOpen) this.hud.hideSheet();
-    this.player.position.copy(this.sewer.entrancePos).add(_v.set(0, 0, -1.4));
+    this.player.position.copy(this.cellar.entrancePos).add(_v.set(0, 0, -1.4));
     this.player.animator.prevPos.copy(this.player.position);
     this.audio.stairs();
     this._snapCamera();
-    this.lobby.join("sewer");
-    this.hud.banner(`${icon("hole")} The Sewers`, "", 2.6);
+    this.lobby.join("cellar");
+    this.hud.banner(`${icon("hole")} The Cellar`, "", 2.6);
   },
 
-  // Confirm sheet at a sewer mouth's lip. The first is always open; a deeper
+  // Confirm sheet at a cellar mouth's lip. The first is always open; a deeper
   // one only offers the dive once its shortcut's been earned (see _shortcutOpen).
   _holePrompt(id) {
     if (this.hud.sheetOpen) return;
-    const hole = this.sewer.holes[id];
+    const hole = this.cellar.holes[id];
     if (!hole) return;
     if (!this._shortcutOpen(id)) {
       // still barred — spell out how the shortcut opens
@@ -121,7 +121,7 @@ export const dungeonFlowMethods = {
     };
   },
 
-  // Is sewer mouth `id` open? The entrance (0) always is; the deeper mouths
+  // Is cellar mouth `id` open? The entrance (0) always is; the deeper mouths
   // stay open until their earned wall-clock expiry lapses.
   _shortcutOpen(id) {
     if (id <= 0) return true;
@@ -147,8 +147,8 @@ export const dungeonFlowMethods = {
     this._save();
     this.net.send({ t: "shortcut", id, until });
     if (fresh) {
-      const name = this.sewer.holes[id]?.name ?? "a deeper vault";
-      this.hud.toast(`${icon("hole")} Sewer shortcut to ${name} opened for 3h`);
+      const name = this.cellar.holes[id]?.name ?? "a deeper vault";
+      this.hud.toast(`${icon("hole")} Cellar shortcut to ${name} opened for 3h`);
     }
   },
 
@@ -160,18 +160,18 @@ export const dungeonFlowMethods = {
     const floor = id * FLOORS_PER_DUNGEON + 1;
     if (this.net.isGuest) {
       if (!this.dungeon.active) {
-        this.sewerHole = id;
+        this.cellarHole = id;
         this._wantDelve = true;
         this.net.send({ t: "delveReq", hole: id });
         return;
       }
       // the pair shares one dungeon: whichever mouth is live is where we land
-      // (sewerHole already tracks it from the host's "floor" message)
+      // (cellarHole already tracks it from the host's "floor" message)
       this._enterDungeon();
       return;
     }
     if (!this.dungeon.active || this.dungeon.floor !== floor) {
-      this.sewerHole = id;
+      this.cellarHole = id;
       const seed = daySeed();
       this.dungeon.generate(floor, seed);
       this.net.send({ t: "floor", n: floor, seed, hole: id });
@@ -303,7 +303,7 @@ export const dungeonFlowMethods = {
   // A short "jump into the hole" cutscene before the next area loads: the
   // player springs up over the mouth, then plunges down the dark shaft,
   // spinning and shrinking away into the black. Purely cosmetic and local —
-  // used both for the shop's cellar trapdoor and each sewer hole. `center` is
+  // used both for the shop's cellar trapdoor and each cellar mouth. `center` is
   // the mouth to dive into; `after` runs the real transition once it wraps up.
   _beginHoleDive(center, after) {
     const c = this.player;
@@ -360,11 +360,11 @@ export const dungeonFlowMethods = {
   },
 
   _enterDungeon() {
-    // dropping in from a sewer hole: play the plunge animation first, then land
-    // in the dungeon once it finishes (the dive re-calls us with the flag set).
-    // Descending stairs mid-run starts in the dungeon, so it skips this.
-    if (this.playerArea === "sewer" && this.sewerHole >= 0 && !this._diveDone) {
-      const hole = this.sewer.holes[this.sewerHole];
+    // dropping in from a cellar mouth: play the plunge animation first, then
+    // land in the dungeon once it finishes (the dive re-calls us with the flag
+    // set). Descending stairs mid-run starts in the dungeon, so it skips this.
+    if (this.playerArea === "cellar" && this.cellarHole >= 0 && !this._diveDone) {
+      const hole = this.cellar.holes[this.cellarHole];
       this._beginHoleDive(hole ? hole.pos : this.player.position, () => {
         this._diveDone = true;
         this._enterDungeon();
@@ -374,7 +374,7 @@ export const dungeonFlowMethods = {
     this._diveDone = false;
     // the themed dungeon (and its boss/palette) follows the current floor now
     // that dungeons are stacked; the tutorial cellar keeps its private look
-    if (!this.tutorial) this.sewerHole = dungeonIndexFor(this.dungeon.floor);
+    if (!this.tutorial) this.cellarHole = dungeonIndexFor(this.dungeon.floor);
     // a fresh drop (not descending stairs mid-run) bumps the run counter that
     // feeds dungeon variety — guarded on playerArea so mid-run stairs, which
     // start already in the dungeon, don't re-roll it. Solo only.
@@ -385,17 +385,19 @@ export const dungeonFlowMethods = {
     this.hud.showGold(true);
     this.hud.setGoldCorner(true);
     _v.copy(this.dungeon.entrancePos).add(DUNGEON_ORIGIN);
-    this.player.position.set(_v.x + 0.8, 0, _v.z + 0.8);
+    // land a step clear of the up-stairs at the arrival spot, so the "go up"
+    // action doesn't sit primed the moment you drop in
+    this.player.position.set(_v.x + 1.4, 0, _v.z + 1.0);
     this.player.animator.prevPos.copy(this.player.position);
     this._invulnT = Math.max(this._invulnT, LEVEL_INVULN); // grace on arrival
     this.today.deepest = Math.max(this.today.deepest, this.dungeon.floor);
     // hop onto this hole's realtime channel so fellow delvers show up
-    if (this.sewerHole >= 0) this.lobby.join(`hole:${utcDay()}:${this.sewerHole}`);
+    if (this.cellarHole >= 0) this.lobby.join(`hole:${utcDay()}:${this.cellarHole}`);
     this.audio.stairs();
     this._snapCamera();
     const bossFloor = isBossFloor(this.dungeon.floor);
     const finalFloor = this.dungeon.floor >= MAX_DEPTH;
-    const place = this.sewer.holes[this.sewerHole]?.name ?? "Cellar";
+    const place = this.cellar.holes[this.cellarHole]?.name ?? "Cellar";
     this.hud.banner(
       bossFloor
         ? `${icon("skull")} ${place} — ${finalFloor ? "Final Floor" : "Boss Floor"}`
@@ -429,63 +431,9 @@ export const dungeonFlowMethods = {
     this._save();
   },
 
-  // At the stairs down: ask whether to press on or head back. Saying no is the
-  // way out of the cellar now that the return circle is gone.
-  _descendPrompt() {
-    if (this.hud.sheetOpen) return;
-    // during the tutorial the cellar is one floor deep and the stairs lead
-    // straight home — no prompt, no choice, the loop closes itself
-    if (this.tutorial) return this._returnHome();
-    // freeze the sim while the choice is up (but not during co-op, so the
-    // other player isn't stranded mid-run)
-    this.paused = !this.net.connected;
-    // on a boss floor the stairs only lead back UP — the way deeper opens
-    // beyond the boss (its portal), so this is purely the way out
-    if (isBossFloor(this.dungeon.floor)) {
-      const final = this.dungeon.floor >= MAX_DEPTH;
-      const el = this.hud.showSheet(`
-        <div class="sheet-title"><span class="big-emoji">${icon("home")}</span>
-          <div><b>Head back up?</b><br/><small>${final ? "The deepest boss lies beyond the sealed door." : "The way deeper opens past the boss — these stairs only lead back up."}</small></div></div>
-        <div class="sheet-btns">
-          <button class="btn deny" id="descend-stay">${icon("close")} Keep exploring</button>
-          <button class="btn deal" id="descend-home">${icon("home")} Back to shop</button>
-        </div>
-      `, "sheet-card");
-      el.querySelector("#descend-home").onclick = () => {
-        this.paused = false;
-        this.hud.hideSheet();
-        this._returnHome();
-      };
-      el.querySelector("#descend-stay").onclick = () => {
-        this.paused = false;
-        this.hud.hideSheet();
-      };
-      return;
-    }
-    const next = this.dungeon.floor + 1;
-    const el = this.hud.showSheet(`
-      <div class="sheet-title"><span class="big-emoji">${icon("arrowDown")}</span>
-        <div><b>Go deeper?</b><br/><small>Floor ${next} — tougher foes, better loot</small></div></div>
-      <div class="sheet-btns">
-        <button class="btn deny" id="descend-no">${icon("home")} Back to shop</button>
-        <button class="btn deal" id="descend-yes">${icon("arrowDown")} Descend</button>
-      </div>
-    `, "sheet-card");
-    el.querySelector("#descend-yes").onclick = () => {
-      this.paused = false;
-      this.hud.hideSheet();
-      this._descend();
-    };
-    el.querySelector("#descend-no").onclick = () => {
-      this.paused = false;
-      this.hud.hideSheet();
-      this._returnHome();
-    };
-  },
-
-  // One floor deeper. Within a dungeon this is the stairs; crossing a boss
-  // floor (3/6/9) it's the boss's descent portal, which also unseals the sewer
-  // shortcut to the dungeon we're dropping into.
+  // One floor deeper. Within a dungeon this is the down-stairs; crossing a
+  // boss floor (3/6/9) it's the boss's descent stairs, which also unseal the
+  // cellar shortcut to the dungeon we're dropping into.
   _descend() {
     if (this.tutorial) return; // tutorial cellar is a single floor
     if (this.dungeon.floor >= MAX_DEPTH) return; // 12 is the deepest there is
@@ -505,12 +453,12 @@ export const dungeonFlowMethods = {
     const n = from + 1;
     const seed = this.dungeon.seed;
     // crossing a boss floor drops into the next stacked dungeon — open its
-    // sewer shortcut for the day (3h)
+    // cellar shortcut for the day (3h)
     if (isBossFloor(from)) this._unlockShortcut(dungeonIndexFor(n));
-    this.sewerHole = dungeonIndexFor(n);
+    this.cellarHole = dungeonIndexFor(n);
     this.dungeon.generate(n, seed);
     this._hostDungeonFloor = n;
-    this.net.send({ t: "floor", n, seed, hole: this.sewerHole, lead: 1 });
+    this.net.send({ t: "floor", n, seed, hole: this.cellarHole, lead: 1 });
     this._enterDungeon();
     this.engine.shake(0.2);
   },
@@ -518,7 +466,7 @@ export const dungeonFlowMethods = {
   // Guest: catch up to the floor the host has already advanced to.
   _followLead() {
     const { n, seed, hole } = this._pendingLead;
-    if (hole != null) this.sewerHole = hole;
+    if (hole != null) this.cellarHole = hole;
     this.dungeon.generate(n, seed);
     this._hostDungeonFloor = n;
     this._floorDesync = false;
@@ -548,7 +496,7 @@ export const dungeonFlowMethods = {
   _gatePrompt() {
     if (this.hud.sheetOpen || this.dungeon.gateOpen) return;
     // freeze the sim while the choice is up (but not in co-op, so a delving
-    // partner isn't stranded mid-run) — mirrors the stairs descend prompt
+    // partner isn't stranded mid-run)
     this.paused = !this.net.connected;
     const has = this._hasBossKey();
     const boss = bossDefFor(dungeonIndexFor(this.dungeon.floor));
@@ -619,14 +567,14 @@ export const dungeonFlowMethods = {
   },
 
   // The boss is down: fanfare, a shower of sparks, and the treasure it guarded.
-  // The portal it leaves drops deeper into the next stacked dungeon; the final
+  // The stairs it leaves drop deeper into the next stacked dungeon; the final
   // boss (floor 12) leaves the way straight home instead.
   onBossDefeated(pos = null) {
     this.audio.victory();
     this.engine.shake(0.45);
     const name = this.dungeon.boss?.def?.name ?? bossDefFor(dungeonIndexFor(this.dungeon.floor)).name;
     const final = this.dungeon.floor >= MAX_DEPTH;
-    // first boss ever felled: unseal the sewer hub for all future runs
+    // records the first boss ever felled (kept for save-migration purposes)
     if (!this.bossBeaten) {
       this.bossBeaten = true;
       this._save();
@@ -634,9 +582,9 @@ export const dungeonFlowMethods = {
     this.hud.banner(`${icon("crown")} ${name} falls!`, "", 3.4);
     if (pos) {
       this.particles.burst(_v.copy(pos).setY(1), { color: 0xffe08a, n: 30, speed: 5, up: 2.2, life: 1.1, size: 1.3 });
-      // deterministic on host + guest (both run this): a descent portal, or the
+      // deterministic on host + guest (both run this): descent stairs, or the
       // way home once the deepest boss falls
-      this.dungeon.spawnReturnPortal(pos.x, pos.z, !final);
+      this.dungeon.spawnBossStairs(pos.x, pos.z, !final);
     }
   },
 };

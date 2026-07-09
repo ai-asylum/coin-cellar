@@ -122,18 +122,18 @@ export const narrativeMethods = {
           if (d < bestD) { bestD = d; best = _v2.clone(); text = "Smash the chest for loot"; }
         }
         if (best) pos = _v.copy(best);
-        else { pos = _v.copy(this.dungeon.stairsPos).add(DUNGEON_ORIGIN); text = "To the stairs"; }
+        else { pos = _v.copy(this.dungeon.upStairsPos).add(DUNGEON_ORIGIN); text = "To the stairs"; }
         break;
       }
       case "return":
         if (!inShop && this.dungeon.active) {
-          pos = _v.copy(this.dungeon.stairsPos).add(DUNGEON_ORIGIN);
+          pos = _v.copy(this.dungeon.upStairsPos).add(DUNGEON_ORIGIN);
           text = "Stairs — back to shop";
         }
         break;
       case "stock": {
         if (!inShop) {
-          if (this.dungeon.active) { pos = _v.copy(this.dungeon.stairsPos).add(DUNGEON_ORIGIN); text = "Back to shop"; }
+          if (this.dungeon.active) { pos = _v.copy(this.dungeon.upStairsPos).add(DUNGEON_ORIGIN); text = "Back to shop"; }
           break;
         }
         if (!this.stash.length) break; // nothing left to place — no target

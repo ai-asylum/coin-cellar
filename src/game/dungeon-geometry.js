@@ -4,10 +4,53 @@
 import * as THREE from "three";
 import { makeToonMaterial } from "../core/toon.js";
 import { rng } from "../core/engine.js";
+import { dungeonAssetsReady, cloneModel, bakedGeometry } from "./dungeon-assets.js";
 
 export const CELL = 2.4;
 
-export function makeChest() {
+// A short flight of stairs. "down" sinks shrinking steps into the floor (the
+// way deeper); "up" rises a straight flight of lengthening steps (the way out).
+// Every travel point uses one of these two now — portals are gone.
+export function makeStairs(dir = "down", color = 0x2a2038) {
+  // Prefer the kit's stone flight when the pack is loaded; the model runs a
+  // single ramp along +Z, so "down" faces it the other way for a descent read.
+  if (dungeonAssetsReady()) {
+    const g = new THREE.Group();
+    const stair = cloneModel("stair");
+    if (dir === "down") stair.rotation.y = Math.PI;
+    g.add(stair);
+    return g;
+  }
+  const g = new THREE.Group();
+  const mat = makeToonMaterial({ color, rim: 0 });
+  if (dir === "down") {
+    for (let i = 0; i < 4; i++) {
+      const step = new THREE.Mesh(new THREE.BoxGeometry(1.5 - i * 0.28, 0.42, 1.5 - i * 0.28), mat);
+      // lift slightly so the top step's face doesn't sit coplanar with the
+      // floor slab (y=0), which caused z-fighting on the descent
+      step.position.y = -0.19 - i * 0.16;
+      g.add(step);
+    }
+  } else {
+    for (let i = 0; i < 4; i++) {
+      const h = 0.24 + i * 0.24;
+      const step = new THREE.Mesh(new THREE.BoxGeometry(1.3, h, 0.44), mat);
+      step.position.set(0, h / 2, -0.2 - i * 0.42);
+      g.add(step);
+    }
+  }
+  return g;
+}
+
+// kind: "wood" (default) or "iron". `userData.cover` is the hinged lid so
+// openChest can flip it open regardless of how the mesh is authored.
+export function makeChest(kind = "wood") {
+  if (dungeonAssetsReady()) {
+    const g = cloneModel(kind === "iron" ? "chestIron" : "chestWood");
+    g.traverse((o) => { if (o.isMesh && /cover/i.test(o.name)) g.userData.cover = o; });
+    g.userData.coverAxis = "z"; // lid is hinged along the chest's depth axis
+    return g;
+  }
   const g = new THREE.Group();
   const base = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.5, 0.6), makeToonMaterial({ color: 0x8a5a33, rim: 0.2 }));
   base.position.y = 0.25;
@@ -17,6 +60,7 @@ export function makeChest() {
   const clasp = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.18, 0.05), makeToonMaterial({ color: 0xf0c04a, rim: 0.3 }));
   clasp.position.set(0, 0.45, 0.31);
   g.add(base, lid, clasp);
+  g.userData.cover = lid;
   return g;
 }
 
@@ -106,4 +150,115 @@ export function makeTilesTexture(palette, seed) {
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.repeat.set(3, 3);
   return tex;
+}
+
+// ---------------------------------------------------------------- asset kit
+// One stone floor tile per open cell, drawn as two InstancedMeshes (the pack's
+// two floor variants, split by a cheap position hash for a little variety) so a
+// whole floor costs just two draw calls. `tint` lightly recolours the shared
+// palette material to keep each dungeon's theme identity. Returns a Group.
+export function buildAssetFloor(open, GW, GH, cellPos, tint = null) {
+  const a = bakedGeometry("floorA");
+  const b = bakedGeometry("floorB");
+  const cellsA = [], cellsB = [];
+  for (let y = 0; y < GH; y++)
+    for (let x = 0; x < GW; x++) {
+      if (!open[y][x]) continue;
+      ((x * 7 + y * 13) % 5 === 0 ? cellsB : cellsA).push([x, y]);
+    }
+  const group = new THREE.Group();
+  const m = new THREE.Matrix4();
+  for (const [geoInfo, cells] of [[a, cellsA], [b, cellsB]]) {
+    if (!geoInfo || !cells.length) continue;
+    const mat = geoInfo.mat.clone();
+    if (tint) mat.color.copy(tint);
+    const inst = new THREE.InstancedMesh(geoInfo.geo, mat, cells.length);
+    cells.forEach(([x, y], i) => {
+      const p = cellPos(x, y);
+      m.makeTranslation(p.x, 0, p.z);
+      inst.setMatrixAt(i, m);
+    });
+    inst.instanceMatrix.needsUpdate = true;
+    group.add(inst);
+  }
+  return group;
+}
+
+// Line the boundary between walkable and solid ground with the kit's wall panels:
+// for every open cell, drop a panel on each of its four edges that faces a closed
+// cell (or the grid rim). One InstancedMesh over the shared occluder material, so
+// walls between the camera and the hero still dither away. Colliders are handled
+// separately (cell-based, in dungeon.js) — this is purely the visible shell.
+const _WALL_DIRS = [
+  [1, 0, 0],                 // east edge  → panel runs N–S
+  [-1, 0, Math.PI],          // west edge
+  [0, 1, Math.PI / 2],       // south edge → panel runs E–W
+  [0, -1, -Math.PI / 2],     // north edge
+];
+export function buildAssetWalls(open, GW, GH, cellPos, tint = null, mat = null) {
+  const info = bakedGeometry("wallFull");
+  if (!info) return null;
+  const placements = [];
+  const H = CELL / 2;
+  for (let y = 0; y < GH; y++)
+    for (let x = 0; x < GW; x++) {
+      if (!open[y][x]) continue;
+      const p = cellPos(x, y);
+      for (const [dx, dy, rotY] of _WALL_DIRS) {
+        if (open[y + dy]?.[x + dx]) continue; // neighbour walkable → no wall
+        placements.push([p.x + dx * H, p.z + dy * H, rotY]);
+      }
+    }
+  // reuse the shared occluder material by default (cloning it would drop the
+  // compiled shader ref feedOccluder drives); only one floor is live at a time,
+  // so a per-floor colour tint on the shared material is safe. The cellar lobby
+  // is live *alongside* dungeon floors, so it passes its own material instead —
+  // otherwise each new floor would re-tint the lobby's walls too.
+  mat = mat ?? info.mat;
+  if (tint) mat.color.copy(tint); else mat.color.setRGB(1, 1, 1);
+  const inst = new THREE.InstancedMesh(info.geo, mat, placements.length);
+  const m = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  const s = new THREE.Vector3(1, 1, 1);
+  const pos = new THREE.Vector3();
+  placements.forEach(([wx, wz, rotY], i) => {
+    q.setFromAxisAngle(_UP, rotY);
+    pos.set(wx, 0, wz);
+    m.compose(pos, q, s);
+    inst.setMatrixAt(i, m);
+  });
+  inst.instanceMatrix.needsUpdate = true;
+  return { mesh: inst, mat };
+}
+
+const _UP = new THREE.Vector3(0, 1, 0);
+
+// Freestanding 3D set dressing from the kit — barrels, crates and the odd
+// brazier — tucked against room walls so they never block the walkway. Purely
+// cosmetic (no colliders, like the billboard decor). Seeded off the floor rng so
+// co-op peers place them identically. No-op until the pack is loaded.
+export function scatterAssetProps(group, r, rooms, cellPos, opts = {}) {
+  if (!dungeonAssetsReady()) return;
+  const { skip = [] } = opts;
+  const blocked = (cx, cy) => skip.some((s) => Math.abs(s.x - cx) < 1.5 && Math.abs(s.y - cy) < 1.5);
+  const place = (name, gx, gy, rot) => {
+    const m = cloneModel(name);
+    if (!m) return;
+    const p = cellPos(gx, gy);
+    m.position.set(p.x, 0, p.z);
+    m.rotation.y = rot;
+    group.add(m);
+  };
+  for (const room of rooms) {
+    if (blocked(room.cx, room.cy) || room.w < 3 || room.h < 3) continue;
+    const n = r() < 0.55 ? 1 + Math.floor(r() * 2) : 0;
+    for (let i = 0; i < n; i++) {
+      // hug a random wall of the room, one cell in from the corner
+      const gx = r() < 0.5 ? room.x + 0.6 : room.x + room.w - 1.6;
+      const gy = r() < 0.5 ? room.y + 0.6 : room.y + room.h - 1.6;
+      const roll = r();
+      const kind = roll < 0.45 ? "barrel" : roll < 0.8 ? "box" : "brazier";
+      place(kind, gx, gy, r() * Math.PI * 2);
+    }
+  }
 }

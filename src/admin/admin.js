@@ -8,7 +8,7 @@ import * as THREE from "three";
 
 import { ITEMS, itemSprite, EQUIP_DROPS } from "../game/items.js";
 import { ENEMY_KINDS, DUNGEON_MIX, HOLE_THEMES, DUNGEON_LOOT, BOSSES, bossDefFor, FLOORS_PER_DUNGEON } from "../game/dungeon.js";
-import { HOLE_DEFS } from "../game/sewer.js";
+import { HOLE_DEFS } from "../game/cellar.js";
 import { ARCHETYPES } from "../game/shop.js";
 import { Creature } from "../chargen/creature.js";
 import { BlockyCreature, variantForSeed } from "../chargen/blocky.js";
@@ -374,7 +374,7 @@ const ENEMY_SEED = {
   rattler: 13, gravewisp: 5, boneguard: 1, sporeling: 10, gloomcaster: 3, mossbrute: 2,
 };
 
-// Card copy for the per-hole bosses (index matches BOSSES / Sewer.holes).
+// Card copy for the per-hole bosses (index matches BOSSES / Cellar.holes).
 const BOSS_META = [
   { icon: icon("spider"), desc: "The Rat Warren's matriarch — a giant rust skitter that leads with room-crossing charges and calls her brood when enraged." },
   { icon: icon("jelly"), desc: "A mountain of waterlogged ooze in the Flooded Deep — ponderous, hugely tough, and drowns the arena in radial orb bursts." },
@@ -394,7 +394,7 @@ function enemyFloors(kind) {
 
 function buildEnemies() {
   // regular floor monsters (the base `boss` kind is covered by the Bosses
-  // category below — one card per sewer hole's arena keeper)
+  // category below — one card per cellar mouth's arena keeper)
   const cards = Object.entries(ENEMY_KINDS)
     .filter(([kind]) => kind !== "boss")
     .map(([kind, def]) => {
@@ -420,7 +420,7 @@ function buildEnemies() {
       };
     });
 
-  cards.push({ section: "Bosses — one per sewer hole", icon: icon("crown") });
+  cards.push({ section: "Bosses — one per cellar mouth", icon: icon("crown") });
   BOSSES.forEach((_, i) => {
     const def = bossDefFor(i);
     const meta = BOSS_META[i] ?? { icon: icon("unknown"), desc: "" };

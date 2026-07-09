@@ -614,7 +614,7 @@ export const uiMethods = {
 
     const wares = ["mushroom", "meat"]; // the FTUE's fixed starter loot
     const genTutFloor = () => {
-      this.sewerHole = -1;
+      this.cellarHole = -1;
       this.dungeon.dispose();
       this.dungeon.generate(1, this.day * 1000 + Math.floor(Math.random() * 999), true);
     };

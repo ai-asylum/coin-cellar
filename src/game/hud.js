@@ -577,9 +577,10 @@ export class HUD {
       }
     };
 
-    // entrance (green) and stairs down / exit (amber) — exit hides until found
+    // up-stairs at the entrance (green) and stairs down (amber) — the descent
+    // hides until found, and boss floors have no down-stairs at all
     if (d.entranceCell) dot(d.entranceCell.x, d.entranceCell.y, cell * 0.42, "#6fce5b", "#1c3a16");
-    if (d.stairsCell && seen(d.stairsCell.x, d.stairsCell.y))
+    if (d.hasDownStairs && d.stairsCell && seen(d.stairsCell.x, d.stairsCell.y))
       dot(d.stairsCell.x, d.stairsCell.y, cell * 0.42, "#ff9a3d", "#5a2a08");
 
     // enemies (small red pips) — only in discovered ground
