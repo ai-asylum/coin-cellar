@@ -12,12 +12,20 @@ export const CELL = 2.4;
 // way deeper); "up" rises a straight flight of lengthening steps (the way out).
 // Every travel point uses one of these two now — portals are gone.
 export function makeStairs(dir = "down", color = 0x2a2038) {
-  // Prefer the kit's stone flight when the pack is loaded; the model runs a
-  // single ramp along +Z, so "down" faces it the other way for a descent read.
+  // Prefer the kit's stone flight when the pack is loaded. The model is a ramp
+  // rising along +Z; the "up" flight (way home) stays on the floor rising away,
+  // while the "down" flight (the exit deeper) is sunk so its TOP step sits flush
+  // at floor level and the rest drops into the pit cut beneath it (the descent
+  // cell is left as a hole in buildAssetFloor) — so it reads as going down.
   if (dungeonAssetsReady()) {
     const g = new THREE.Group();
     const stair = cloneModel("stair");
     if (dir === "down") stair.rotation.y = Math.PI;
+    const box = new THREE.Box3().setFromObject(stair);
+    // "down": top step drops to y=0 and the flight sinks into the pit below.
+    // "up": the model's pivot sits mid-height, so its base is below y=0 (buried
+    // under the floor slab) — lift it so the bottom step rests flush on the floor.
+    stair.position.y = dir === "down" ? -box.max.y : -box.min.y;
     g.add(stair);
     return g;
   }
@@ -42,13 +50,31 @@ export function makeStairs(dir = "down", color = 0x2a2038) {
   return g;
 }
 
+// The mouth the descent flight drops into. A whole floor tile is cut out under
+// it (buildAssetFloor leaves the cell empty), which on its own reads as a black
+// hole out to the scene void; this fills that cut-out with a dark shaft box
+// viewed from the inside (BackSide), so from above we look down its walls to a
+// dark floor. It spans the full cell so it meets the surrounding floor tiles
+// edge-to-edge — no rim/collar outline.
+const _PIT_DEPTH = 1.5;
+export function makeDescentPit() {
+  const g = new THREE.Group();
+  const shaft = new THREE.Mesh(
+    new THREE.BoxGeometry(CELL, _PIT_DEPTH, CELL),
+    new THREE.MeshBasicMaterial({ color: 0x0d0a07, side: THREE.BackSide })
+  );
+  shaft.position.y = -_PIT_DEPTH / 2 + 0.01; // rim flush with the floor
+  g.add(shaft);
+  return g;
+}
+
 // kind: "wood" (default) or "iron". `userData.cover` is the hinged lid so
 // openChest can flip it open regardless of how the mesh is authored.
 export function makeChest(kind = "wood") {
   if (dungeonAssetsReady()) {
     const g = cloneModel(kind === "iron" ? "chestIron" : "chestWood");
-    g.traverse((o) => { if (o.isMesh && /cover/i.test(o.name)) g.userData.cover = o; });
-    g.userData.coverAxis = "z"; // lid is hinged along the chest's depth axis
+    g.traverse((o) => { if (o.isMesh && /lid|cover/i.test(o.name)) g.userData.cover = o; });
+    g.userData.coverAxis = "x"; // KayKit lid is hinged along the chest's width (X)
     return g;
   }
   const g = new THREE.Group();
@@ -157,13 +183,14 @@ export function makeTilesTexture(palette, seed) {
 // two floor variants, split by a cheap position hash for a little variety) so a
 // whole floor costs just two draw calls. `tint` lightly recolours the shared
 // palette material to keep each dungeon's theme identity. Returns a Group.
-export function buildAssetFloor(open, GW, GH, cellPos, tint = null) {
+export function buildAssetFloor(open, GW, GH, cellPos, tint = null, holes = null) {
   const a = bakedGeometry("floorA");
   const b = bakedGeometry("floorB");
   const cellsA = [], cellsB = [];
   for (let y = 0; y < GH; y++)
     for (let x = 0; x < GW; x++) {
       if (!open[y][x]) continue;
+      if (holes && holes.has(x + "," + y)) continue; // leave a pit (descent stairs)
       ((x * 7 + y * 13) % 5 === 0 ? cellsB : cellsA).push([x, y]);
     }
   const group = new THREE.Group();
@@ -237,28 +264,99 @@ const _UP = new THREE.Vector3(0, 1, 0);
 // brazier — tucked against room walls so they never block the walkway. Purely
 // cosmetic (no colliders, like the billboard decor). Seeded off the floor rng so
 // co-op peers place them identically. No-op until the pack is loaded.
+const _ORIGIN0 = { x: 0, z: 0 };
+// A world-space AABB collider fitted to a placed model's footprint. Compute it
+// while the mesh is still unparented (so its bounds land in group-local space),
+// then offset by the area origin. `shrink` trims the box a hair so you can brush
+// past edges. Used for every solid kit model (props + chests).
+export function modelCollider(mesh, origin = _ORIGIN0, shrink = 0.85) {
+  mesh.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(mesh);
+  return {
+    x: (box.min.x + box.max.x) / 2 + origin.x,
+    z: (box.min.z + box.max.z) / 2 + origin.z,
+    hw: Math.max(0.2, ((box.max.x - box.min.x) / 2) * shrink),
+    hd: Math.max(0.2, ((box.max.z - box.min.z) / 2) * shrink),
+  };
+}
+
+// floor clutter that hugs a room's inner corners (never blocks the walkway).
+// Returns the world-space colliders for every prop it drops so the caller can
+// fold them into the floor's collider list (player/enemies/shots all block).
+const _CLUTTER = ["barrel", "barrelSmall", "box", "boxSmall", "crates", "table", "rubble", "coins", "pillar", "floorTorch"];
 export function scatterAssetProps(group, r, rooms, cellPos, opts = {}) {
-  if (!dungeonAssetsReady()) return;
-  const { skip = [] } = opts;
+  if (!dungeonAssetsReady()) return [];
+  const { skip = [], open = null, origin = _ORIGIN0 } = opts;
+  const colliders = [];
   const blocked = (cx, cy) => skip.some((s) => Math.abs(s.x - cx) < 1.5 && Math.abs(s.y - cy) < 1.5);
+  // a prop's footprint mustn't land on a walk target (stairs/entrance/mouths)
+  const nearSkip = (gx, gy) => skip.some((s) => Math.abs(s.x - gx) < 1.2 && Math.abs(s.y - gy) < 1.2);
   const place = (name, gx, gy, rot) => {
     const m = cloneModel(name);
     if (!m) return;
     const p = cellPos(gx, gy);
     m.position.set(p.x, 0, p.z);
     m.rotation.y = rot;
+    colliders.push(modelCollider(m, origin)); // fit before parenting (group-local)
     group.add(m);
   };
   for (const room of rooms) {
     if (blocked(room.cx, room.cy) || room.w < 3 || room.h < 3) continue;
-    const n = r() < 0.55 ? 1 + Math.floor(r() * 2) : 0;
-    for (let i = 0; i < n; i++) {
-      // hug a random wall of the room, one cell in from the corner
-      const gx = r() < 0.5 ? room.x + 0.6 : room.x + room.w - 1.6;
-      const gy = r() < 0.5 ? room.y + 0.6 : room.y + room.h - 1.6;
-      const roll = r();
-      const kind = roll < 0.45 ? "barrel" : roll < 0.8 ? "box" : "brazier";
-      place(kind, gx, gy, r() * Math.PI * 2);
+    // the room's four inner corners — one prop per corner at most, so two props
+    // can never stack on the same spot. Seeded shuffle keeps co-op peers matched.
+    const corners = [
+      [room.x + 0.6, room.y + 0.6],
+      [room.x + room.w - 1.6, room.y + 0.6],
+      [room.x + 0.6, room.y + room.h - 1.6],
+      [room.x + room.w - 1.6, room.y + room.h - 1.6],
+    ].filter(([gx, gy]) => !nearSkip(gx, gy));
+    for (let k = corners.length - 1; k > 0; k--) {
+      const j = Math.floor(r() * (k + 1));
+      [corners[k], corners[j]] = [corners[j], corners[k]];
     }
+    const n = r() < 0.65 ? 1 + Math.floor(r() * 2) : 0;
+    for (let i = 0; i < n && i < corners.length; i++) {
+      const [gx, gy] = corners[i];
+      place(_CLUTTER[Math.floor(r() * _CLUTTER.length)], gx, gy, r() * Math.PI * 2);
+    }
+    // wall-mounted ambiance: a torch or hanging banner on a perimeter wall
+    // (mounted on already-solid wall cells, so no extra collider needed)
+    if (open && r() < 0.7) mountWallDecor(group, r, room, cellPos, open, nearSkip);
+  }
+  return colliders;
+}
+
+// Hang a torch/banner on one of a room's solid perimeter walls, facing inward.
+// Both kit models stick out along +Z from the wall they mount on, so we rotate
+// +Z to point at the room interior. Torches sit at head height; banners hang
+// from the top of the wall.
+function mountWallDecor(group, r, room, cellPos, open, nearSkip = () => false) {
+  const H = CELL / 2;
+  const edges = [];
+  const push = (cx, cy, dx, dy) => {
+    if (open[cy + dy]?.[cx + dx]) return;   // neighbour is walkable → not a wall
+    if (nearSkip(cx, cy)) return;           // keep mouths/stairs walls clear
+    edges.push([cx, cy, dx, dy]);
+  };
+  for (let x = room.x; x < room.x + room.w; x++) {
+    push(x, room.y, 0, -1);               // north wall
+    push(x, room.y + room.h - 1, 0, 1);   // south wall
+  }
+  for (let y = room.y; y < room.y + room.h; y++) {
+    push(room.x, y, -1, 0);               // west wall
+    push(room.x + room.w - 1, y, 1, 0);   // east wall
+  }
+  if (!edges.length) return;
+  const count = Math.min(edges.length, 1 + (r() < 0.4 ? 1 : 0));
+  for (let i = 0; i < count; i++) {
+    // pull the chosen wall cell out of the pool so two mounts never stack
+    const [cx, cy, dx, dy] = edges.splice(Math.floor(r() * edges.length), 1)[0];
+    const isBanner = r() < 0.4;
+    const m = cloneModel(isBanner ? "banner" : "wallTorch");
+    if (!m) continue;
+    const p = cellPos(cx, cy);
+    m.position.set(p.x + dx * (H - 0.05), isBanner ? 0 : 1.4, p.z + dy * (H - 0.05));
+    m.rotation.y = Math.atan2(-dx, -dy); // face the room interior
+    group.add(m);
   }
 }

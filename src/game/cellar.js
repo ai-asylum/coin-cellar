@@ -25,12 +25,15 @@ const GW = 7, GH = 7;
 const ROOM = { x: 1, y: 1, w: 5, h: 5, cx: 3, cy: 3 };
 const cellPos = (x, y) => new THREE.Vector3((x - GW / 2 + 0.5) * CELL, 0, (y - GH / 2 + 0.5) * CELL);
 
-// One mouth per corner of the room (grid cells), reading order = dungeon index.
+// All four mouths lined up in a neat row across the top of the room, evenly
+// spaced (reading order = dungeon index). They sit one cell in from the north
+// wall (gy 2, not 1) so neither the mouth nor the trapdoor lid — which hinges
+// and swings back toward the wall — clips through the wall geometry.
 export const HOLE_DEFS = [
-  { name: "Rat Warren", gx: 1, gy: 1, color: 0x9a6dff },
-  { name: "Flooded Deep", gx: 5, gy: 1, color: 0x5dd0ff },
-  { name: "Bone Hollow", gx: 1, gy: 5, color: 0xff9a5d },
-  { name: "Gloom Drain", gx: 5, gy: 5, color: 0x6fd6c8 },
+  { name: "Rat Warren", gx: 1.5, gy: 2, color: 0x9a6dff },
+  { name: "Flooded Deep", gx: 2.5, gy: 2, color: 0x5dd0ff },
+  { name: "Bone Hollow", gx: 3.5, gy: 2, color: 0xff9a5d },
+  { name: "Gloom Drain", gx: 4.5, gy: 2, color: 0x6fd6c8 },
 ];
 
 // the tutorial keeps its arrival spot and home stairs on opposite walls of the
@@ -153,12 +156,7 @@ export class Cellar {
         new THREE.MeshBasicMaterial({ color: 0x05060a })
       );
       mouth.position.copy(local).setY(0.02);
-      const rim = new THREE.Mesh(
-        new THREE.RingGeometry(0.85, 1.05, 28).rotateX(-Math.PI / 2),
-        new THREE.MeshBasicMaterial({ color: hole.color, transparent: true, opacity: 0.5, depthWrite: false })
-      );
-      rim.position.copy(local).setY(0.03);
-      this.group.add(mouth, rim);
+      this.group.add(mouth);
       const shaft = makeLightShaft({ color: hole.color, length: 4.2, topWidth: 0.45, bottomWidth: 1.6, opacity: 0.22, tilt: 0.16, spin: r() * Math.PI, motes: 8 });
       shaft.position.set(local.x, 3.2, local.z);
       this.group.add(shaft);
@@ -192,7 +190,8 @@ export class Cellar {
     // props plus the kit's barrels and crates, kept clear of every walk target
     const skip = [ENTRANCE_CELL, STAIRS_CELL, ...HOLE_DEFS.map((h) => ({ x: h.gx, y: h.gy }))];
     scatterDungeonDecor(this.group, r, [ROOM], cellPos, { skip, theme: DEFAULT_THEME.decor });
-    scatterAssetProps(this.group, r, [ROOM], cellPos, { skip });
+    const propColliders = scatterAssetProps(this.group, r, [ROOM], cellPos, { skip, origin: CELLAR_ORIGIN });
+    for (const c of propColliders) this.colliders.push(c);
   }
 
   update(dt, elapsed) {

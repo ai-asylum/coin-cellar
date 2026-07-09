@@ -10,7 +10,7 @@ import { scatterDungeonDecor, disposeDecor } from "./decor.js";
 import { Projectiles } from "./projectile.js";
 import { rng, pick } from "../core/engine.js";
 import { DUNGEON_ORIGIN, isBossFloor, dungeonIndexFor, bossDefFor, ENEMY_KINDS, HOLE_THEMES, DEFAULT_THEME, FLOORS_PER_DUNGEON, floorMixFor } from "./dungeon-data.js";
-import { CELL, makeChest, makeGate, makeFloorGeometry, makeStairs, buildAssetFloor, buildAssetWalls, scatterAssetProps } from "./dungeon-geometry.js";
+import { CELL, makeChest, makeGate, makeFloorGeometry, makeStairs, makeDescentPit, buildAssetFloor, buildAssetWalls, scatterAssetProps, modelCollider } from "./dungeon-geometry.js";
 import { dungeonAssetsReady, dungeonWallMaterial } from "./dungeon-assets.js";
 import { aiMethods } from "./dungeon-ai.js";
 import { combatMethods } from "./dungeon-combat.js";
@@ -174,6 +174,17 @@ export class Dungeon {
 
     const cellPos = (x, y) => new THREE.Vector3((x - GW / 2 + 0.5) * CELL, 0, (y - GH / 2 + 0.5) * CELL);
 
+    // Pick the descent (down-stairs) room now — the one farthest from the
+    // arrival room — so the floor can leave a pit under it that the sunk stair
+    // flight drops into. (Boss/tutorial floors have no down-stairs, so no pit.)
+    let _farRoom = rooms[0], _farD = -1;
+    for (const room of rooms) {
+      const d = Math.abs(room.cx - rooms[0].cx) + Math.abs(room.cy - rooms[0].cy);
+      if (d > _farD) { _farD = d; _farRoom = room; }
+    }
+    const hasDown = !tutorial && !isBoss;
+    const floorHoles = hasDown ? new Set([`${_farRoom.cx},${_farRoom.cy}`]) : null;
+
     // --- floor slab (colors come from the hole's theme; tutorial gets the default)
     const theme = tutorial ? DEFAULT_THEME : (HOLE_THEMES[dungeonIndexFor(floorN)] ?? DEFAULT_THEME);
     this.theme = theme;
@@ -188,7 +199,7 @@ export class Dungeon {
     const floorTint = new THREE.Color(palette[1]).lerp(_WHITE, 0.5);
     const wallTint = new THREE.Color(palette[1]).lerp(_WHITE, 0.32);
     if (dungeonAssetsReady()) {
-      this._floorMesh = buildAssetFloor(open, GW, GH, cellPos, floorTint);
+      this._floorMesh = buildAssetFloor(open, GW, GH, cellPos, floorTint, floorHoles);
     } else {
       this._floorMesh = new THREE.Mesh(
         makeFloorGeometry(open, GW, GH, cellPos),
@@ -250,25 +261,27 @@ export class Dungeon {
     this.reveal(this.entrancePos.x + DUNGEON_ORIGIN.x, this.entrancePos.z + DUNGEON_ORIGIN.z);
 
     // down-stairs go in the room farthest from the entrance for a longer descent
-    let last = rooms[0], far = -1;
-    for (const room of rooms) {
-      const d = Math.abs(room.cx - rooms[0].cx) + Math.abs(room.cy - rooms[0].cy);
-      if (d > far) { far = d; last = room; }
-    }
-    const stairsCell = tutorial ? { x: rm0.x + rm0.w - 2, y: rm0.cy } : { x: last.cx, y: last.cy };
+    // (_farRoom was chosen above so the floor pit lines up under the flight)
+    const stairsCell = tutorial ? { x: rm0.x + rm0.w - 2, y: rm0.cy } : { x: _farRoom.cx, y: _farRoom.cy };
     this.stairsPos = cellPos(stairsCell.x, stairsCell.y);
     this.stairsCell = stairsCell;
-    this.hasDownStairs = !tutorial && !isBoss;
+    this.hasDownStairs = hasDown;
     if (this.hasDownStairs) {
+      // the dark shaft that keeps the cut-out cell from reading as a black void
+      const pit = makeDescentPit();
+      pit.position.copy(this.stairsPos);
+      this.group.add(pit);
       const stairs = makeStairs("down");
+      stairs.rotation.y = Math.PI; // turn the flight to face the camera
       stairs.position.copy(this.stairsPos);
+      // the flight's footprint is offset (and asymmetric), so re-seat it so it
+      // sits centred inside the pit rather than poking through a wall
+      stairs.updateMatrixWorld(true);
+      const sb = new THREE.Box3().setFromObject(stairs);
+      stairs.position.x -= (sb.min.x + sb.max.x) / 2 - this.stairsPos.x;
+      stairs.position.z -= (sb.min.z + sb.max.z) / 2 - this.stairsPos.z;
+      stairs.position.y = 0.35; // lift the flight so its steps sit up out of the pit
       this.group.add(stairs);
-      const glow = new THREE.Mesh(
-        new THREE.CircleGeometry(0.7, 20).rotateX(-Math.PI / 2),
-        new THREE.MeshBasicMaterial({ color: 0xff8a3d, transparent: true, opacity: 0.4 })
-      );
-      glow.position.copy(this.stairsPos).setY(0.05);
-      this.group.add(glow);
     }
 
     // up-stairs: the way back out. On normal floors they rise at the arrival
@@ -303,8 +316,11 @@ export class Dungeon {
       theme: theme.decor,
     }).map((d, i) => ({ ...d, id: i, wx: d.x + DUNGEON_ORIGIN.x, wz: d.z + DUNGEON_ORIGIN.z }));
 
-    // freestanding kit props (barrels/crates/braziers) tucked against the walls
-    scatterAssetProps(this.group, r, rooms, cellPos, { skip: [this.entranceCell, this.stairsCell] });
+    // freestanding kit props (barrels/crates/braziers) tucked against the walls,
+    // plus torches/banners mounted on the rooms' perimeter walls. Their solid
+    // footprints join the floor's colliders so nothing walks through them.
+    const propColliders = scatterAssetProps(this.group, r, rooms, cellPos, { skip: [this.entranceCell, this.stairsCell], open, GW, GH, origin: DUNGEON_ORIGIN });
+    for (const c of propColliders) this.colliders.push(c);
 
     // --- god-ray shafts: light leaking through cracks in the ceiling above.
     // Cool arcane glow over the up-stairs at the entrance, warm dusk over the
@@ -366,6 +382,7 @@ export class Dungeon {
       const chest = makeChest();
       chest.position.copy(cellPos(rooms[0].cx, rooms[0].cy));
       chest.rotation.y = -Math.PI / 2;
+      this.colliders.push(modelCollider(chest, DUNGEON_ORIGIN));
       this.group.add(chest);
       this.chests.push({ mesh: chest, opened: false, id: 0 });
     } else {
@@ -377,6 +394,7 @@ export class Dungeon {
       const chest = makeChest();
       chest.position.copy(p);
       chest.rotation.y = r() * Math.PI * 2;
+      this.colliders.push(modelCollider(chest, DUNGEON_ORIGIN));
       this.group.add(chest);
       this.chests.push({ mesh: chest, opened: false, id: i });
     }
@@ -395,6 +413,7 @@ export class Dungeon {
         const p = cellPos(room.cx, room.cy);
         const chest = makeChest();
         chest.position.copy(p);
+        this.colliders.push(modelCollider(chest, DUNGEON_ORIGIN));
         this.group.add(chest);
         this.chests.push({ mesh: chest, opened: false, id: 0 });
       }
