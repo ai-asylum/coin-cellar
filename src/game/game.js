@@ -564,10 +564,11 @@ export class Game {
   _contextAction() {
     const p = this.player.position;
     // the cave: the daylight mouth is a walk-through (see _updateCaveTravel);
-    // the one interact is the cellar descent at its deepest point
+    // the one interact is the cellar descent at its deepest point — silent
+    // while its trapdoor is still shut (the FTUE's shop half)
     if (this.playerArea === "cave") {
       const tutBlocks = this.tutorial && this.tutorial !== "delve";
-      if (!tutBlocks && p.distanceTo(this.cave.descentPos) < 1.7)
+      if (!tutBlocks && this.cave.trapdoorOpen && p.distanceTo(this.cave.descentPos) < 1.7)
         return { label: "hole", hint: "Delve", fn: () => this._delve(), focus: _focus.copy(this.cave.descentPos).setY(0.06).clone(), color: 0xb98cff };
       return { label: null };
     }

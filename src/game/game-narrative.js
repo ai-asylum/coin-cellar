@@ -84,6 +84,7 @@ export const narrativeMethods = {
     this._doorScene = false; // Scene 3 runs once
     this._bagStowed = false; // the haul moves to the storeroom on first entry
     this.cave.spawnSlime();
+    this.cave.setTrapdoorOpen(false, true); // shut behind them on the climb out
     this.playerArea = "cave";
     this.player.position.copy(this.cave.entrancePos);
     this.player.heading = 0; // face the daylight, south down the tunnel

@@ -152,6 +152,32 @@ export class Cave {
     this.group.add(downShaft);
     this.shafts.push(downShaft);
 
+    // --- the trapdoor over the descent: the hero shut it behind them on the
+    // way out, so the FTUE wakes up next to a closed lid. It swings open when
+    // the player comes back to delve (see _enterCave), and returning players
+    // boot with it already open (see _beginShop).
+    const lidMat = makeToonMaterial({ color: 0x6e4526, rim: 0 });
+    const lidTrim = makeToonMaterial({ color: 0x4a2c17, rim: 0, polygonOffset: true });
+    const lidR = CELL / 2;
+    const lidPivot = new THREE.Group();
+    lidPivot.position.set(descentLocal.x, 0.06, descentLocal.z - lidR); // hinge on the deep edge
+    const lid = new THREE.Mesh(new THREE.BoxGeometry(lidR * 2, 0.12, lidR * 2), lidMat);
+    lid.position.set(0, 0, lidR);
+    lidPivot.add(lid);
+    for (const px of [-0.62, 0, 0.62]) {
+      const plank = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.15, lidR * 2 - 0.16), lidTrim);
+      plank.position.set(px, 0.06, lidR);
+      lidPivot.add(plank);
+    }
+    const pull = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.03, 6, 14), lidTrim);
+    pull.rotation.x = Math.PI / 2;
+    pull.position.set(0, 0.12, lidR * 1.7);
+    lidPivot.add(pull);
+    this.group.add(lidPivot);
+    this._lid = lidPivot;
+    this.trapdoorOpen = false; // shut until claimed (or instantly for old saves)
+    this._lidAngle = 0; // eased: 0 = flat over the hole, 1 = flung up and back
+
     // --- the daylight mouth: a warm shaft pouring in, a glare quad filling the
     // gap (facing the camera) and a pool of light spilling onto the floor
     const shaft = makeLightShaft({ color: 0xfff0c0, length: 5.2, topWidth: 0.7, bottomWidth: 2.8, opacity: 0.5, tilt: 0.3, spin: 0.4, motes: 16 });
@@ -195,6 +221,23 @@ export class Cave {
       c.heading = Math.random() * Math.PI * 2;
       this.game.engine.scene.add(c);
       this.rats.push({ creature: c, tx: c.position.x, tz: c.position.z, pause: 1 + Math.random() * 2 });
+    }
+  }
+
+  // Swing the descent's trapdoor. `instant` snaps the pose — returning
+  // players boot with it already open; the FTUE opens it with a creak and a
+  // puff of dust the moment the player walks back in to delve.
+  setTrapdoorOpen(open, instant = false) {
+    if (this.trapdoorOpen === open) return;
+    this.trapdoorOpen = open;
+    if (instant) {
+      this._lidAngle = open ? 1 : 0;
+      this._lid.rotation.x = -this._lidAngle * 1.9;
+    } else if (open) {
+      this.game.particles.burst(
+        this.descentPos.clone().setY(0.3),
+        { color: 0x8a6a4a, n: 12, speed: 2.2, up: 1.6, gravity: 4, life: 0.5, size: 0.9 }
+      );
     }
   }
 
@@ -245,6 +288,11 @@ export class Cave {
     if (this.game.playerArea !== "cave") return;
     feedOccluder(this._wallMat, this.game.player, this.game.engine.camera);
     for (const s of this.shafts) s.userData.update(dt, elapsed);
+
+    // ease the trapdoor toward its open/shut pose (swings up and back)
+    const lidTgt = this.trapdoorOpen ? 1 : 0;
+    this._lidAngle += (lidTgt - this._lidAngle) * Math.min(1, dt * 4);
+    this._lid.rotation.x = -this._lidAngle * 1.9;
     // with the south wall gone the glare shows face-on — keep it soft enough
     // that the floor still reads through the daylight
     this.glare.material.opacity = 0.5 + Math.sin(elapsed * 1.7) * 0.1;

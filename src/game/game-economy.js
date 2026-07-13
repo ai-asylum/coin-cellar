@@ -253,6 +253,9 @@ export const economyMethods = {
     if (first) {
       this.hud.banner(`${icon("shop")} COIN CELLAR`, "", 3);
       if (this.day === 1 && !this._hadSave && !this.net.connected) this._tutStart();
+      // no FTUE (returning player / co-op): the cave's trapdoor was claimed
+      // long ago — it boots already open
+      if (!this.tutorial) this.cave.setTrapdoorOpen(true, true);
     }
     this.today = this._freshDayStats();
     this._syncState();

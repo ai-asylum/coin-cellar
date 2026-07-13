@@ -65,6 +65,12 @@ export const dungeonFlowMethods = {
     this.hud.setGoldCorner(true);
     this.audio.stairs();
     this._snapCamera();
+    // coming back with the Mayor's dare: the trapdoor the hero shut behind
+    // them swings open ahead — the FTUE's last reveal
+    if (!this.cave.trapdoorOpen && (!this.tutorial || this.tutorial === "delve")) {
+      this.cave.setTrapdoorOpen(true);
+      this.audio.chest();
+    }
   },
 
   _exitCave() {
