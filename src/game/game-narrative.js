@@ -65,8 +65,9 @@ const MAYOR_PRAISE_LINES = [
 ];
 
 // where the Mayor stands inside the shop while you set up and make the sale
-// (just in from the east-side door, clear of the vitrine and the tables)
-const WATCH_SPOT = new THREE.Vector3(1.5, 0, -3.3);
+// (just in from the street-side door, clear of the vitrine and the tables;
+// rotated-town coordinates — the road runs along z now)
+const WATCH_SPOT = new THREE.Vector3(3.3, 0, 1.5);
 
 const TUT_ORDER = ["exit", "shop", "stock", "sell", "delve"];
 
@@ -216,9 +217,10 @@ export const narrativeMethods = {
         break;
       case "stock":
         // first step through the door: the pack empties into the storeroom, so
-        // the tables can be stocked from it
+        // the tables can be stocked from it (the town is rotated a quarter-turn,
+        // so the shop rect is D wide in x and W deep in z)
         if (!this._bagStowed && this.playerArea === "shop" &&
-            Math.abs(p.x) < SHOP.W / 2 && Math.abs(p.z) < SHOP.D / 2) {
+            Math.abs(p.x) < SHOP.D / 2 && Math.abs(p.z) < SHOP.W / 2) {
           this._bagStowed = true;
           this._depositBag();
         }
@@ -330,8 +332,8 @@ export const narrativeMethods = {
 
   _mayorDoorScene() {
     if (this._mayor) return;
-    const m = this._ensureMayor(_v.set(-this.shop.streetHalfX, 0, this.shop.streetWalkZ));
-    this._mayorWalk(m, [this.shop.doorPos.clone().add(_v.set(-1.7, 0, -0.7))], () => {
+    const m = this._ensureMayor(this.shop.streetEndN);
+    this._mayorWalk(m, [this.shop.doorPos.clone().add(_v.set(0.7, 0, -1.7))], () => {
       m.state = "talk";
       this._mayorSay(MAYOR_DOOR_LINES, () => {
         // the keys are yours: unlock the shopfront and lead the way in
@@ -356,7 +358,7 @@ export const narrativeMethods = {
     this._mayorSay(MAYOR_SALE_LINES, () => {
       this.shop.doorHeld = true;
       this._mayorWalk(m, [this.shop.doorInside.clone(), this.shop.doorPos.clone(),
-        new THREE.Vector3(-this.shop.streetHalfX - 1.5, 0, this.shop.streetWalkZ)], () => this._endMayorScene());
+        this.shop.streetEndN.clone().add(_v.set(0, 0, -1.5))], () => this._endMayorScene());
       this._selfSay([PLAYER_RESOLVE_LINE]);
     });
   },
@@ -446,12 +448,12 @@ export const narrativeMethods = {
   // player for a word of praise, then sees himself off.
   _mayorAfterRestore() {
     if (this.net.connected || this._mayor) return;
-    const m = this._ensureMayor(_v.set(-this.shop.streetHalfX, 0, this.shop.streetWalkZ));
+    const m = this._ensureMayor(this.shop.streetEndN);
     const spot = this.player.position.clone().add(_v2.set(1.5, 0, 0.8));
     this._mayorWalk(m, [spot], () => {
       m.state = "talk";
       this._mayorSay(MAYOR_PRAISE_LINES, () => {
-        this._mayorWalk(m, [new THREE.Vector3(-this.shop.streetHalfX - 1.5, 0, this.shop.streetWalkZ)], () => this._endMayorScene());
+        this._mayorWalk(m, [this.shop.streetEndN.clone().add(_v.set(0, 0, -1.5))], () => this._endMayorScene());
       });
     });
   },
@@ -510,8 +512,7 @@ export const narrativeMethods = {
       creature,
       portrait: portraitDataURL(CLERK_VARIANT, "left"),
       state: "talk",
-      path: [this.shop.doorInside, this.shop.doorPos,
-        new THREE.Vector3(this.shop.streetHalfX, 0, this.shop.streetWalkZ)],
+      path: [this.shop.doorInside, this.shop.doorPos, this.shop.streetEndN.clone()],
       pathIdx: 0, pathT: 0,
     };
     this.hud.speak({

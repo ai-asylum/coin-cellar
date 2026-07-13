@@ -46,8 +46,8 @@ export const customerMethods = {
   spawnScriptedCustomer(seed = 4242) {
     const game = this.game;
     const creature = new BlockyCreature(variantForSeed(seed), { height: 1.5 });
-    creature.position.set(-this.streetHalfX, 0, this.streetWalkZ);
-    creature.heading = Math.PI / 2;
+    creature.position.copy(this.streetEndN); // in from the village end
+    creature.heading = 0; // walking south, toward the shop door
     this.group.add(creature);
     const cust = {
       id: game.net.newId(),
@@ -73,7 +73,7 @@ export const customerMethods = {
       state: "street",
       t: 0,
       patience: 1e9, // he won't leave until the deal is done
-      exitPoint: new THREE.Vector3(-this.streetHalfX, 0, this.streetWalkZ),
+      exitPoint: this.streetEndN.clone(),
       emote: null,
     };
     this.customers.push(cust);
@@ -116,7 +116,7 @@ export const customerMethods = {
       }
       c.update(dt, elapsed);
       // retire once they've reached the exit point beyond the street edge
-      if (p.life <= -1e8 && Math.abs(c.position.x) > this.streetRegion.xMax + 2.5) {
+      if (p.life <= -1e8 && Math.abs(c.position.z) > this.streetRegion.alongMax + 2.4) {
         c.dispose();
         this.passersby = this.passersby.filter((x) => x !== p);
       }
@@ -128,25 +128,25 @@ export const customerMethods = {
   // buildings, so a straight stroll between waypoints never clips a wall).
   _pickPasserTarget(p) {
     const R = this.streetRegion;
-    p.tx = (Math.random() - 0.5) * 2 * R.xMax;
-    p.tz = R.farZ + Math.random() * (R.nearZ - R.farZ);
+    p.tx = R.crossNear + Math.random() * (R.crossFar - R.crossNear);
+    p.tz = (Math.random() - 0.5) * 2 * R.alongMax;
   },
 
   _spawnPasserby() {
     const R = this.streetRegion;
-    const dir = Math.random() < 0.5 ? 1 : -1; // which edge they walk in from
+    const dir = Math.random() < 0.5 ? 1 : -1; // which end they walk in from
     const creature = makeCustomerBody(Math.floor(Math.random() * 1e6));
-    const span = R.xMax + 2.5;
-    creature.position.set(-dir * span, 0, R.farZ + Math.random() * (R.nearZ - R.farZ));
-    creature.heading = dir > 0 ? Math.PI / 2 : -Math.PI / 2;
+    const span = R.alongMax + 2.5;
+    creature.position.set(R.crossNear + Math.random() * (R.crossFar - R.crossNear), 0, -dir * span);
+    creature.heading = dir > 0 ? 0 : Math.PI;
     this.group.add(creature);
     const p = {
       creature,
       speed: 1.0 + Math.random() * 0.9,
       life: 10 + Math.random() * 14, // seconds of milling before they head off
       pause: 0,
-      exitX: dir * span, // where they leave once done
-      exitZ: R.farZ + Math.random() * (R.nearZ - R.farZ),
+      exitX: R.crossNear + Math.random() * (R.crossFar - R.crossNear),
+      exitZ: dir * span, // where they leave once done
       tx: 0, tz: 0,
     };
     this._pickPasserTarget(p);
@@ -158,9 +158,10 @@ export const customerMethods = {
     const seed = pick(rng(Math.random() * 1e9), this._custSeedPool) + Math.floor(Math.random() * 4) * 100;
     const creature = makeCustomerBody(seed);
     // arrive from one end of the street and stroll toward the door
-    const side = Math.random() < 0.5 ? -1 : 1;
-    creature.position.set(side * this.streetHalfX, 0, this.streetWalkZ + (Math.random() - 0.5) * 0.5);
-    creature.heading = side > 0 ? -Math.PI / 2 : Math.PI / 2;
+    const end = Math.random() < 0.5 ? this.streetEndN : this.streetEndS;
+    creature.position.copy(end);
+    creature.position.x += (Math.random() - 0.5) * 0.5; // drift across the lane
+    creature.heading = end === this.streetEndN ? 0 : Math.PI;
     this.group.add(creature);
 
     // weighted archetype. Restored houses add residents who shop here: each
@@ -218,7 +219,7 @@ export const customerMethods = {
       state: "street", // street -> enter -> (roam.../offer) -> leave
       t: 0,
       patience: 18 + Math.random() * 10,
-      exitPoint: new THREE.Vector3((Math.random() < 0.5 ? -1 : 1) * this.streetHalfX, 0, this.streetWalkZ),
+      exitPoint: (Math.random() < 0.5 ? this.streetEndN : this.streetEndS).clone(),
       emote: null,
     };
     this.customers.push(cust);

@@ -671,9 +671,9 @@ export const uiMethods = {
         this.shop.doorLocked = true;
         this.inventory = [...wares];
         this._syncInv();
-        // stand where the cave spits you out, facing the shop
-        this.player.position.copy(this.shop.caveMouthPos).add(_v.set(-1.9, 0, 0));
-        this.player.heading = -Math.PI / 2;
+        // stand where the cave spits you out, facing up the road at the shop
+        this.player.position.copy(this.shop.caveMouthPos).add(_v.set(0, 0, -1.9));
+        this.player.heading = Math.PI;
         this.player.animator.prevPos.copy(this.player.position);
         this._snapCamera();
         this._tutHint();

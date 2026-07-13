@@ -863,6 +863,10 @@ export class Game {
 
   // jump the camera straight to the current area's framing (no glide)
   _snapCamera() {
+    // area transitions are teleports, so the light palette snaps with the
+    // camera — otherwise the street spends seconds brightening out of the
+    // cave's gloom on every walk-through (see Shop._updateLighting)
+    this.shop._litInit = false;
     const area = this.playerArea;
     if (area === "dungeon" || area === "cellar" || area === "cave") {
       this.engine.camTarget.copy(this.player.position);

@@ -430,12 +430,74 @@ export const buildMethods = {
     // buildings across the road, and the plaza floor beneath them all.
     this._buildTown(mkWall, mkGround, wallMat2, wood2, roadFar, streetW, wallH, backZ);
 
+    // quarter-turn the whole town so the road runs down the screen (portrait
+    // play): the cave mouth lands at the bottom, the ruined row along the far
+    // side. Must run before the nav bake so the grid sees rotated colliders.
+    this._rotateTown();
+
     // bake a coarse navigation grid of the shop floor so customers can route
     // around the tables & furniture instead of shoving straight through them.
     this._buildNav();
     // doors start shut: block the opening (added after nav bake so the grid
     // still treats the doorway as walkable for when they're opened)
     this.colliders.push(this._doorCollider);
+  },
+
+  // Rotate the town 90° — (x, z) → (−z, x) — so the street runs along the
+  // screen's long axis with the cave mouth at the bottom. The rotation is
+  // baked into each existing top-level child's transform (not the group), so
+  // group space stays identical to world space for everything spawned later
+  // (customers, the Mayor, stocked item sprites). Every stored logic anchor —
+  // colliders, spots, zones, bounds — is mapped through the same transform.
+  _rotateTown() {
+    const qR = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -Math.PI / 2);
+    for (const child of this.group.children) {
+      const p = child.position;
+      p.set(-p.z, p.y, p.x);
+      child.quaternion.premultiply(qR);
+    }
+    const rotV = (v) => { const x = v.x; v.x = -v.z; v.z = x; return v; };
+    const rotC = (c) => {
+      const nx = -c.z, nz = c.x, hw = c.hd, hd = c.hw;
+      c.x = nx; c.z = nz; c.hw = hw; c.hd = hd;
+    };
+    // expansion door colliders and lot colliders live inside this array too
+    // (shared object refs), so one pass covers them all
+    for (const c of this.colliders) rotC(c);
+    rotC(this._doorCollider); // joins the list after the nav bake
+    rotV(this.counterPos);
+    for (const q of this.queueSpots) rotV(q);
+    rotV(this.doorPos);
+    rotV(this.doorInside);
+    rotV(this.caveMouthPos);
+    for (const slot of this.slots) {
+      rotV(slot.pos);
+      rotV(slot.browsePos);
+      for (const b of slot.browseSpots) rotV(b);
+    }
+    for (const t of this.tables) rotV(t.interactPos);
+    for (const lot of this.lots) rotV(lot.interactPos);
+    for (const ex of this.expansions) rotV(ex.interactPos);
+    for (const z of this.zones) {
+      Object.assign(z, {
+        minX: -z.maxZ, maxX: -z.minZ, minZ: z.minX, maxZ: z.maxX,
+        cx: -z.cz, cz: z.cx,
+      });
+    }
+    const b = this.bounds;
+    Object.assign(b, { minX: -b.maxZ, maxX: -b.minZ, minZ: b.minX, maxZ: b.maxX });
+    // the street now runs along z: expose its two ends as explicit anchors
+    // (spawn / exit points for customers, the Mayor and the clerk). North is
+    // the village end; the cave mouth closes the south end.
+    this.streetEndN = new THREE.Vector3(-this.streetWalkZ, 0, -this.streetHalfX);
+    this.streetEndS = new THREE.Vector3(-this.streetWalkZ, 0, this.streetHalfX);
+    // passers-by roam the rotated road: `cross` spans its width (x), `along`
+    // its length (z, capped shy of the cave mound)
+    this.streetRegion = {
+      alongMax: this.streetRegion.xMax,
+      crossNear: -this.streetRegion.nearZ,
+      crossFar: -this.streetRegion.farZ,
+    };
   },
 
   // The cave mouth: a mound of stacked rock with a dark opening facing down
@@ -462,7 +524,7 @@ export const buildMethods = {
     mkRock(1.5, 1.9, 1.4, cx - 1.2, 0.95, cz - 2.6, rock2, 0.5);
     mkRock(1.3, 1.5, 1.3, cx - 1.1, 0.75, cz + 2.7, rock, -0.4);
     mkRock(1.0, 0.8, 1.0, cx - 1.9, 0.4, cz + 1.4, rock2, 0.3);
-    // the dark maw itself, facing west down the street
+    // the dark maw itself, facing down the street toward the approach
     const maw = new THREE.Mesh(
       new THREE.PlaneGeometry(2.6, 2.6),
       new THREE.MeshBasicMaterial({ color: 0x05060a })
@@ -470,6 +532,14 @@ export const buildMethods = {
     maw.rotation.y = -Math.PI / 2;
     maw.position.set(cx - 1.15, 1.3, cz);
     g.add(maw);
+    // a shadowed threshold spilling out of the opening — the top-down read of
+    // "this is a hole in the hill" survives whatever way the camera faces
+    const thresh = new THREE.Mesh(
+      new THREE.CircleGeometry(1.15, 22).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: 0x0a0806 })
+    );
+    thresh.position.set(cx - 1.6, 0.02, cz);
+    g.add(thresh);
     // dirt apron where the road peters out into the hillside
     const apron = mkGround(4.5, 6.5, cx - 2.6, cz, 0x6b5a45);
     apron.position.y = 0.015;

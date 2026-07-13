@@ -22,11 +22,13 @@ owner's "cellar," and — for the first time in a long while — wants more than
 
 **The world's shape:** the cave where the road runs out is the dungeon's front
 door, permanently. Its deepest point holds the descent into the cellar lobby
-(the four dungeon mouths); the shop has no trapdoor. The rocky mouth sits just
-past the shop's east corner and the shop door is on the east side of its
-front, so pit → till is a few steps — a tight loop with the ruined north row
-always in view. Dungeons generate on a tall grid (18×32 cells, taller rooms):
-the game is played portrait, so floors sprawl along the screen's long axis.
+(the four dungeon mouths); the shop has no trapdoor. The game is played
+portrait, so the whole town is turned to match: the road runs down the screen
+with the village at the top and the rocky cave mouth at the bottom, the shop
+beside the road with its door on the street side, and the ruined row along
+the far side. Pit → till is a few steps, and every trip passes the ruins.
+Dungeons generate on a tall grid too (18×32 cells, taller rooms), so floors
+sprawl along the screen's long axis.
 
 **Theme: "enough."** The hero opens the game deciding they have enough
 (*"That should be enough for today"*) and closes the FTUE deciding they don't

@@ -69,9 +69,9 @@ export const dungeonFlowMethods = {
 
   _exitCave() {
     this.playerArea = "shop";
-    // step out beside the rocky mouth at the road's east end
-    this.player.position.copy(this.shop.caveMouthPos).add(_v.set(-1.9, 0, 0));
-    this.player.heading = -Math.PI / 2; // face west, down the road
+    // step out beside the rocky mouth at the road's south end
+    this.player.position.copy(this.shop.caveMouthPos).add(_v.set(0, 0, -1.9));
+    this.player.heading = Math.PI; // face north, up the road toward the shop
     this.player.animator.prevPos.copy(this.player.position);
     this.hud.showBag(false);
     this.hud.setGoldCorner(false);

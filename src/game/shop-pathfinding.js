@@ -15,12 +15,14 @@ export const pathMethods = {
   // it lands inside any collider inflated by a customer's half-width, so paths
   // keep a body's clearance from tables and walls.
   _buildNav() {
+    // the town is rotated a quarter-turn (see _rotateTown), so the shop's
+    // interior rect spans D across x and W along z
     const { W, D } = SHOP;
     const cell = 0.34;
     const pad = 0.32; // customer clearance
-    const minX = -W / 2 + 0.3, minZ = -D / 2 + 0.3;
-    const cols = Math.ceil((W - 0.6) / cell);
-    const rows = Math.ceil((D - 0.6) / cell);
+    const minX = -D / 2 + 0.3, minZ = -W / 2 + 0.3;
+    const cols = Math.ceil((D - 0.6) / cell);
+    const rows = Math.ceil((W - 0.6) / cell);
     const blocked = new Uint8Array(cols * rows);
     for (let r = 0; r < rows; r++) {
       for (let cc = 0; cc < cols; cc++) {
