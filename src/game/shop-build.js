@@ -231,31 +231,36 @@ export const buildMethods = {
       this.queueSpots.push(new THREE.Vector3(qHeadX - i * 0.95, 0, qZ));
     }
 
-    // display tables (2x2 grid, 2 slots each = 8 slots). Each table is a
-    // buildable fixture: all but the first start un-built (their real mesh hidden,
-    // slots unusable, a glowing floor outline marking the footprint) until the
-    // player pays to build them — see repairTable / _applyTableState.
-    // `this.tables` groups every table's meshes + slots + build cost so the
-    // game glue can offer the "Repair" prompt and persist what's been built.
+    // display tables (2x2 grid, 2 slots each = 8 slots). Long axis along
+    // pre-rotation z, so on screen the shelves read HORIZONTAL, stacked in two
+    // rows down the narrow room. Each table is a buildable fixture: all but
+    // the first start un-built (their real mesh hidden, slots unusable, a
+    // glowing floor outline marking the footprint) until the player pays to
+    // build them — see repairTable / _applyTableState. `this.tables` groups
+    // every table's meshes + slots + build cost so the game glue can offer
+    // the "Repair" prompt and persist what's been built.
     this.tables = [];
+    // pre-rotation spots → on screen: two columns (clear of the vitrine along
+    // the road wall and of the counter's queue), two rows down the room. The
+    // first — the free starter shelf — sits nearest the door.
     const tablePts = [
-      [-1.6, 0.6], [1.6, 0.6],
-      [-1.6, 3.2], [1.6, 3.2],
+      [-0.8, -0.2], [-0.8, 2.2],
+      [1.6, -0.2], [1.6, 2.2],
     ];
     tablePts.forEach(([tx, tz], ti) => {
       const t = new THREE.Group();
-      const top = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.14, 1.1), woodMat);
+      const top = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.14, 2.2), woodMat);
       top.position.y = 0.78;
-      const legs = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.72, 0.8), wood2);
+      const legs = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.72, 1.9), wood2);
       legs.position.y = 0.36;
       t.add(top, legs);
       // footprint outline flagging where this table gets built (shown while it's
       // locked, in place of the old greyed-out ghost mesh)
-      const outline = makeFloorOutline(2.4, 1.3);
+      const outline = makeFloorOutline(1.3, 2.4);
       t.add(outline);
       t.position.set(tx, 0, tz);
       g.add(t);
-      this.colliders.push({ x: tx, z: tz, hw: 1.15, hd: 0.6 });
+      this.colliders.push({ x: tx, z: tz, hw: 0.6, hd: 1.15 });
       const table = {
         group: t,
         meshes: [top, legs],
@@ -265,20 +270,20 @@ export const buildMethods = {
         fancy: false,
         repaired: ti === 0, // only the first shelf comes ready to stock
         slots: [],
-        interactPos: new THREE.Vector3(tx, 0, tz + 1.05),
+        interactPos: new THREE.Vector3(tx + 1.05, 0, tz),
       };
-      for (const dx of [-0.55, 0.55]) {
+      for (const dz of [-0.55, 0.55]) {
         const slot = {
-          pos: new THREE.Vector3(tx + dx, 0.86, tz),
-          browsePos: new THREE.Vector3(tx + dx, 0, tz + 1.05),
+          pos: new THREE.Vector3(tx, 0.86, tz + dz),
+          browsePos: new THREE.Vector3(tx + 1.05, 0, tz + dz),
           // standing spots on every side of the table, so a shopper can view
           // the item from whichever side is nearest / reachable rather than
-          // always squeezing to the front (see _browseSpotFor)
+          // always squeezing to one face (see _browseSpotFor)
           browseSpots: [
-            new THREE.Vector3(tx + dx, 0, tz + 1.05), // front
-            new THREE.Vector3(tx + dx, 0, tz - 1.05), // back
-            new THREE.Vector3(tx + 1.6, 0, tz),       // right
-            new THREE.Vector3(tx - 1.6, 0, tz),       // left
+            new THREE.Vector3(tx + 1.05, 0, tz + dz), // one long face
+            new THREE.Vector3(tx - 1.05, 0, tz + dz), // the other
+            new THREE.Vector3(tx, 0, tz + 1.6),       // near end
+            new THREE.Vector3(tx, 0, tz - 1.6),       // far end
           ],
           item: null,
           mesh: null,
@@ -481,6 +486,9 @@ export const buildMethods = {
       p.set(-p.z, p.y, p.x);
       child.quaternion.premultiply(qR);
     }
+    // animated pivots whose yaw gets SET each frame (the door leaves) need the
+    // baked yaw folded into their swing rather than overwritten (see update())
+    this._doorBaseY = -Math.PI / 2;
     const rotV = (v) => { const x = v.x; v.x = -v.z; v.z = x; return v; };
     const rotC = (c) => {
       const nx = -c.z, nz = c.x, hw = c.hd, hd = c.hw;

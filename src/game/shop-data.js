@@ -14,7 +14,10 @@ export const ARCHETYPES = [
 export const MAX_CUSTOMERS = 6;
 export const SELLER_CHANCE = 0.3; // fraction of shoppers who come to sell, not buy
 
+// Pre-rotation dims: the town gets a quarter-turn at build time, so W is the
+// room's on-screen HEIGHT and D its on-screen WIDTH. Kept narrow (9) so the
+// whole interior fits a 9:16 portrait frame.
 export const SHOP = {
   W: 13,
-  D: 11,
+  D: 9,
 };

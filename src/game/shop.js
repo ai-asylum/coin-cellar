@@ -207,13 +207,16 @@ export class Shop {
     // still swings it, so it reads as firmly shut until the Mayor's intro ends.
     const wantOpen = this.customers.some((c) => !c._outside) || this.doorHeld || (playerNear && !this.doorLocked);
 
-    // ease the shopfront doors toward their open/shut pose
+    // ease the shopfront doors toward their open/shut pose. The swing rides on
+    // top of the town bake's yaw (_doorBaseY) — setting absolute angles here
+    // would wipe the rotation and leave the leaves spinning against the wall.
     const doorTgt = wantOpen ? 1 : 0;
     this._doorAngle += (doorTgt - this._doorAngle) * Math.min(1, dt * 7);
     if (this.doorLeaves) {
       const a = this._doorAngle * 2.1; // ~120° when fully open
-      this.doorLeaves[0].rotation.y = a;
-      this.doorLeaves[1].rotation.y = -a;
+      const base = this._doorBaseY ?? 0;
+      this.doorLeaves[0].rotation.y = base + a;
+      this.doorLeaves[1].rotation.y = base - a;
     }
 
     // ease each bought expansion door open (they swing into their room and stay)
