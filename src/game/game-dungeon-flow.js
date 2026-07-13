@@ -57,8 +57,8 @@ export const dungeonFlowMethods = {
 
   _enterCave() {
     this.playerArea = "cave";
-    this.player.position.copy(this.cave.exitPos).add(_v.set(0, 0, 1.8));
-    this.player.heading = 0; // walking south, into the dark
+    this.player.position.copy(this.cave.exitPos).add(_v.set(0, 0, -1.8));
+    this.player.heading = Math.PI; // walking north, deeper into the dark
     this.player.animator.prevPos.copy(this.player.position);
     this.hud.showHearts(false);
     this.hud.showBag(true);
@@ -69,9 +69,9 @@ export const dungeonFlowMethods = {
 
   _exitCave() {
     this.playerArea = "shop";
-    // step out beside the rocky mouth at the road's south end
-    this.player.position.copy(this.shop.caveMouthPos).add(_v.set(0, 0, -1.9));
-    this.player.heading = Math.PI; // face north, up the road toward the shop
+    // step out beside the rocky mouth at the top of the road
+    this.player.position.copy(this.shop.caveMouthPos).add(_v.set(0, 0, 1.9));
+    this.player.heading = 0; // face south, down the road toward the shop
     this.player.animator.prevPos.copy(this.player.position);
     this.hud.showBag(false);
     this.hud.setGoldCorner(false);
@@ -445,8 +445,8 @@ export const dungeonFlowMethods = {
     this.hud.showGold(true);
     this.hud.setGoldCorner(true);
     if (this.hud.sheetOpen) this.hud.hideSheet();
-    this.player.position.copy(this.cave.descentPos).add(_v.set(0, 0, -1.9));
-    this.player.heading = Math.PI; // facing the daylight, homeward
+    this.player.position.copy(this.cave.descentPos).add(_v.set(0, 0, 1.9));
+    this.player.heading = 0; // facing the daylight, homeward
     this.player.animator.prevPos.copy(this.player.position);
     this.audio.stairs();
     this._snapCamera();

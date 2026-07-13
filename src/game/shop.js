@@ -50,7 +50,7 @@ export class Shop {
     this.colliders = this.colliders.filter((c) => c !== ex.doorCollider);
     if (instant) {
       ex._doorA = 1;
-      ex.pivot.rotation.y = ex.side * 1.7;
+      ex.pivot.rotation.y = -1.7;
     }
   }
 
@@ -222,8 +222,21 @@ export class Shop {
         const tgt = ex.unlocked ? 1 : 0;
         if (Math.abs(ex._doorA - tgt) < 0.001) continue;
         ex._doorA += (tgt - ex._doorA) * Math.min(1, dt * 6);
-        ex.pivot.rotation.y = ex.side * ex._doorA * 1.7; // swing into the room
+        ex.pivot.rotation.y = -ex._doorA * 1.7; // swing into the back room
       }
+    }
+
+    // the roof lifts away while the player is anywhere inside the building
+    // (shop + its back rooms), so the interior stays readable
+    if (this.roof) {
+      const br = this.buildingRect;
+      const inBuilding = !!pp && this.game.playerArea === "shop" &&
+        pp.x > br.minX - 0.3 && pp.x < br.maxX + 0.3 &&
+        pp.z > br.minZ - 0.3 && pp.z < br.maxZ + 0.3;
+      const roofTgt = inBuilding ? 0 : 1;
+      this._roofA += (roofTgt - this._roofA) * Math.min(1, dt * 9);
+      this.roof.visible = this._roofA > 0.02;
+      if (this.roof.visible) for (const m of this._roofMats) m.opacity = this._roofA;
     }
 
     // the doorway only blocks the player once it's actually shut (no customers

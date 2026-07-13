@@ -46,8 +46,8 @@ export const customerMethods = {
   spawnScriptedCustomer(seed = 4242) {
     const game = this.game;
     const creature = new BlockyCreature(variantForSeed(seed), { height: 1.5 });
-    creature.position.copy(this.streetEndN); // in from the village end
-    creature.heading = 0; // walking south, toward the shop door
+    creature.position.copy(this.streetEndS); // in from the village end
+    creature.heading = Math.PI; // walking north, up toward the shop door
     this.group.add(creature);
     const cust = {
       id: game.net.newId(),
@@ -73,7 +73,7 @@ export const customerMethods = {
       state: "street",
       t: 0,
       patience: 1e9, // he won't leave until the deal is done
-      exitPoint: this.streetEndN.clone(),
+      exitPoint: this.streetEndS.clone(),
       emote: null,
     };
     this.customers.push(cust);
@@ -134,11 +134,12 @@ export const customerMethods = {
 
   _spawnPasserby() {
     const R = this.streetRegion;
-    const dir = Math.random() < 0.5 ? 1 : -1; // which end they walk in from
     const creature = makeCustomerBody(Math.floor(Math.random() * 1e6));
+    // in from (and back out through) the village end — the south. The north
+    // end is capped by the cave mound, so nobody strolls out of the rocks.
     const span = R.alongMax + 2.5;
-    creature.position.set(R.crossNear + Math.random() * (R.crossFar - R.crossNear), 0, -dir * span);
-    creature.heading = dir > 0 ? 0 : Math.PI;
+    creature.position.set(R.crossNear + Math.random() * (R.crossFar - R.crossNear), 0, span);
+    creature.heading = Math.PI;
     this.group.add(creature);
     const p = {
       creature,
@@ -146,7 +147,7 @@ export const customerMethods = {
       life: 10 + Math.random() * 14, // seconds of milling before they head off
       pause: 0,
       exitX: R.crossNear + Math.random() * (R.crossFar - R.crossNear),
-      exitZ: dir * span, // where they leave once done
+      exitZ: span, // where they leave once done
       tx: 0, tz: 0,
     };
     this._pickPasserTarget(p);
@@ -158,10 +159,10 @@ export const customerMethods = {
     const seed = pick(rng(Math.random() * 1e9), this._custSeedPool) + Math.floor(Math.random() * 4) * 100;
     const creature = makeCustomerBody(seed);
     // arrive from one end of the street and stroll toward the door
-    const end = Math.random() < 0.5 ? this.streetEndN : this.streetEndS;
-    creature.position.copy(end);
+    // everyone arrives from the village (south) end — the cave caps the north
+    creature.position.copy(this.streetEndS);
     creature.position.x += (Math.random() - 0.5) * 0.5; // drift across the lane
-    creature.heading = end === this.streetEndN ? 0 : Math.PI;
+    creature.heading = Math.PI;
     this.group.add(creature);
 
     // weighted archetype. Restored houses add residents who shop here: each
@@ -219,7 +220,7 @@ export const customerMethods = {
       state: "street", // street -> enter -> (roam.../offer) -> leave
       t: 0,
       patience: 18 + Math.random() * 10,
-      exitPoint: (Math.random() < 0.5 ? this.streetEndN : this.streetEndS).clone(),
+      exitPoint: this.streetEndS.clone(),
       emote: null,
     };
     this.customers.push(cust);

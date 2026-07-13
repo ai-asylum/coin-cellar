@@ -9,6 +9,11 @@ import { populateStreet } from "./decor.js";
 import { rng } from "../core/engine.js";
 import { SHOP, MAX_CUSTOMERS } from "./shop-data.js";
 
+// The two buyable back rooms' doorways, cut through the shop's low back wall
+// (pre-rotation coords): door centres along x, and each gap's half-width.
+const EX_DOORS = [-3.4, 1.8];
+const EX_DOOR_HW = 1.0;
+
 export const buildMethods = {
   _build() {
     const g = this.group;
@@ -42,48 +47,45 @@ export const buildMethods = {
       return m;
     };
 
-    // side walls — each carries a doorway through to an adjoining empty room
-    // (one to the left, one to the right of the shop), so the player can stroll
-    // between them and the camera re-frames on whichever room they stand in.
-    const sideDoorZ = -3.5, sideDoorHW = 1.1; // doorway centre + half-width (z)
-    this.sideDoorZ = sideDoorZ;
-    this.sideDoorHW = sideDoorHW;
-    const gapBack = sideDoorZ - sideDoorHW, gapFront = sideDoorZ + sideDoorHW;
+    // side walls: solid — the buyable extensions hang off the building's back
+    // (the post-rotation WEST side, away from the street), not the flanks
     for (const sx of [-W / 2, W / 2]) {
-      // wall split into a back piece and a front piece, leaving the door gap
-      mkWall(0.4, wallH, gapBack - -D / 2, sx, wallH / 2, (-D / 2 + gapBack) / 2, wallMat2);
-      mkWall(0.4, wallH, D / 2 - gapFront, sx, wallH / 2, (gapFront + D / 2) / 2, wallMat2);
-      // lintel across the top of the opening
-      mkWall(0.4, wallH - 2.2, sideDoorHW * 2, sx, (2.2 + wallH) / 2, sideDoorZ, wallMat2);
-      this.colliders.push(
-        { x: sx, z: (-D / 2 + gapBack) / 2, hw: 0.35, hd: (gapBack + D / 2) / 2 },
-        { x: sx, z: (gapFront + D / 2) / 2, hw: 0.35, hd: (D / 2 - gapFront) / 2 }
-      );
+      mkWall(0.4, wallH, D, sx, wallH / 2, 0, wallMat2);
+      this.colliders.push({ x: sx, z: 0, hw: 0.35, hd: D / 2 });
     }
-    // front wall (nearest the camera): one low wall so the view stays open
-    mkWall(W, 1.1, 0.35, 0, 0.55, D / 2, wallMat2);
-    this.colliders.push({ x: 0, z: D / 2, hw: W / 2, hd: 0.3 });
+    // front wall (pre-rotation): low so the view stays open, split around the
+    // two framed doorways into the buyable back rooms (see _buildTown)
+    {
+      const xs = [-W / 2, EX_DOORS[0] - EX_DOOR_HW, EX_DOORS[0] + EX_DOOR_HW,
+        EX_DOORS[1] - EX_DOOR_HW, EX_DOORS[1] + EX_DOOR_HW, W / 2];
+      for (let i = 0; i < xs.length; i += 2) {
+        const x0 = xs[i], x1 = xs[i + 1];
+        mkWall(x1 - x0, 1.1, 0.35, (x0 + x1) / 2, 0.55, D / 2, wallMat2);
+        this.colliders.push({ x: (x0 + x1) / 2, z: D / 2, hw: (x1 - x0) / 2, hd: 0.3 });
+      }
+    }
 
-    // back wall = the shopfront: the display window ("vitrine") on the left,
-    // the door on the right — the east side, nearest the cave mouth down the
-    // road, so the delve→sell commute is as short as it looks. Customers
-    // stream in through the door; goods on the sill face the camera.
+    // back wall = the shopfront: a door on the left, a display window
+    // ("vitrine") on the right. Post-rotation the door sits on the up-street
+    // half of the road-facing wall, nearest the cave mouth at the top, so the
+    // pit→till commute is as short as it looks. Customers stream in through
+    // the door; goods on the sill face the road.
     const backZ = -D / 2;
-    const doorW = 2.4, doorCx = 3.0;
-    const winW = 3.6, winCx = -2.6, sillH = 0.95, headY = 2.5;
+    const doorW = 2.4, doorCx = -3.0;
+    const winW = 3.6, winCx = 2.6, sillH = 0.95, headY = 2.5;
     const doorL = doorCx - doorW / 2, doorR = doorCx + doorW / 2;
     const winL = winCx - winW / 2, winR = winCx + winW / 2;
     const seg = (x0, x1) => mkWall(x1 - x0, wallH, 0.4, (x0 + x1) / 2, wallH / 2, backZ);
-    seg(-W / 2, winL); // left of window
-    seg(winR, doorL); // between window and door
-    seg(doorR, W / 2); // right of door
+    seg(-W / 2, doorL); // left of door
+    seg(doorR, winL); // between door and window
+    seg(winR, W / 2); // right of window
     mkWall(winW, sillH, 0.42, winCx, sillH / 2, backZ, woodMat); // sill under window
     mkWall(winW, wallH - headY, 0.4, winCx, (headY + wallH) / 2, backZ); // header above window
     mkWall(doorW, wallH - 2.3, 0.4, doorCx, (2.3 + wallH) / 2, backZ); // lintel over doorway
     this.colliders.push(
-      { x: (-W / 2 + winL) / 2, z: backZ, hw: (winL + W / 2) / 2, hd: 0.35 },
-      { x: (winR + doorL) / 2, z: backZ, hw: (doorL - winR) / 2, hd: 0.35 },
-      { x: (doorR + W / 2) / 2, z: backZ, hw: (W / 2 - doorR) / 2, hd: 0.35 },
+      { x: (-W / 2 + doorL) / 2, z: backZ, hw: (doorL + W / 2) / 2, hd: 0.35 },
+      { x: (doorR + winL) / 2, z: backZ, hw: (winL - doorR) / 2, hd: 0.35 },
+      { x: (winR + W / 2) / 2, z: backZ, hw: (W / 2 - winR) / 2, hd: 0.35 },
       { x: winCx, z: backZ, hw: winW / 2, hd: 0.35 } // sill blocks the window
     );
     // glass pane + mullions in the opening
@@ -131,6 +133,28 @@ export const buildMethods = {
     };
     mkLeaf(doorL, 1); // left leaf, hinged on the left jamb
     mkLeaf(doorR, -1); // right leaf, hinged on the right jamb
+
+    // --- the roof: a stepped hip stack over the shop box, with a chimney. It
+    // fades away whenever the player is inside the building (see update()) so
+    // the room stays readable; from the street it sells "a house you enter".
+    const roofMat = makeToonMaterial({ color: 0x9a4a3a, rim: 0 });
+    const roofTrimMat = makeToonMaterial({ color: 0x7a382c, rim: 0 });
+    for (const m of [roofMat, roofTrimMat]) m.transparent = true;
+    const roof = new THREE.Group();
+    const r1 = new THREE.Mesh(new THREE.BoxGeometry(W + 1.4, 0.5, D + 1.4), roofMat);
+    r1.position.y = wallH + 0.22;
+    const r2 = new THREE.Mesh(new THREE.BoxGeometry(W - 1.6, 0.55, D - 1.8), roofMat);
+    r2.position.y = wallH + 0.72;
+    const r3 = new THREE.Mesh(new THREE.BoxGeometry(W - 4.6, 0.6, D - 5.0), roofTrimMat);
+    r3.position.y = wallH + 1.26;
+    const chimney = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.7, 0.7), roofTrimMat);
+    chimney.position.set(-W / 2 + 2.4, wallH + 1.4, -1.2);
+    roof.add(r1, r2, r3, chimney);
+    g.add(roof);
+    this.roof = roof;
+    this._roofMats = [roofMat, roofTrimMat];
+    this._roofA = 1; // eased: 1 = shown (outside), 0 = hidden (inside)
+
     this.doorsOpen = true; // the shop trades all day; the shopfront swings with foot traffic
     this.doorHeld = false; // scene override: a scripted scene is holding the doors open
     this.doorLocked = false; // FTUE: fence the player inside until the Mayor's intro is done
@@ -444,7 +468,7 @@ export const buildMethods = {
   },
 
   // Rotate the town 90° — (x, z) → (−z, x) — so the street runs along the
-  // screen's long axis with the cave mouth at the bottom. The rotation is
+  // screen's long axis with the cave mouth at the TOP. The rotation is
   // baked into each existing top-level child's transform (not the group), so
   // group space stays identical to world space for everything spawned later
   // (customers, the Mayor, stocked item sprites). Every stored logic anchor —
@@ -486,9 +510,11 @@ export const buildMethods = {
     }
     const b = this.bounds;
     Object.assign(b, { minX: -b.maxZ, maxX: -b.minZ, minZ: b.minX, maxZ: b.maxX });
+    const br = this.buildingRect;
+    Object.assign(br, { minX: -br.maxZ, maxX: -br.minZ, minZ: br.minX, maxZ: br.maxX });
     // the street now runs along z: expose its two ends as explicit anchors
-    // (spawn / exit points for customers, the Mayor and the clerk). North is
-    // the village end; the cave mouth closes the south end.
+    // (spawn / exit points for customers, the Mayor and the clerk). The cave
+    // mouth caps the north end; SOUTH is the village end everyone comes from.
     this.streetEndN = new THREE.Vector3(-this.streetWalkZ, 0, -this.streetHalfX);
     this.streetEndS = new THREE.Vector3(-this.streetWalkZ, 0, this.streetHalfX);
     // passers-by roam the rotated road: `cross` spans its width (x), `along`
@@ -501,15 +527,16 @@ export const buildMethods = {
   },
 
   // The cave mouth: a mound of stacked rock with a dark opening facing down
-  // the street, and a dirt apron where the road peters out. It sits just past
-  // the shop's east corner — the walk from the pit to the till is a few steps,
-  // with the whole ruined north row visible on the way. `caveMouthPos` is the
+  // the street, and a dirt apron where the road peters out. It sits at the
+  // pre-rotation WEST end of the street — the post-rotation TOP of the road,
+  // its maw facing south toward the camera and the shop just below it, so the
+  // walk from the pit to the till is a few steps. `caveMouthPos` is the
   // walk-in spot the travel trigger watches.
   _buildCaveMouth(mkGround) {
     const g = this.group;
     const rock = makeToonMaterial({ color: 0x5c5248, rim: 0 });
     const rock2 = makeToonMaterial({ color: 0x6a5f52, rim: 0 });
-    const cx = 12.6, cz = -8.5; // on the road, just east of the shopfront
+    const cx = -12.6, cz = -8.5; // on the road, just up-street of the shopfront
     const mkRock = (w, h, d, x, y, z, mat = rock, ry = 0) => {
       const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
       m.position.set(x, y, z);
@@ -518,19 +545,19 @@ export const buildMethods = {
       return m;
     };
     // two rough pillars + a lintel frame the opening; boulders pile around it
-    mkRock(2.2, 3.4, 1.6, cx, 1.7, cz - 2.0, rock, 0.18);
-    mkRock(2.2, 3.4, 1.6, cx, 1.7, cz + 2.0, rock2, -0.14);
-    mkRock(2.6, 1.6, 5.4, cx + 0.4, 3.6, cz, rock, 0.06);
-    mkRock(1.5, 1.9, 1.4, cx - 1.2, 0.95, cz - 2.6, rock2, 0.5);
-    mkRock(1.3, 1.5, 1.3, cx - 1.1, 0.75, cz + 2.7, rock, -0.4);
-    mkRock(1.0, 0.8, 1.0, cx - 1.9, 0.4, cz + 1.4, rock2, 0.3);
+    mkRock(2.2, 3.4, 1.6, cx, 1.7, cz - 2.0, rock, -0.18);
+    mkRock(2.2, 3.4, 1.6, cx, 1.7, cz + 2.0, rock2, 0.14);
+    mkRock(2.6, 1.6, 5.4, cx - 0.4, 3.6, cz, rock, -0.06);
+    mkRock(1.5, 1.9, 1.4, cx + 1.2, 0.95, cz - 2.6, rock2, -0.5);
+    mkRock(1.3, 1.5, 1.3, cx + 1.1, 0.75, cz + 2.7, rock, 0.4);
+    mkRock(1.0, 0.8, 1.0, cx + 1.9, 0.4, cz + 1.4, rock2, -0.3);
     // the dark maw itself, facing down the street toward the approach
     const maw = new THREE.Mesh(
       new THREE.PlaneGeometry(2.6, 2.6),
       new THREE.MeshBasicMaterial({ color: 0x05060a })
     );
-    maw.rotation.y = -Math.PI / 2;
-    maw.position.set(cx - 1.15, 1.3, cz);
+    maw.rotation.y = Math.PI / 2;
+    maw.position.set(cx + 1.15, 1.3, cz);
     g.add(maw);
     // a shadowed threshold spilling out of the opening — the top-down read of
     // "this is a hole in the hill" survives whatever way the camera faces
@@ -538,14 +565,14 @@ export const buildMethods = {
       new THREE.CircleGeometry(1.15, 22).rotateX(-Math.PI / 2),
       new THREE.MeshBasicMaterial({ color: 0x0a0806 })
     );
-    thresh.position.set(cx - 1.6, 0.02, cz);
+    thresh.position.set(cx + 1.6, 0.02, cz);
     g.add(thresh);
     // dirt apron where the road peters out into the hillside
-    const apron = mkGround(4.5, 6.5, cx - 2.6, cz, 0x6b5a45);
+    const apron = mkGround(4.5, 6.5, cx + 2.6, cz, 0x6b5a45);
     apron.position.y = 0.015;
     // solid: the mound can't be walked through (the trigger fires first)
     this.colliders.push({ x: cx, z: cz, hw: 1.8, hd: 3.4 });
-    this.caveMouthPos = new THREE.Vector3(cx - 1.4, 0, cz);
+    this.caveMouthPos = new THREE.Vector3(cx + 1.4, 0, cz);
   },
 
   // Build the rest of the town around the shop: two empty rooms flanking it
@@ -555,56 +582,61 @@ export const buildMethods = {
   _buildTown(mkWall, mkGround, wallMat, trimMat, roadFar, streetW, wallH, backZ) {
     const { W, D } = SHOP;
 
-    // --- flanking rooms: two sealed spaces the player can buy their way into
-    // to extend the shop. Until bought, each is a pitch-black void behind a
-    // locked door set in the shared side wall; paying the fee (see game.js)
-    // swings the door open and lights the room up as an extension. ---
-    const roomHalfW = 4;
+    // --- buyable extensions: two sealed rooms hanging off the BACK of the
+    // building (the post-rotation west side — away from the street, so they
+    // never eat road frontage). Until bought, each is a pitch-black void
+    // behind a locked door framed into the low back wall; paying the fee (see
+    // game.js) swings the door open and lights the room up as an extension. ---
+    const roomD = 7; // how far the rooms extend behind the shop
+    const roomZ0 = D / 2, roomZ1 = D / 2 + roomD;
+    const roomCz = (roomZ0 + roomZ1) / 2;
     const black = () => new THREE.MeshBasicMaterial({ color: 0x000000 });
     const doorPanelMat = makeToonMaterial({ color: 0x7a4a28, rim: 0 });
     const doorTrimMat = makeToonMaterial({ color: 0x5c3720, rim: 0, polygonOffset: true });
     const handleMat = makeToonMaterial({ color: 0xe6c26a, rim: 0 });
     this.expansions = [];
     this._townWallMat = wallMat; // restored onto a room's walls when it's bought
+    // the divider the two rooms share, black until either room is bought
+    const divider = mkWall(0.4, wallH, roomD, 0, wallH / 2, roomCz, wallMat);
+    divider.material = black();
+    this.colliders.push({ x: 0, z: roomCz, hw: 0.35, hd: roomD / 2 });
     for (const side of [-1, 1]) {
-      const cx = side * (W / 2 + roomHalfW); // room centre x
-      // floor + the three enclosing walls, all blacked out until the room's bought
-      const floor = mkGround(roomHalfW * 2, D, cx, 0, 0);
+      const cx = side * W / 4; // each room takes half the building's width
+      const doorX = side < 0 ? EX_DOORS[0] : EX_DOORS[1];
+      // floor + the enclosing walls, all blacked out until the room's bought
+      const floor = mkGround(W / 2 - 0.2, roomD, cx, roomCz, 0);
       floor.material = black();
-      const outerWall = mkWall(0.4, wallH, D, cx + side * roomHalfW, wallH / 2, 0, wallMat);
-      const backWall = mkWall(roomHalfW * 2, wallH, 0.4, cx, wallH / 2, -D / 2, wallMat);
-      const frontWall = mkWall(roomHalfW * 2, 1.1, 0.35, cx, 0.55, D / 2, wallMat);
+      const outerWall = mkWall(0.4, wallH, roomD, side * W / 2, wallH / 2, roomCz, wallMat);
+      const backWall = mkWall(W / 2, wallH, 0.4, cx, wallH / 2, roomZ1, wallMat);
       const litColor = side < 0 ? 0x8a7a5f : 0x86748f; // floor colour once bought
-      const dark = [outerWall, backWall, frontWall];
-      for (const m of dark) m.material = black();
+      const dark = [outerWall, backWall, divider];
+      outerWall.material = black();
+      backWall.material = black();
       // the rug, hidden until the room is opened up
-      const rugMesh = mkGround(2.6, 1.7, cx, 1.4, side < 0 ? 0x6a4f6a : 0x4f5f6a);
+      const rugMesh = mkGround(2.6, 1.7, cx, roomCz - 1, side < 0 ? 0x6a4f6a : 0x4f5f6a);
       rugMesh.position.y = 0.02;
       rugMesh.visible = false;
       this.colliders.push(
-        { x: cx + side * roomHalfW, z: 0, hw: 0.35, hd: D / 2 },
-        { x: cx, z: -D / 2, hw: roomHalfW, hd: 0.35 },
-        { x: cx, z: D / 2, hw: roomHalfW, hd: 0.3 }
+        { x: side * W / 2, z: roomCz, hw: 0.35, hd: roomD / 2 }, // outer wall
+        { x: cx, z: roomZ1, hw: W / 4, hd: 0.35 } // back wall
       );
 
-      // a hinged door filling the shared-wall opening. Hinges on the back jamb
-      // and swings into the room. A collider bars the doorway while it's locked.
-      const hingeZ = this.sideDoorZ - this.sideDoorHW;
+      // a framed door standing in the low wall's gap: jambs + lintel + a
+      // hinged leaf that swings into the room once the fee is paid. A collider
+      // bars the doorway while it's locked.
+      mkWall(0.18, 2.3, 0.38, doorX - EX_DOOR_HW, 1.15, D / 2, doorTrimMat);
+      mkWall(0.18, 2.3, 0.38, doorX + EX_DOOR_HW, 1.15, D / 2, doorTrimMat);
+      mkWall(EX_DOOR_HW * 2 + 0.18, 0.22, 0.38, doorX, 2.35, D / 2, doorTrimMat);
       const pivot = new THREE.Group();
-      pivot.position.set(side * W / 2, 0, hingeZ);
-      const panel = new THREE.Mesh(new THREE.BoxGeometry(0.12, 2.18, this.sideDoorHW * 2), doorPanelMat);
-      panel.position.set(0, 1.09, this.sideDoorHW);
+      pivot.position.set(doorX - EX_DOOR_HW + 0.08, 0, D / 2); // hinge on the left jamb
+      const panel = new THREE.Mesh(new THREE.BoxGeometry(EX_DOOR_HW * 2 - 0.2, 2.1, 0.12), doorPanelMat);
+      panel.position.set(EX_DOOR_HW - 0.06, 1.05, 0);
       pivot.add(panel);
-      for (const pz of [this.sideDoorHW * 0.55, this.sideDoorHW * 1.45]) {
-        const plank = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.14, this.sideDoorHW * 1.4), doorTrimMat);
-        plank.position.set(side * 0.02, 1.55, pz);
-        pivot.add(plank);
-      }
       const handle = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), handleMat);
-      handle.position.set(side * 0.1, 1.09, this.sideDoorHW * 1.8);
+      handle.position.set(EX_DOOR_HW * 1.7 - 0.2, 1.05, 0.12);
       pivot.add(handle);
       this.group.add(pivot);
-      const doorCollider = { x: side * W / 2, z: this.sideDoorZ, hw: 0.35, hd: this.sideDoorHW };
+      const doorCollider = { x: doorX, z: D / 2, hw: EX_DOOR_HW, hd: 0.3 };
       this.colliders.push(doorCollider);
 
       this.expansions.push({
@@ -617,9 +649,12 @@ export const buildMethods = {
         pivot,
         doorCollider,
         _doorA: 0, // eased 0 = shut, 1 = swung open
-        interactPos: new THREE.Vector3(side * (W / 2 - 1.0), 0, this.sideDoorZ),
+        interactPos: new THREE.Vector3(doorX, 0, D / 2 - 1.1),
       });
     }
+    // the whole building's footprint (shop + back rooms) — the roof reads it
+    // to duck out of the way while the player is anywhere inside
+    this.buildingRect = { minX: -W / 2, maxX: W / 2, minZ: -D / 2, maxZ: roomZ1 };
 
     // --- the far side of the street is now an unbroken row of restoration lots
     // (built in _buildLots): no more walk-in buildings hogging the middle. Just
@@ -634,24 +669,23 @@ export const buildMethods = {
     // camera zones: standing inside one locks the camera to its centre (like
     // the shop); out on the open street/plaza the camera follows the player.
     this.zones = [
-      { minX: -W / 2, maxX: W / 2, minZ: -D / 2 - 0.4, maxZ: 9, cx: 0, cz: 0 }, // shop
-      { minX: -W / 2 - roomHalfW * 2, maxX: -W / 2, minZ: -D / 2 - 0.4, maxZ: 9, cx: -(W / 2 + roomHalfW), cz: 0 }, // left room
-      { minX: W / 2, maxX: W / 2 + roomHalfW * 2, minZ: -D / 2 - 0.4, maxZ: 9, cx: W / 2 + roomHalfW, cz: 0 }, // right room
+      { minX: -W / 2, maxX: W / 2, minZ: -D / 2 - 0.4, maxZ: roomZ0, cx: 0, cz: 0 }, // shop
+      { minX: -W / 2, maxX: 0, minZ: roomZ0, maxZ: roomZ1 + 0.4, cx: -W / 4, cz: roomCz }, // back room A
+      { minX: 0, maxX: W / 2, minZ: roomZ0, maxZ: roomZ1 + 0.4, cx: W / 4, cz: roomCz }, // back room B
     ];
     // walkable fence for the whole town: the road out front is free to roam
     // corner to corner (colliders do the fine work — walls and the lot
-    // footprints). Beside the rooms there's no ground north of the shopfront
-    // line, so seal those two flanks with an invisible wall along it.
-    const roomOuter = W / 2 + roomHalfW * 2; // outer edge of the flanking rooms
+    // footprints). Beside the building there's no ground north of the
+    // shopfront line, so seal those two flanks with an invisible wall along it.
     const edgeX = streetW / 2 - 1.0; // road's walkable half-width
     for (const s of [-1, 1]) {
-      this.colliders.push({ x: s * (roomOuter + edgeX) / 2, z: backZ, hw: (edgeX - roomOuter) / 2, hd: 0.35 });
+      this.colliders.push({ x: s * (W / 2 + edgeX) / 2, z: backZ, hw: (edgeX - W / 2) / 2, hd: 0.35 });
     }
     this.bounds = {
       minX: -edgeX,
       maxX: edgeX,
       minZ: backLimit + 0.5,
-      maxZ: D / 2 + 2.5,
+      maxZ: roomZ1 + 0.5,
     };
   },
 

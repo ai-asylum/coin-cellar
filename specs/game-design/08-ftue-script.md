@@ -23,12 +23,15 @@ owner's "cellar," and — for the first time in a long while — wants more than
 **The world's shape:** the cave where the road runs out is the dungeon's front
 door, permanently. Its deepest point holds the descent into the cellar lobby
 (the four dungeon mouths); the shop has no trapdoor. The game is played
-portrait, so the whole town is turned to match: the road runs down the screen
-with the village at the top and the rocky cave mouth at the bottom, the shop
-beside the road with its door on the street side, and the ruined row along
-the far side. Pit → till is a few steps, and every trip passes the ruins.
-Dungeons generate on a tall grid too (18×32 cells, taller rooms), so floors
-sprawl along the screen's long axis.
+portrait, so the whole town is turned to match: the rocky cave mouth caps the
+TOP of the road (its maw facing the camera), the shop sits just below it with
+its door on the up-street side and a roof that fades away while you're
+inside, the buyable back rooms hang off the shop's far side (never eating
+road frontage), and the village runs down the screen with the ruined row
+along the far side. Pit → till is a few steps, and every trip passes the
+ruins. Dungeons generate on a tall grid too (18×32 cells, taller rooms), so
+floors sprawl along the screen's long axis — and "deeper" is always
+up-screen: road → cave → pit all continue the same walking direction.
 
 **Theme: "enough."** The hero opens the game deciding they have enough
 (*"That should be enough for today"*) and closes the FTUE deciding they don't
@@ -91,9 +94,7 @@ everything. Control unlocks.*
 
 **→ GUIDE:** `Head for the daylight`
 
-*(Optional, first time the player dashes a rat — its hide pops into the pack:)*
-
-> **ME** — Sorry, little guy. Force of habit.
+*(If the player dashes a rat, its hide pops into the pack — no line.)*
 
 - **Trigger:** fresh solo save. The kill cinematic is scripted; input is locked
   until the first line.
@@ -102,8 +103,8 @@ everything. Control unlocks.*
 
 ### Scene 2 — The Road
 
-*The hero steps out of the rocky cave mouth that closes off the road's east
-end. A village opens up ahead; half the houses are dark. Banner: `The end of
+*The hero steps out of the rocky cave mouth that caps the top of the road.
+The village opens up below; half the houses are dark. Banner: `The end of
 the road`.*
 
 > **ME** — Finally — a village. My back is killing me.

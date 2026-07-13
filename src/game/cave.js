@@ -18,16 +18,18 @@ import { dungeonAssetsReady, dungeonPalette } from "./dungeon-assets.js";
 
 export const CAVE_ORIGIN = new THREE.Vector3(-200, 0, 200);
 
-// A long 4×7-cell tunnel with a one-cell mouth carved out of the north rim —
-// the light ahead is the whole composition. The cellar descent sits in the
-// deepest (southmost) row; the FTUE hero wakes right beside it, as if they'd
-// just climbed out. A few corner cells stay solid so it reads dug-out.
+// A long 4×7-cell tunnel with a one-cell mouth carved out of the SOUTH rim —
+// the cave hangs off the top of the village road, so walking up-screen on the
+// road continues up-screen inside: in through the light at the bottom, deeper
+// toward the cellar descent in the deepest (northmost) row. The FTUE hero
+// wakes right beside the pit, as if they'd just climbed out. A few corner
+// cells stay solid so it reads dug-out.
 const GW = 6, GH = 9;
 const ROOM = { x: 1, y: 1, w: 4, h: 7, cx: 2, cy: 4 };
-const EXIT_CELL = { x: 2, y: 0 }; // the daylight gap in the north rim
-const SPAWN_CELL = { x: 2, y: 6 }; // the FTUE wake-up spot, facing the light
-const DESCENT_CELL = { x: 2, y: 7 }; // the sunk stairs down to the cellar lobby
-const SOLID_NOOKS = [[1, 1], [4, 1], [4, 5], [1, 4]]; // corners left un-dug
+const EXIT_CELL = { x: 2, y: 8 }; // the daylight gap in the south rim
+const SPAWN_CELL = { x: 2, y: 2 }; // the FTUE wake-up spot, facing the light
+const DESCENT_CELL = { x: 2, y: 1 }; // the sunk stairs down to the cellar lobby
+const SOLID_NOOKS = [[1, 7], [4, 7], [4, 3], [1, 4]]; // corners left un-dug
 const cellPos = (x, y) => new THREE.Vector3((x - GW / 2 + 0.5) * CELL, 0, (y - GH / 2 + 0.5) * CELL);
 
 export class Cave {
@@ -47,7 +49,7 @@ export class Cave {
     this.entrancePos = cellPos(SPAWN_CELL.x, SPAWN_CELL.y).add(CAVE_ORIGIN);
     this.exitPos = cellPos(EXIT_CELL.x, EXIT_CELL.y).add(CAVE_ORIGIN);
     this.descentPos = cellPos(DESCENT_CELL.x, DESCENT_CELL.y).add(CAVE_ORIGIN);
-    this.slimePos = this.entrancePos.clone().add(new THREE.Vector3(0, 0, -4.6));
+    this.slimePos = this.entrancePos.clone().add(new THREE.Vector3(0, 0, 4.6));
 
     this._build();
     this._spawnRats();
@@ -115,7 +117,7 @@ export class Cave {
         this.colliders.push({ x: p.x + O.x, z: p.z + O.z, hw: CELL / 2, hd: CELL / 2 });
       }
     const exitLocal = cellPos(EXIT_CELL.x, EXIT_CELL.y);
-    this.colliders.push({ x: exitLocal.x + O.x, z: exitLocal.z - CELL + O.z, hw: CELL / 2, hd: CELL / 2 });
+    this.colliders.push({ x: exitLocal.x + O.x, z: exitLocal.z + CELL + O.z, hw: CELL / 2, hd: CELL / 2 });
 
     // --- the cellar descent: the same pit + sunk stair flight the dungeons'
     // descent cells use, under a violet shaft — the way down to the lobby
@@ -151,7 +153,7 @@ export class Cave {
         blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
       })
     );
-    this.glare.position.set(exitLocal.x, 1.2, exitLocal.z - CELL / 2 + 0.1);
+    this.glare.position.set(exitLocal.x, 1.2, exitLocal.z + CELL / 2 - 0.1);
     this.group.add(this.glare);
     const pool = new THREE.Mesh(
       new THREE.CircleGeometry(1.5, 26).rotateX(-Math.PI / 2),
@@ -160,13 +162,13 @@ export class Cave {
         blending: THREE.AdditiveBlending, depthWrite: false,
       })
     );
-    pool.position.set(exitLocal.x, 0.02, exitLocal.z + CELL * 0.4);
+    pool.position.set(exitLocal.x, 0.02, exitLocal.z - CELL * 0.4);
     this.group.add(pool);
 
     // --- set dressing: the warren's billboard mix plus the kit's props, kept
     // clear of the walk between the mouth and the descent
     const skip = [SPAWN_CELL, EXIT_CELL, DESCENT_CELL,
-      ...[1, 2, 3, 4, 5].map((y) => ({ x: EXIT_CELL.x, y }))];
+      ...[3, 4, 5, 6, 7].map((y) => ({ x: EXIT_CELL.x, y }))];
     scatterDungeonDecor(this.group, r, [ROOM], cellPos, { skip, theme: HOLE_THEMES[0].decor });
     for (const pr of scatterAssetProps(this.group, r, [ROOM], cellPos, { skip, origin: CAVE_ORIGIN }))
       this.colliders.push(pr.collider);
@@ -175,7 +177,7 @@ export class Cave {
   _spawnRats() {
     // a couple of harmless rats pottering about — pure ambience, they only
     // scurry off when the player barrels near (one dash fells them: dashHit)
-    for (const [gx, gy, seed] of [[3, 2, 11], [4, 3, 23]]) {
+    for (const [gx, gy, seed] of [[3, 5, 11], [4, 4, 23]]) {
       const c = new Creature(ratSpec({ key: `cave_rat_${seed}`, seed, scale: 0.55 }));
       c.position.copy(cellPos(gx, gy)).add(CAVE_ORIGIN);
       c.heading = Math.random() * Math.PI * 2;
@@ -190,7 +192,7 @@ export class Cave {
     if (this.slime) return this.slime;
     this.slime = new Creature(slimeSpec({ key: "cave_slime", scale: 0.66, hue: 0.42 }));
     this.slime.position.copy(this.slimePos);
-    this.slime.heading = Math.PI; // face south, toward the player
+    this.slime.heading = Math.PI; // face north, toward the waking player
     this.game.engine.scene.add(this.slime);
     return this.slime;
   }
