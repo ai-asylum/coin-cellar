@@ -141,14 +141,15 @@ export const buildMethods = {
     const roofTrimMat = makeToonMaterial({ color: 0x7a382c, rim: 0 });
     for (const m of [roofMat, roofTrimMat]) m.transparent = true;
     const roof = new THREE.Group();
-    const r1 = new THREE.Mesh(new THREE.BoxGeometry(W + 1.4, 0.5, D + 1.4), roofMat);
-    r1.position.y = wallH + 0.22;
-    const r2 = new THREE.Mesh(new THREE.BoxGeometry(W - 1.6, 0.55, D - 1.8), roofMat);
-    r2.position.y = wallH + 0.72;
-    const r3 = new THREE.Mesh(new THREE.BoxGeometry(W - 4.6, 0.6, D - 5.0), roofTrimMat);
-    r3.position.y = wallH + 1.26;
-    const chimney = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.7, 0.7), roofTrimMat);
-    chimney.position.set(-W / 2 + 2.4, wallH + 1.4, -1.2);
+    // flush with the walls' outer faces — no eaves hanging past the footprint
+    const r1 = new THREE.Mesh(new THREE.BoxGeometry(W + 0.3, 0.4, D + 0.3), roofMat);
+    r1.position.y = wallH + 0.18;
+    const r2 = new THREE.Mesh(new THREE.BoxGeometry(W - 2.4, 0.5, D - 2.6), roofMat);
+    r2.position.y = wallH + 0.58;
+    const r3 = new THREE.Mesh(new THREE.BoxGeometry(W - 5.4, 0.5, D - 5.8), roofTrimMat);
+    r3.position.y = wallH + 1.0;
+    const chimney = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.5, 0.7), roofTrimMat);
+    chimney.position.set(-W / 2 + 2.4, wallH + 1.1, -1.2);
     roof.add(r1, r2, r3, chimney);
     g.add(roof);
     this.roof = roof;
