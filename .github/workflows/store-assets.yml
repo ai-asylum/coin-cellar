@@ -1,0 +1,32 @@
+# Store creatives on demand: capture 9:16 shots from the dev server, dress
+# them + generate an icon via Scenario. All logic lives in ai-asylum/game-kit
+# (reusable workflow + composite action) — this caller was seeded by
+# team-dashboard's seed-store-assets sweep; edit inputs freely, it is yours.
+name: Store Assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenes:
+        description: "Comma-separated scene params (deep-link ?scene=)"
+        default: "default"
+      slogan:
+        description: "Headline for the dressed shots"
+        required: true
+      cta:
+        description: "CTA button text"
+        default: "PLAY FREE"
+      icon-style:
+        description: "1-2 lines of icon art direction (see ARTSTYLE.md)"
+        default: "vivid stylized mobile game art"
+
+jobs:
+  assets:
+    uses: ai-asylum/game-kit/.github/workflows/store-assets.yml@main
+    with:
+      game-name: "Coin Cellar"
+      icon-style: ${{ inputs.icon-style }}
+      scenes: ${{ inputs.scenes }}
+      slogan: ${{ inputs.slogan }}
+      cta: ${{ inputs.cta }}
+    secrets: inherit
