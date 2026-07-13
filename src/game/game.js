@@ -9,6 +9,7 @@ import { BlockyCreature } from "../chargen/blocky.js";
 import { Shop } from "./shop.js";
 import { Dungeon, DUNGEON_ORIGIN } from "./dungeon.js";
 import { Cellar } from "./cellar.js";
+import { Cave } from "./cave.js";
 import { ITEMS, itemSprite } from "./items.js";
 import { starterEquipment, aggregateStats, weaponMesh } from "./gear.js";
 import { Particles } from "./particles.js";
@@ -26,9 +27,10 @@ import { combatMethods } from "./game-combat.js";
 import { economyMethods } from "./game-economy.js";
 import { dungeonFlowMethods } from "./game-dungeon-flow.js";
 
-// New shopkeepers start with an empty bag on purpose: bare shelves push
-// them straight down the trapdoor to earn their first stock (see _tutStart).
-const START_INV = [];
+// New shopkeepers wake up in the FTUE cave with a day's spelunking haul
+// already in the bag — the goods that the closed shop (and the Mayor's offer)
+// give a reason to sell. The opening cinematic adds the slime's jelly on top.
+const START_INV = ["crystal", "caveshroom", "rathide", "meat"];
 const BASE_MAXHP = 6; // hearts before any chestplate / ring bonuses
 
 export class Game {
@@ -116,11 +118,11 @@ export class Game {
     // free — the rest (and the fancy vitrine) start broken until paid for.
     // Persisted.
     this.tablesRepaired = [];
-    // the Mayor cutscene: a walking NPC plus a persistent objective arrow that
-    // points the player at the lot he's asked them to rebuild.
+    // the Mayor cutscene: a walking NPC driven through the FTUE's scenes (and
+    // the praise beat when the first home goes up).
     this._mayor = null;
-    this._questArrow = null; // { pos: Vector3, text } shown outside the tutorial
-    this._restockNudge = false; // post-Mayor: steer the guide back to the cellar once
+    // the FTUE's scripted opening cinematic (see _updateCaveIntro)
+    this._cine = null;
 
     this._load();
 
@@ -158,6 +160,10 @@ export class Game {
     this.tablesRepaired.forEach((done, i) => { if (done) this.shop.repairTable(i, true); });
     this.dungeon = new Dungeon(this);
     this.cellar = new Cellar(this);
+    // the cave at the end of the road — the dungeon's permanent front door
+    // (its cellar descent is the way down; see _updateCaveTravel for the
+    // walk-through between the road and the cave mouth)
+    this.cave = new Cave(this);
     // the shared-world lobby (Supabase Realtime): joined while in the cellar or
     // down a hole, so strangers' avatars show up alongside the co-op partner
     this.lobby = new Lobby(this);
@@ -184,10 +190,23 @@ export class Game {
     // up. The raw screen point is stashed here and resolved in _updatePlayer.
     this._ray = new THREE.Raycaster();
     this._pendingClick = null;
-    const clickArea = document.getElementById("app");
-    if (clickArea) clickArea.addEventListener("mousedown", (e) => {
-      if (e.button === 0) this._pendingClick = { x: e.clientX, y: e.clientY };
-    });
+    // last mouse position (screen px), so hovering a shop fixture can preview
+    // its interact hint under the cursor before you click — mirrors the ring
+    // and hint you get when the hero walks right up to it.
+    this._pointer = null;
+    this._clickArea = document.getElementById("app");
+    const clickArea = this._clickArea;
+    if (clickArea) {
+      clickArea.addEventListener("mousedown", (e) => {
+        if (e.button === 0) this._pendingClick = { x: e.clientX, y: e.clientY };
+      });
+      clickArea.addEventListener("mousemove", (e) => {
+        this._pointer = { x: e.clientX, y: e.clientY };
+      });
+      clickArea.addEventListener("mouseleave", () => {
+        this._pointer = null;
+      });
+    }
 
     this._wireHud();
     this._initFullscreenGate();
@@ -218,11 +237,14 @@ export class Game {
     this._updateClerk(dt, elapsed);
     this.dungeon.update(dt, elapsed);
     this.cellar.update(dt, elapsed);
+    this.cave?.update(dt, elapsed);
     this.particles.update(dt);
     this.slash.update(dt);
     this.remoteSlash.update(dt);
     this._updateUseFx(dt);
     this._updateRemoteUseFx(dt);
+    this._updateCaveTravel();
+    this._updateFtue();
     this._updateTutGuide();
     this.hud.update();
     this.net.update(dt);
@@ -233,19 +255,20 @@ export class Game {
     const p = this.player.position;
     const inDungeon = this.playerArea === "dungeon";
     const inCellar = this.playerArea === "cellar";
+    const inCave = this.playerArea === "cave";
     const inBoss = inDungeon && this.dungeon.active && this.dungeon.inBossRoom(p);
     // in the shop/town the camera locks onto whichever room the player stands in
     // (like the classic fixed shop framing); out on the street it follows them.
-    const zone = !inDungeon && !inCellar && !inBoss ? this.shop.zoneCenter(p) : null;
+    const zone = !inDungeon && !inCellar && !inCave && !inBoss ? this.shop.zoneCenter(p) : null;
     const camTarget = inBoss ? this.dungeon.bossCenter
-      : inDungeon || inCellar ? p
+      : inDungeon || inCellar || inCave ? p
       : zone ? _townCenter.set(zone.cx, 0, zone.cz)
       : p;
-    const camOffset = inBoss ? _camBoss : inDungeon ? _camDungeon : inCellar ? _camCellar
+    const camOffset = inBoss ? _camBoss : inDungeon || inCave ? _camDungeon : inCellar ? _camCellar
       : zone ? _camShop : _camStreet;
     this.engine.camTarget.lerp(camTarget, 1 - Math.pow(0.001, dt));
     this.engine.camOffset.lerp(camOffset, 1 - Math.pow(0.1, dt));
-    this.audio.setMood(this.gameOver ? null : inDungeon || inCellar ? "dungeon" : "shop");
+    this.audio.setMood(this.gameOver ? null : inDungeon || inCellar || inCave ? "dungeon" : "shop");
 
     // boss health bar: pinned up while the boss lives and you're in the cellar
     const boss = this.dungeon.boss;
@@ -281,6 +304,14 @@ export class Game {
       this._updateHoleDive(dt, elapsed);
       return;
     }
+    if (this._cine) {
+      // the FTUE's scripted opening (the cave slime kill) drives the hero
+      // itself — input is ignored until the little scene wraps up
+      this.highlight.visible = false;
+      this.hud.hideInteractHint();
+      this._updateCaveIntro(dt, elapsed);
+      return;
+    }
     if (this._respawnT >= 0) {
       this._respawnT -= dt;
       this.highlight.visible = false;
@@ -311,11 +342,12 @@ export class Game {
     }
 
     // dash / attack — grabbed before movement so it can override it. Underground
-    // the primary on-screen button IS the attack, so a press of it (actionEdge)
-    // triggers the dash too; keys (J/Shift) and the right mouse button dash in
-    // every area via dodgeEdge.
+    // (dungeon or the FTUE cave) the primary on-screen button IS the attack, so
+    // a press of it (actionEdge) triggers the dash too; keys (J/Shift) and the
+    // right mouse button dash in every area via dodgeEdge.
+    const underground = this.playerArea === "dungeon" || this.playerArea === "cave";
     const attackPress = this.input.dodgeEdge ||
-      (this.playerArea === "dungeon" && this.input.actionEdge);
+      (underground && this.input.actionEdge);
     if (attackPress && !sheetBlocked) this._dodge();
 
     if (this._dashT >= 0) {
@@ -345,7 +377,8 @@ export class Game {
       c.heading = Math.atan2(mv.x, mv.y);
     }
     const colliders = this.playerArea === "shop" ? this.shop.playerColliders
-      : this.playerArea === "cellar" ? this.cellar.colliders : this.dungeon.colliders;
+      : this.playerArea === "cellar" ? this.cellar.colliders
+      : this.playerArea === "cave" ? this.cave.colliders : this.dungeon.colliders;
     this.collide(c.position, c.radius * 0.8, colliders);
     if (this.playerArea === "shop") {
       // town-wide fence: walls (colliders) do the real containment; this just
@@ -392,7 +425,7 @@ export class Game {
     const act = this._contextAction();
     const inDungeon = this.playerArea === "dungeon";
     const hasInteract = !!act.label;
-    if (inDungeon) {
+    if (underground) {
       // the primary button is the ATTACK button while delving (crossed swords);
       // real interacts (stairs / gate / portal / chest) get their own button
       // when something's in reach, so the two never fight over one press.
@@ -402,15 +435,22 @@ export class Game {
       this.input.setActionLabel(act.label);
       this.input.setInteract(null, false);
     }
+    // hovering a shop fixture with the mouse previews the same ring + hint you'd
+    // get by walking up to it, but pinned to what's under the cursor. A live
+    // hover target wins over the proximity one so the hint tracks the mouse.
+    const hover = (!sheetBlocked && !this.gameOver) ? this._shopHoverAction() : null;
+    if (this._clickArea) this._clickArea.style.cursor = hover ? "pointer" : "";
+    const disp = hover || act;
     // a repair-able table lights up wholesale (white glow) instead of getting a
     // ground ring, so hand the glow target to the shop and skip the ring for it.
-    const glowTable = (!sheetBlocked && !this.gameOver) ? (act.glowTable || null) : null;
+    const glowTable = (!sheetBlocked && !this.gameOver) ? (disp.glowTable || null) : null;
     this.shop.highlightTable(glowTable);
-    this._updateHighlight(glowTable ? null : act.focus, act.color, elapsed);
+    this._updateHighlight(glowTable ? null : disp.focus, disp.color, elapsed);
     // control hint under the highlight ring: keycap + verb on desktop, verb
-    // only on touch (the action button itself already pulses there)
-    if (act.focus && act.hint && !sheetBlocked && !this.gameOver)
-      this.hud.interactHint(act.focus, act.hint, this.input.isTouch ? "" : "E");
+    // only on touch (the action button itself already pulses there). A hover
+    // preview is click-driven, so it drops the [E] keycap.
+    if (disp.focus && disp.hint && !sheetBlocked && !this.gameOver)
+      this.hud.interactHint(disp.focus, disp.hint, hover || this.input.isTouch ? "" : "E");
     else this.hud.hideInteractHint();
     // direct click-to-interact (shop only): a left click that lands on a display
     // slot, a customer with a deal, or the cellar trapdoor opens it straight
@@ -523,6 +563,14 @@ export class Game {
 
   _contextAction() {
     const p = this.player.position;
+    // the cave: the daylight mouth is a walk-through (see _updateCaveTravel);
+    // the one interact is the cellar descent at its deepest point
+    if (this.playerArea === "cave") {
+      const tutBlocks = this.tutorial && this.tutorial !== "delve";
+      if (!tutBlocks && p.distanceTo(this.cave.descentPos) < 1.7)
+        return { label: "hole", hint: "Delve", fn: () => this._delve(), focus: _focus.copy(this.cave.descentPos).setY(0.06).clone(), color: 0xb98cff };
+      return { label: null };
+    }
     if (this.playerArea === "shop") {
       // step behind the counter to serve whoever's at the head of the queue —
       // the deal only opens when you interact here, never on its own.
@@ -535,11 +583,6 @@ export class Game {
           return { label: "moneyfly", hint: "Buy", fn: () => this._buyFrom(head), focus, color: 0x8fe0ff };
         }
       }
-      // the guided first day only offers the cellar on its delve step — no
-      // re-delving until the FTUE's walked you through stocking and selling
-      const tutBlocksCellar = this.tutorial && this.tutorial !== "delve";
-      if (!tutBlocksCellar && this.shop.trapdoorOpen && p.distanceTo(this.shop.trapdoorPos) < 1.5)
-        return { label: "hole", hint: "Enter", fn: () => this._delve(), focus: _focus.copy(this.shop.trapdoorPos).setY(0.06).clone(), color: 0xb98cff };
       // the sealed side rooms: step up to a locked door to buy the extension.
       // Once bought the door swings open for good and there's nothing to prompt.
       // Locked out until the FTUE's done so a new player isn't pulled off the loop.
@@ -583,12 +626,11 @@ export class Game {
       if (slot) {
         const table = slot.table;
         if (table && !table.repaired) {
-          // Hold back the repair UI until the tutorial's first house is rebuilt:
-          // a brand-new player shouldn't be nudged to fix shelves before the
-          // Mayor's put them on the restoration loop. Until then a broken table
-          // just reads as scenery (no prompt, no glow). townPop() is persisted,
-          // so returning players — who've already raised a home — see it as usual.
-          if (this.townPop() > 0) {
+          // Hold back the repair UI until the FTUE is done: a brand-new player
+          // shouldn't be nudged to fix shelves before they've closed their first
+          // sale. Until then a broken table just reads as scenery (no prompt,
+          // no glow). Returning players (tutorial null) see it as usual.
+          if (!this.tutorial) {
             const i = this.shop.tables.indexOf(table);
             const broke = this.gold < table.cost;
             return {
@@ -688,8 +730,8 @@ export class Game {
   }
 
   // Raycast a shop click (screen point) against the interactable fixtures and
-  // return what it hit: a display `slot`, a `customer` you can deal with, or the
-  // `trapdoor`. Null when the click misses everything actionable.
+  // return what it hit: a display `slot` or a `customer` you can deal with.
+  // Null when the click misses everything actionable.
   _shopPick(clientX, clientY) {
     const shop = this.shop;
     if (!shop) return null;
@@ -705,7 +747,6 @@ export class Game {
         (cust.state === "offer" && cust.sellItem);
       if (dealable && cust.creature) pairs.push([cust.creature, { type: "customer", cust }]);
     }
-    if (shop.trapTargets) for (const o of shop.trapTargets) pairs.push([o, { type: "trapdoor" }]);
     for (const table of shop.tables) pairs.push([table.group, { type: "table", table }]);
     for (const slot of shop.slots) if (slot.mesh) pairs.push([slot.mesh, { type: "slot", slot }]);
 
@@ -731,16 +772,45 @@ export class Game {
     return meta;
   }
 
-  // Run the interaction for a clicked shop fixture — mirrors the proximity
-  // context action, so clicking a slot / customer / trapdoor does exactly what
-  // walking up and pressing E would.
-  _doShopClick(target) {
-    if (target.type === "trapdoor") {
-      const tutBlocksCellar = this.tutorial && this.tutorial !== "delve";
-      if (tutBlocksCellar || !this.shop.trapdoorOpen) return;
-      this._delve();
-      return;
+  // Resolve whatever shop fixture the mouse is hovering into the same shape a
+  // proximity context action produces ({hint, focus, color, glowTable}), so the
+  // ring + hint can preview a click before you make it. Desktop-only (touch has
+  // no hover); null when the cursor isn't over anything actionable.
+  _shopHoverAction() {
+    if (this.playerArea !== "shop" || this.input.isTouch || !this._pointer) return null;
+    if (this._dashT >= 0) return null;
+    const target = this._shopPick(this._pointer.x, this._pointer.y);
+    if (!target) return null;
+    if (target.type === "customer") {
+      const cust = target.cust;
+      const focus = _focus.copy(cust.creature.position).setY(0.06).clone();
+      if (cust.state === "want") return { hint: "Haggle", focus, color: 0xffd34d };
+      return { hint: "Buy", focus, color: 0x8fe0ff };
     }
+    if (target.type === "slot") {
+      const slot = target.slot;
+      const table = slot.table;
+      if (table && !table.repaired) {
+        if (this.tutorial) return null; // repair UI stays hidden during the FTUE
+        const broke = this.gold < table.cost;
+        return {
+          hint: `Repair ${table.cost}g`,
+          focus: _focus.copy(table.group.position).setY(1.35).clone(),
+          color: broke ? 0x9aa0aa : 0x66ff9e,
+          glowTable: table,
+        };
+      }
+      if (slot.disabled) return null;
+      if (slot.item) return { hint: "Swap", focus: _focus.copy(slot.pos).clone(), color: 0xff9d5c };
+      if (this.stash.length > 0) return { hint: "Stock", focus: _focus.copy(slot.pos).clone(), color: 0x66ff9e };
+    }
+    return null;
+  }
+
+  // Run the interaction for a clicked shop fixture — mirrors the proximity
+  // context action, so clicking a slot / customer does exactly what walking
+  // up and pressing E would.
+  _doShopClick(target) {
     if (target.type === "customer") {
       const cust = target.cust;
       if (cust.state === "want" && cust.slot?.item) this._haggle(cust);
@@ -751,9 +821,9 @@ export class Game {
       const slot = target.slot;
       const table = slot.table;
       if (table && !table.repaired) {
-        // only offer the repair once the tutorial's first house is up (matches
-        // the proximity gate in _contextAction)
-        if (this.townPop() > 0) this._repairTable(this.shop.tables.indexOf(table));
+        // only offer the repair once the FTUE is done (matches the proximity
+        // gate in _contextAction)
+        if (!this.tutorial) this._repairTable(this.shop.tables.indexOf(table));
         return;
       }
       if (slot.disabled) return;
@@ -794,9 +864,9 @@ export class Game {
   // jump the camera straight to the current area's framing (no glide)
   _snapCamera() {
     const area = this.playerArea;
-    if (area === "dungeon" || area === "cellar") {
+    if (area === "dungeon" || area === "cellar" || area === "cave") {
       this.engine.camTarget.copy(this.player.position);
-      this.engine.camOffset.copy(area === "dungeon" ? _camDungeon : _camCellar);
+      this.engine.camOffset.copy(area === "cellar" ? _camCellar : _camDungeon);
       return;
     }
     const zone = this.shop.zoneCenter(this.player.position);

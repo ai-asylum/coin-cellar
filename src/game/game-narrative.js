@@ -1,30 +1,74 @@
-// The Mayor cutscene + the first-run FTUE tutorial guide. Attached to
-// Game.prototype via Object.assign, so `this` is the live Game instance.
+// The first-run FTUE ("The End of the Road") + the Mayor cutscenes. Attached
+// to Game.prototype via Object.assign, so `this` is the live Game instance.
+//
+// A brand-new shopkeeper wakes up mid-spelunk in the cave at the end of the
+// road, watches their own hero cut down one last slime (the scripted opener),
+// walks out into the daylight with a full pack, finds the village shop CLOSED
+// — and the Mayor hands them the keys. The loop is then taught in the order
+// you live it: stock a table, watch the first sale land, and take the Mayor's
+// dare back to the cave, whose pit is the way down to the dungeons. Steps:
+//   exit → shop → stock → sell → delve
 import * as THREE from "three";
 import { BlockyCreature } from "../chargen/blocky.js";
 import { portraitDataURL } from "../chargen/portrait.js";
-import { icon } from "../core/icons.js";
-import { DUNGEON_ORIGIN } from "./dungeon.js";
+import { icon, itemIcon } from "../core/icons.js";
+import { ITEMS } from "./items.js";
+import { SHOP } from "./shop-data.js";
 import { track } from "../core/analytics.js";
 
 // The Mayor NPC: a fixed character variant (so his walking body matches the
-// dialogue bust), and his short spiel. One sentence per bubble — he offers the
-// shop rent-free in exchange for helping rebuild the town, then again once the
-// first lot goes up.
+// dialogue bust). One sentence per bubble throughout.
 const MAYOR_VARIANT = "q"; // Kenney "Villager Q"
 // The shop clerk who hauls you home after a shallow-floor knockout: a fixed
 // variant so the body you wake up next to matches the bust in the dialogue.
 const CLERK_VARIANT = "e";
 const CLERK_LINE = "We found you in the dungeon, you're lucky you didn't pass out deeper.";
-const MAYOR_INTRO_LINES = [
-  "Ha! I was looking for one of those!",
-  "The shop's yours rent-free, but you need to help me revive this town.",
-  "Let's see what you can do, follow me.",
+
+// ---- the script -------------------------------------------------------------
+// The full annotated script (staging, tap budgets, cut lines and why) lives in
+// specs/game-design/08-ftue-script.md — keep the two in sync. House rules:
+// one idea per bubble, ≤ ~70 chars, no speaker gets more than 3 in a row.
+// Scene 1 — the cave, right after the scripted slime kill
+const PLAYER_WAKE_LINES = [
+  "Whew. That should be enough for today.",
+  "Now — where was that exit...",
 ];
+// ...and the sheepish word if the hero cuts down one of the harmless rats
+const PLAYER_RAT_LINE = "Sorry, little guy. Force of habit.";
+// Scene 2 — out on the road, first sight of the village (the guide arrow
+// carries the "go sell" instruction, so one line is plenty)
+const PLAYER_ROAD_LINES = [
+  "Finally — a village. My back is killing me.",
+];
+// Scene 3 — the shopfront: the sign tells the shopkeeper's story, so the
+// Mayor only makes the deal. No "follow me" — walking in IS the invitation.
+const SIGN_TEXT = "“CLOSED — gone delving. Don't wait up. — the management”";
+const PLAYER_CLOSED_LINE = "Closed?! You have GOT to be kidding me.";
+const MAYOR_DOOR_LINES = [
+  "Don't bother, friend — he's been gone a year.",
+  "You, though... full pack, strong back. I have a mad idea.",
+  "The shop's yours. Rent-free. Help me wake this town up.",
+];
+// Scene 4 — the first sale just landed: the Mayor's praise doubles as the
+// send-off. The rebuild ask is soft (one line, never a quest); the cave
+// reveal is a dare, not a lecture — the guide arrow finishes the sentence.
+const MAYOR_SALE_LINES = [
+  "Ha! Sold already. You're made for this.",
+  "Purse ever heavy? Spare a ruin a thought — I'll do the hammering.",
+  "That pit in the cave? The old owner didn't dig it for potatoes. Go see.",
+];
+const PLAYER_RESOLVE_LINE = "“Enough for today,” huh... not anymore.";
+// The optional epilogue: the player rebuilt their first home, the Mayor drops by
 const MAYOR_PRAISE_LINES = [
-  "Would you look at that, a family's already moving in!",
-  "Keep it up: every home you raise brings more custom to your door.",
+  "Ha! A family already — would you look at that.",
+  "Every roof you raise brings more custom through your door.",
 ];
+
+// where the Mayor stands inside the shop while you set up and make the sale
+// (just in from the east-side door, clear of the vitrine and the tables)
+const WATCH_SPOT = new THREE.Vector3(1.5, 0, -3.3);
+
+const TUT_ORDER = ["exit", "shop", "stock", "sell", "delve"];
 
 // per-call scratch vectors (duplicated from game.js — these are transient)
 const _v = new THREE.Vector3();
@@ -32,26 +76,164 @@ const _v2 = new THREE.Vector3();
 
 export const narrativeMethods = {
   // ---- first-run onboarding -------------------------------------------------
-  // Rather than front-loading four timed toasts, we teach the loop in the order
-  // you actually live it — delve for stock, bring it up, put it on a table, and
-  // make the sale — advancing only as each step is done. The shop trades all
-  // day now, so there's no "open the doors" beat: the moment stock hits a table
-  // a customer wanders in. Combined with the near-empty START_INV, the bare
-  // shelves point a brand-new player straight at the trapdoor. Runs once, on a
-  // fresh save, solo only, and hands off to the Mayor when the loop closes.
+  // Kick off the FTUE on a fresh solo save: wake up deep in the (permanent)
+  // cave with the haul already in the bag, right beside the cellar descent —
+  // as if just climbed out — and queue the scripted slime-kill opener.
   _tutStart() {
-    this.tutorial = "delve";
-    this.shop.doorLocked = true; // keep the new player in until the Mayor's intro
-    setTimeout(() => this._tutHint(), 3200); // let the intro banner clear first
+    this.tutorial = "exit";
+    this.shop.doorLocked = true; // the shopfront reads firmly shut until Scene 3
+    this._doorScene = false; // Scene 3 runs once
+    this._bagStowed = false; // the haul moves to the storeroom on first entry
+    this._ratSorry = false; // the sheepish rat-kill line plays once
+    this.cave.spawnSlime();
+    this.playerArea = "cave";
+    this.player.position.copy(this.cave.entrancePos);
+    this.player.heading = Math.PI; // face the daylight
+    this.player.animator.prevPos.copy(this.player.position);
+    this.hud.showHearts(false);
+    this.hud.showBag(true);
+    this.hud.setGoldCorner(true);
+    this._snapCamera();
+    // let the title banner breathe, then the opener takes the hero
+    this._cine = { phase: "wait", t: 0 };
+  },
+
+  // The scripted opener: a beat of quiet, a wary walk as the slime hops in to
+  // meet the hero, one dash through it (the real dash's juice, minus the
+  // input), the jelly popping into the bag, then the hero's first words.
+  // Runs from _updatePlayer while `this._cine` is live.
+  _updateCaveIntro(dt, elapsed) {
+    const cine = this._cine;
+    const c = this.player;
+    const slime = this.cave?.slime;
+    cine.t += dt;
+    switch (cine.phase) {
+      case "wait":
+        if (cine.t >= 0.8 && slime) {
+          cine.phase = "approach";
+          cine.t = 0;
+        }
+        break;
+      case "approach": {
+        if (!slime || slime.dead) { cine.phase = "loot"; cine.t = 0; break; }
+        // both close the gap: the hero at a wary walk, the slime at a hungry
+        // hop (its animator derives the bounce from the position delta)
+        _v.set(slime.position.x - c.position.x, 0, slime.position.z - c.position.z);
+        const gap = _v.length();
+        _v.normalize();
+        c.heading = Math.atan2(_v.x, _v.z);
+        slime.heading = Math.atan2(-_v.x, -_v.z);
+        c.position.addScaledVector(_v, 2.2 * dt);
+        slime.position.addScaledVector(_v, -1.25 * dt);
+        if (gap <= 2.3 || cine.t > 3) {
+          cine.phase = "dash";
+          cine.t = 0;
+          cine.dx = _v.x;
+          cine.dz = _v.z;
+          c.animator.squash.kick(5);
+          this.audio.dodge();
+          this.particles.burst(_v2.copy(c.position).setY(0.1), { color: 0xbfe8ff, n: 9, speed: 2.6, up: 0.6, gravity: 3, life: 0.35, size: 0.9 });
+          this.slash.play(_v2.copy(c.position).setY(0.62), c.heading, 1.2);
+        }
+        break;
+      }
+      case "dash": {
+        const k = Math.max(0, 1 - cine.t / 0.34);
+        const sp = 13 * (0.35 + 0.65 * k);
+        c.position.x += cine.dx * sp * dt;
+        c.position.z += cine.dz * sp * dt;
+        this.slash.follow(c.position.x, 0.62, c.position.z);
+        const felled = slime && !slime.dead &&
+          (c.position.distanceTo(slime.position) < 0.7 || cine.t >= 0.34);
+        if (felled) {
+          cine.killPos = slime.position.clone();
+          slime.die(_v.set(cine.dx * 7, -2, cine.dz * 7));
+          this.audio.hit();
+          this.audio.kill();
+          this.engine.hitStop(0.08);
+          this.engine.shake(0.16);
+          this.particles.burst(_v2.copy(slime.position).setY(0.5), { color: 0x53c66e, n: 16, speed: 3.4, up: 1.6, life: 0.6, size: 1.1 });
+        }
+        if (cine.t >= 0.34) {
+          cine.phase = "loot";
+          cine.t = 0;
+        }
+        break;
+      }
+      case "loot":
+        if (cine.t >= 0.55 && !cine.looted) {
+          // the felled slime's jelly pops straight into the pack
+          cine.looted = true;
+          this.inventory.push("jelly");
+          this.audio.pickup();
+          const it = ITEMS.jelly;
+          const at = cine.killPos ?? this.cave.slimePos;
+          this.hud.float(_v.copy(at).setY(1.1), `${itemIcon(it.icon)} ${it.name}`, "loot");
+          this.hud.flyToBag(_v.copy(at).setY(0.8), itemIcon(it.icon));
+        }
+        if (cine.t >= 1.35) {
+          this._cine = null;
+          this._selfSay(PLAYER_WAKE_LINES, () => this._tutHint());
+        }
+        break;
+    }
+    c.update(dt, elapsed);
+  },
+
+  // A cave rat fell to the player's dash (see Cave.dashHit): the kill juice,
+  // its hide popping into the pack, and — the first time — a sheepish word.
+  _onCaveRatKilled(pos) {
+    this.audio.hit();
+    this.audio.kill();
+    this.engine.shake(0.1);
+    this.particles.burst(_v.copy(pos).setY(0.4), { color: 0x8a5a3a, n: 12, speed: 3, up: 1.4, life: 0.5, size: 1.0 });
+    if (this.inventory.length < this.invCap) {
+      this.inventory.push("rathide");
+      this.audio.pickup();
+      const it = ITEMS.rathide;
+      this.hud.float(_v.copy(pos).setY(1.0), `${itemIcon(it.icon)} ${it.name}`, "loot");
+      this.hud.flyToBag(_v.copy(pos).setY(0.7), itemIcon(it.icon));
+    }
+    if (!this._ratSorry) {
+      this._ratSorry = true;
+      setTimeout(() => {
+        if (this.tutorial === "exit" && !this.hud.speakOpen && !this._cine)
+          this._selfSay([PLAYER_RAT_LINE]);
+      }, 500);
+    }
+  },
+
+  // Per-frame FTUE triggers that aren't tied to an existing action: reaching
+  // the shopfront, and crossing the threshold with the haul. (The cave's
+  // daylight walk-out is generic travel now — see _exitCave / _onFtueCaveExit.)
+  _updateFtue() {
+    if (!this.tutorial || this.net.connected || this._cine || this.hud.speakOpen) return;
+    const p = this.player.position;
+    switch (this.tutorial) {
+      case "shop":
+        if (!this._doorScene && this.playerArea === "shop" && p.distanceTo(this.shop.doorPos) < 2.3)
+          this._shopDoorScene();
+        break;
+      case "stock":
+        // first step through the door: the pack empties into the storeroom, so
+        // the tables can be stocked from it
+        if (!this._bagStowed && this.playerArea === "shop" &&
+            Math.abs(p.x) < SHOP.W / 2 && Math.abs(p.z) < SHOP.D / 2) {
+          this._bagStowed = true;
+          this._depositBag();
+        }
+        break;
+    }
   },
 
   _tutHint() {
     if (!this.tutorial) return;
     const hints = {
-      delve: `${icon("hole")} Your shelves are bare — step onto the trapdoor to delve for stock`,
-      return: `${icon("arrowDown")} Take the stairs to bring your loot back to the shop`,
-      stock: `${icon("box")} Stand at a glowing table and place your loot — a customer will come`,
-      sell: `${icon("speak")} Step behind the counter and haggle to seal your first sale`,
+      exit: `${icon("bag")} Pack's full — head for the daylight`,
+      shop: `${icon("shop")} Take your haul to the shop and sell it`,
+      stock: `${icon("box")} Stand at the glowing table and lay out your goods`,
+      sell: `${icon("coin")} A shopper's on their way in — watch your first sale land`,
+      delve: `${icon("hole")} Head back to the cave — its pit is the way down for stock`,
     };
     if (hints[this.tutorial]) this.hud.toast(hints[this.tutorial]);
   },
@@ -60,85 +242,41 @@ export const narrativeMethods = {
   // re-hints) only if that's the step we're currently waiting on.
   _tutAdvance(step) {
     if (this.tutorial !== step) return;
-    const order = ["delve", "loot", "return", "stock", "sell"];
-    this.tutorial = order[order.indexOf(step) + 1] || null;
-    // advancing past the last step (the first sale) closes the FTUE loop
+    this.tutorial = TUT_ORDER[TUT_ORDER.indexOf(step) + 1] || null;
+    track("ftue_step", { step, day: this.day, gold: this.gold });
+    // advancing past the last step (the first real descent) ends the FTUE
     if (!this.tutorial) track("ftue_completed", { day: this.day, gold: this.gold });
-    // reaching the sell step means the first table's just been stocked — send in
-    // the Mayor (disguised as an ordinary shopper) to buy that first item. Once
-    // the sale lands he reveals himself, so there's no separate walk-in here.
-    if (this.tutorial === "sell") this.shop.spawnMayorCustomer(MAYOR_VARIANT);
+    // the first table's just been stocked — send in the scripted first shopper,
+    // who always commits: a plain-table purchase the player just watches land
+    if (this.tutorial === "sell") this.shop.spawnScriptedCustomer();
+    // the first sale just landed — the Mayor's praise doubles as the send-off
+    if (this.tutorial === "delve") this._mayorSaleScene();
     if (this.tutorial) setTimeout(() => this._tutHint(), 700);
   },
 
   // Where the FTUE guide arrow should point right now. Re-resolved every frame
-  // so it tracks moving targets (customers, drops) and area changes; the arrow
-  // itself lives in the HUD (hud.guide) and clamps to the screen edge when the
-  // objective is out of view.
+  // so it tracks moving targets (the Mayor, customers, drops) and area changes;
+  // the arrow itself lives in the HUD (hud.guide) and clamps to the screen edge
+  // when the objective is out of view.
   _updateTutGuide() {
-    // outside the first-run tutorial, the same arrow serves the Mayor's quest:
-    // point at the lot he's asked us to rebuild until it's restored
-    if (!this.tutorial) {
-      const blocked = this.gameOver || this.hud.sheetOpen;
-      // one last post-Mayor nudge: the opener sold thinned the shelves, so point
-      // back at the trapdoor to restock before chasing the rebuild (clears on the
-      // next delve, at which point the lot quest arrow below takes over)
-      if (this._restockNudge && !blocked && this.playerArea === "shop") {
-        this.hud.guide(_v.copy(this.shop.trapdoorPos).setY(1.4), "Restock the inventory");
-        return;
-      }
-      const q = this._questArrow;
-      if (q && !blocked && this.playerArea === "shop")
-        this.hud.guide(_v.copy(q.pos).setY(1.4), q.text);
-      else this.hud.hideGuide();
-      return;
-    }
-    if (this.gameOver || this.hud.sheetOpen || this._respawnT >= 0)
+    if (!this.tutorial) return this.hud.hideGuide();
+    if (this.gameOver || this.hud.sheetOpen || this._respawnT >= 0 || this._cine)
       return this.hud.hideGuide();
     const inShop = this.playerArea === "shop";
     let pos = null, text = "";
     switch (this.tutorial) {
-      case "delve":
-        if (inShop) { pos = _v.copy(this.shop.trapdoorPos); text = "Delve here for stock"; }
+      case "exit":
+        if (this.playerArea === "cave" && this.cave) {
+          pos = _v.copy(this.cave.exitPos);
+          text = "Head for the daylight";
+        }
         break;
-      case "loot": {
-        if (inShop) { pos = _v.copy(this.shop.trapdoorPos); text = "Delve here for stock"; break; }
-        if (!this.dungeon.active) break;
-        // nearest drop to grab, else nearest foe to slay, else press deeper
-        const p = this.player.position;
-        let best = null, bestD = Infinity;
-        for (const drop of this.dungeon.drops) {
-          const d = drop.mesh.position.distanceToSquared(p);
-          if (d < bestD) { bestD = d; best = drop.mesh.position; text = "Grab the loot"; }
-        }
-        if (!best) for (const e of this.dungeon.enemies) {
-          if (e.deadT >= 0) continue;
-          const d = e.creature.position.distanceToSquared(p);
-          if (d < bestD) { bestD = d; best = e.creature.position; text = "Slay it for loot"; }
-        }
-        // nothing to fight (e.g. the monster-free tutorial room) — point at the
-        // nearest unopened chest so the player knows to crack it for stock
-        if (!best) for (const chest of this.dungeon.chests) {
-          if (chest.opened) continue;
-          _v2.copy(chest.mesh.position).add(DUNGEON_ORIGIN);
-          const d = _v2.distanceToSquared(p);
-          if (d < bestD) { bestD = d; best = _v2.clone(); text = "Smash the chest for loot"; }
-        }
-        if (best) pos = _v.copy(best);
-        else { pos = _v.copy(this.dungeon.upStairsPos).add(DUNGEON_ORIGIN); text = "To the stairs"; }
-        break;
-      }
-      case "return":
-        if (!inShop && this.dungeon.active) {
-          pos = _v.copy(this.dungeon.upStairsPos).add(DUNGEON_ORIGIN);
-          text = "Stairs — back to shop";
-        }
+      case "shop":
+        if (inShop) { pos = _v.copy(this.shop.doorPos); text = "Sell your haul here"; }
         break;
       case "stock": {
-        if (!inShop) {
-          if (this.dungeon.active) { pos = _v.copy(this.dungeon.upStairsPos).add(DUNGEON_ORIGIN); text = "Back to shop"; }
-          break;
-        }
+        if (!inShop) break;
+        if (!this._bagStowed) { pos = _v.copy(this.shop.doorInside); text = "Step inside"; break; }
         if (!this.stash.length) break; // nothing left to place — no target
         const slot = this.shop.freeSlot();
         if (slot) { pos = _v.copy(slot.pos).setY(0); text = "Stock this table"; }
@@ -150,93 +288,109 @@ export const narrativeMethods = {
         if (cust) { pos = _v.copy(cust.creature.position); text = "Here is your first customer"; }
         break;
       }
+      case "delve":
+        // the send-off: point down the road at the cave mouth, then — once
+        // inside — at the descent pit itself. Completes on the first descent.
+        if (inShop && this.shop.caveMouthPos) {
+          pos = _v.copy(this.shop.caveMouthPos);
+          text = "To the cave — delve for stock";
+        } else if (this.playerArea === "cave") {
+          pos = _v.copy(this.cave.descentPos);
+          text = "Delve here for stock";
+        }
+        break;
     }
     if (pos) this.hud.guide(pos.setY(1.4), text);
     else this.hud.hideGuide();
   },
 
-  // The cheapest lot still awaiting restoration — the one the Mayor points at.
-  _mayorTargetLot() {
-    let best = -1, bestCost = Infinity;
-    (this.shop.lots || []).forEach((lot, i) => {
-      if (!lot.restored && lot.cost < bestCost) { bestCost = lot.cost; best = i; }
+  // ---- scene transitions ------------------------------------------------------
+  // The FTUE's first walk into the daylight (called by _exitCave): the banner,
+  // the step advance, and the hero's first look at the village.
+  _onFtueCaveExit() {
+    this.hud.banner(`${icon("home")} The end of the road`, "", 2.2);
+    this._tutAdvance("exit");
+    setTimeout(() => {
+      if (this.tutorial === "shop" && !this.hud.speakOpen) this._selfSay(PLAYER_ROAD_LINES);
+    }, 1000);
+  },
+
+  // Scene 3, at the shopfront: the dusty sign, the hero's outburst, and the
+  // Mayor hurrying over with the keys to the rest of the game.
+  _shopDoorScene() {
+    this._doorScene = true;
+    this.audio.deny();
+    this.hud.speak({
+      name: "A dusty sign",
+      text: SIGN_TEXT,
+      cta: "▸ …",
+      onAdvance: () => this._selfSay([PLAYER_CLOSED_LINE], () => this._mayorDoorScene()),
     });
-    return best;
   },
 
-  // The Mayor's pitch, played once when the FTUE loop closes. He actually walks
-  // in through the shopfront as a character (a bust flanks the dialogue so you
-  // can see who's talking, like the haggle panel), gives a short spiel — the
-  // shop's yours rent-free, but you help revive the town — then strolls out to
-  // the lot he wants rebuilt, leaving an objective arrow on it.
-  _mayorIntro() {
-    if (this.net.connected || this._mayor) return; // solo onboarding, once
-    const target = this._mayorTargetLot();
-    this._mayorEnter(MAYOR_INTRO_LINES, () => this._mayorGoToLot(target));
-  },
-
-  // Bring the Mayor into a dialogue. `lines` are his bubbles; `afterTalk` runs
-  // once the player's clicked through them. Pass `existing` to adopt a body
-  // that's already in the shop (the disguised first customer) and talk on the
-  // spot; otherwise he spawns on the street and walks in first.
-  _mayorEnter(lines, afterTalk, existing = null) {
+  _mayorDoorScene() {
     if (this._mayor) return;
-    let creature = existing;
-    if (!creature) {
-      creature = new BlockyCreature(MAYOR_VARIANT, { height: 1.55 });
-      creature.position.copy(this.shop.doorPos).add(_v.set(0, 0, -1.4));
-      creature.heading = 0;
-      this.shop.group.add(creature);
-    }
-    this.shop.doorHeld = true; // hold the shopfront open so he can come and go
+    const m = this._ensureMayor(_v.set(-this.shop.streetHalfX, 0, this.shop.streetWalkZ));
+    this._mayorWalk(m, [this.shop.doorPos.clone().add(_v.set(-1.7, 0, -0.7))], () => {
+      m.state = "talk";
+      this._mayorSay(MAYOR_DOOR_LINES, () => {
+        // the keys are yours: unlock the shopfront and lead the way in
+        this.shop.doorLocked = false;
+        this.shop.doorHeld = true; // hold the doors while he shows you inside
+        this._tutAdvance("shop");
+        this._mayorWalk(m, [this.shop.doorPos.clone(), this.shop.doorInside.clone(), WATCH_SPOT.clone()], () => {
+          m.state = "watch"; // stands by, facing the player, while you set up
+          this.shop.doorHeld = false;
+        });
+      });
+    });
+  },
+
+  // Scene 4: the first sale just landed. The watching Mayor applauds, drops
+  // the ruin aside and the cave dare, then sees himself out and off up the
+  // street — the hero's resolve line closes the scene, and the arrow takes
+  // over pointing back down the road at the cave.
+  _mayorSaleScene() {
+    const m = this._ensureMayor(WATCH_SPOT);
+    m.state = "talk";
+    this._mayorSay(MAYOR_SALE_LINES, () => {
+      this.shop.doorHeld = true;
+      this._mayorWalk(m, [this.shop.doorInside.clone(), this.shop.doorPos.clone(),
+        new THREE.Vector3(-this.shop.streetHalfX - 1.5, 0, this.shop.streetWalkZ)], () => this._endMayorScene());
+      this._selfSay([PLAYER_RESOLVE_LINE]);
+    });
+  },
+
+  // ---- the Mayor -------------------------------------------------------------
+  // Where the Mayor stands while the player sets up shop (admin jumps reuse it).
+  _mayorWatchSpot() {
+    return WATCH_SPOT.clone();
+  },
+
+  // The Mayor's body, created on the spot if a scene needs him and he isn't
+  // already on stage (also lets the admin FTUE jumps land mid-story).
+  _ensureMayor(pos) {
+    if (this._mayor) return this._mayor;
+    const creature = new BlockyCreature(MAYOR_VARIANT, { height: 1.55 });
+    creature.position.copy(pos);
+    creature.heading = Math.atan2(this.player.position.x - pos.x, this.player.position.z - pos.z);
+    this.shop.group.add(creature);
     this._mayor = {
       creature,
       portrait: portraitDataURL(MAYOR_VARIANT, "left"),
-      state: existing ? "talk" : "enter",
-      lines, afterTalk,
-      talkSpot: new THREE.Vector3(0.9, 0, 1.9), // just inside, by the tables
-      leaveStage: 0,
+      state: "idle",
+      path: null, pathIdx: 0, pathT: 0, onArrive: null,
     };
-    if (existing) {
-      // already standing at the counter — turn to the player and start talking
-      creature.heading = Math.atan2(
-        this.player.position.x - creature.position.x,
-        this.player.position.z - creature.position.z);
-      this._mayorSay(lines, afterTalk);
-    }
+    return this._mayor;
   },
 
-  // The disguised first customer just bought the player's opener — drop the act
-  // and reveal the Mayor, talking on the spot, then he heads to the first lot.
-  _mayorFromCustomer(cust) {
-    if (this.net.connected || this._mayor) return;
-    const creature = this.shop.detachCustomer(cust);
-    const target = this._mayorTargetLot();
-    this._mayorEnter(MAYOR_INTRO_LINES, () => this._mayorGoToLot(target), creature);
-  },
-
-  // Intro over: head out to the target lot and raise the objective arrow on it.
-  _mayorGoToLot(idx) {
-    const m = this._mayor;
-    if (!m) return;
-    this.shop.doorLocked = false; // first dialog's done — the shopfront's free now
-    m.targetLot = idx;
-    m.state = idx >= 0 ? "toLot" : "leave";
-    const lot = this.shop.lots[idx];
-    if (lot) {
-      // wait a couple of metres to the right of the plot — clear of the spot the
-      // player stands on to rebuild — and hold there until the house goes up.
-      m.standSpot = lot.interactPos.clone().add(_v.set(2.5, 0, 0));
-      this._questArrow = { pos: lot.interactPos.clone(), text: `${icon("home")} Rebuild — ${lot.cost}g` };
-    }
-  },
-
-  _mayorLeave() {
-    const m = this._mayor;
-    if (!m) return;
-    this.hud.hideSpeak();
-    m.state = "leave";
-    m.path = null; // force the leave route to rebuild from wherever he's standing
+  // Send the Mayor down a waypoint path; `onArrive` fires at the last point.
+  _mayorWalk(m, path, onArrive) {
+    m.state = "walk";
+    m.path = path;
+    m.pathIdx = 0;
+    m.pathT = 0;
+    m.onArrive = onArrive;
   },
 
   _endMayorScene() {
@@ -268,101 +422,74 @@ export const narrativeMethods = {
     step();
   },
 
-  // Once the Mayor's target lot is rebuilt: clear the arrow and give him a short
-  // congratulatory follow-up (walking back on if he's already wandered off).
-  // Only now — with the house up — do we send the final FTUE beat: nudge the
-  // player back down to restock the thinned shelves. It's a lightweight flag
-  // that steers the guide arrow + a hint and clears on the next delve.
-  _mayorAfterRestore() {
-    this._questArrow = null;
-    const done = () => {
-      this._mayorLeave();
-      if (!this.net.connected) {
-        this._restockNudge = true;
-        setTimeout(() => {
-          if (this._restockNudge)
-            this.hud.toast(`${icon("hole")} Restock the inventory — head back down to the cellar for more stock`);
-        }, 700);
-      }
+  // The hero thinking out loud — same dialogue bar, the player's own bust.
+  _selfSay(lines, onDone) {
+    let i = 0;
+    const portrait = portraitDataURL(this.player.variant ?? "a", "left");
+    const step = () => {
+      if (i >= lines.length) { this.hud.hideSpeak(); return onDone?.(); }
+      this.audio.pickup?.();
+      const last = i === lines.length - 1;
+      this.hud.speak({
+        name: "Me",
+        portrait,
+        text: lines[i],
+        cta: last ? "▸ done" : "▸ next",
+        onAdvance: () => { i++; step(); },
+      });
     };
-    if (this._mayor) {
-      this._mayor.state = "talk";
-      this._mayor.path = null;
-      this._mayor.afterTalk = done;
-      this._mayorSay(MAYOR_PRAISE_LINES, done);
-    } else {
-      this._mayorEnter(MAYOR_PRAISE_LINES, done);
-    }
+    step();
   },
 
-  // Drive the Mayor cutscene each frame: walk in, stand and talk, stroll out to
-  // a spot just right of the target lot and wait there until it's rebuilt (then
-  // a praise beat sends him off). He follows a short waypoint path (routed
-  // through the doorway so he doesn't try to walk through the back wall);
-  // movement is a simple seek + wall-slide and the body auto-animates from its
-  // own position delta. A per-state timeout keeps him from ever getting stuck.
+  // The optional epilogue: the player just funded their first home (their own
+  // call — there's no quest for it). The Mayor strolls up the road to the
+  // player for a word of praise, then sees himself off.
+  _mayorAfterRestore() {
+    if (this.net.connected || this._mayor) return;
+    const m = this._ensureMayor(_v.set(-this.shop.streetHalfX, 0, this.shop.streetWalkZ));
+    const spot = this.player.position.clone().add(_v2.set(1.5, 0, 0.8));
+    this._mayorWalk(m, [spot], () => {
+      m.state = "talk";
+      this._mayorSay(MAYOR_PRAISE_LINES, () => {
+        this._mayorWalk(m, [new THREE.Vector3(-this.shop.streetHalfX - 1.5, 0, this.shop.streetWalkZ)], () => this._endMayorScene());
+      });
+    });
+  },
+
+  // Drive the Mayor each frame: walk his current path (straight seek +
+  // wall-slide, per-leg timeout so he can never wedge), face the player while
+  // talking or watching, hold his pose at the overlook. The body auto-animates
+  // from its own position delta.
   _updateMayor(dt, elapsed) {
     const m = this._mayor;
     if (!m) return;
     const c = m.creature;
-    const facePlayer = () => {
-      c.heading = Math.atan2(this.player.position.x - c.position.x, this.player.position.z - c.position.z);
-    };
-    // walk `m.path` in order; returns true once the last waypoint is reached
-    const follow = (speed = 2.4) => {
-      m.pathT = (m.pathT ?? 0) + dt;
-      const tgt = m.path[m.pathIdx];
-      _v.set(tgt.x - c.position.x, 0, tgt.z - c.position.z);
-      const d = _v.length();
-      const reached = d < 0.16 || m.pathT > 8; // timeout guard
-      if (reached) {
-        m.pathIdx++;
-        m.pathT = 0;
-        return m.pathIdx >= m.path.length;
-      }
-      _v.normalize();
-      c.position.addScaledVector(_v, Math.min(speed * dt, d));
-      c.heading = Math.atan2(_v.x, _v.z);
-      this.collide(c.position, c.radius * 0.8, this.shop.colliders);
-      return false;
-    };
-    const setPath = (pts) => { m.path = pts; m.pathIdx = 0; m.pathT = 0; };
-    if (!m.path && (m.state === "enter" || m.state === "toLot" || m.state === "leave")) {
-      // lazily build the path for the current walking state on first tick
-      if (m.state === "enter") setPath([this.shop.doorInside, m.talkSpot]);
-      else if (m.state === "toLot") {
-        const lot = this.shop.lots[m.targetLot];
-        setPath(lot ? [this.shop.doorInside, this.shop.doorPos, m.standSpot] : [this.shop.doorInside]);
-      } else setPath([this.shop.doorInside, this.shop.doorPos,
-        new THREE.Vector3(this.shop.streetHalfX, 0, this.shop.streetWalkZ)]);
-    }
     switch (m.state) {
-      case "enter":
-        if (follow(2.3)) {
-          m.path = null;
-          m.state = "talk";
-          facePlayer();
-          this._mayorSay(m.lines, m.afterTalk);
+      case "walk": {
+        m.pathT += dt;
+        const tgt = m.path[m.pathIdx];
+        _v.set(tgt.x - c.position.x, 0, tgt.z - c.position.z);
+        const d = _v.length();
+        if (d < 0.16 || m.pathT > 8) { // reached, or a per-leg timeout guard
+          m.pathIdx++;
+          m.pathT = 0;
+          if (m.pathIdx >= m.path.length) {
+            m.path = null;
+            m.onArrive?.();
+          }
+        } else {
+          _v.normalize();
+          c.position.addScaledVector(_v, Math.min(2.5 * dt, d));
+          c.heading = Math.atan2(_v.x, _v.z);
+          this.collide(c.position, c.radius * 0.8, this.shop.colliders);
         }
         break;
+      }
       case "talk":
-        facePlayer();
+      case "watch":
+        c.heading = Math.atan2(this.player.position.x - c.position.x, this.player.position.z - c.position.z);
         break;
-      case "toLot":
-        if (follow(2.6)) {
-          m.path = null;
-          m.state = "await";
-          const lot = this.shop.lots[m.targetLot];
-          if (lot) c.heading = Math.atan2(lot.cx - c.position.x, lot.collider.z - c.position.z);
-        }
-        break;
-      case "await":
-        // hold by the plot (facing it) until the player rebuilds it — the repair
-        // fires _mayorAfterRestore, which moves him on. No timed walk-off.
-        break;
-      case "leave":
-        if (follow(2.7)) return this._endMayorScene();
-        break;
+      // "overlook" / "idle": hold the pose
     }
     if (this._mayor === m) c.update(dt, elapsed);
   },

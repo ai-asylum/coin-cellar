@@ -64,25 +64,26 @@ export const buildMethods = {
     mkWall(W, 1.1, 0.35, 0, 0.55, D / 2, wallMat2);
     this.colliders.push({ x: 0, z: D / 2, hw: W / 2, hd: 0.3 });
 
-    // back wall = the shopfront: a door on the left, a display window
-    // ("vitrine") on the right. Customers stream in through the door; goods on
-    // the sill face the camera so the player sees what's on show.
+    // back wall = the shopfront: the display window ("vitrine") on the left,
+    // the door on the right — the east side, nearest the cave mouth down the
+    // road, so the delve→sell commute is as short as it looks. Customers
+    // stream in through the door; goods on the sill face the camera.
     const backZ = -D / 2;
-    const doorW = 2.4, doorCx = -3.0;
-    const winW = 3.6, winCx = 2.6, sillH = 0.95, headY = 2.5;
+    const doorW = 2.4, doorCx = 3.0;
+    const winW = 3.6, winCx = -2.6, sillH = 0.95, headY = 2.5;
     const doorL = doorCx - doorW / 2, doorR = doorCx + doorW / 2;
     const winL = winCx - winW / 2, winR = winCx + winW / 2;
     const seg = (x0, x1) => mkWall(x1 - x0, wallH, 0.4, (x0 + x1) / 2, wallH / 2, backZ);
-    seg(-W / 2, doorL); // left of door
-    seg(doorR, winL); // between door and window
-    seg(winR, W / 2); // right of window
+    seg(-W / 2, winL); // left of window
+    seg(winR, doorL); // between window and door
+    seg(doorR, W / 2); // right of door
     mkWall(winW, sillH, 0.42, winCx, sillH / 2, backZ, woodMat); // sill under window
     mkWall(winW, wallH - headY, 0.4, winCx, (headY + wallH) / 2, backZ); // header above window
     mkWall(doorW, wallH - 2.3, 0.4, doorCx, (2.3 + wallH) / 2, backZ); // lintel over doorway
     this.colliders.push(
-      { x: (-W / 2 + doorL) / 2, z: backZ, hw: (doorL + W / 2) / 2, hd: 0.35 },
-      { x: (doorR + winL) / 2, z: backZ, hw: (winL - doorR) / 2, hd: 0.35 },
-      { x: (winR + W / 2) / 2, z: backZ, hw: (W / 2 - winR) / 2, hd: 0.35 },
+      { x: (-W / 2 + winL) / 2, z: backZ, hw: (winL + W / 2) / 2, hd: 0.35 },
+      { x: (winR + doorL) / 2, z: backZ, hw: (doorL - winR) / 2, hd: 0.35 },
+      { x: (doorR + W / 2) / 2, z: backZ, hw: (W / 2 - doorR) / 2, hd: 0.35 },
       { x: winCx, z: backZ, hw: winW / 2, hd: 0.35 } // sill blocks the window
     );
     // glass pane + mullions in the opening
@@ -204,63 +205,6 @@ export const buildMethods = {
     for (let i = 0; i < MAX_CUSTOMERS; i++) {
       this.queueSpots.push(new THREE.Vector3(qHeadX - i * 0.95, 0, qZ));
     }
-
-    // trapdoor to the dungeon (mid left)
-    const trap = new THREE.Mesh(
-      new THREE.CircleGeometry(0.95, 24).rotateX(-Math.PI / 2),
-      makeToonMaterial({ color: 0x241735, rim: 0, polygonOffset: true })
-    );
-    trap.position.set(-W / 2 + 1.9, 0.02, 1.2);
-    g.add(trap);
-    const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(0.95, 0.09, 8, 24).rotateX(-Math.PI / 2),
-      makeToonMaterial({ color: 0x8a5a33, rim: 0 })
-    );
-    ring.position.copy(trap.position);
-    g.add(ring);
-    this.trapdoorPos = trap.position.clone();
-    this.portalGlow = new THREE.Mesh(
-      new THREE.CircleGeometry(0.8, 24).rotateX(-Math.PI / 2),
-      new THREE.MeshBasicMaterial({ color: 0x7a4dff, transparent: true, opacity: 0.5, depthWrite: false })
-    );
-    this.portalGlow.position.copy(trap.position).setY(0.04);
-    g.add(this.portalGlow);
-    // pulsing "you can act here" ring, matching the delve interact colour —
-    // pulses in update() and only shows while the cellar's actually open
-    this.trapHint = makeFloorHint();
-    this.trapHint.position.copy(trap.position).setY(0.06);
-    g.add(this.trapHint);
-
-    // hinged trapdoor lid: a heavy wooden flap that lies shut over the hole
-    // while the shopfront is open for trade, and creaks open once the doors are
-    // closed so the shopkeeper can drop down into the cellar. It
-    // hinges on its far (back) edge and swings up toward the wall.
-    const lidMat = makeToonMaterial({ color: 0x6e4526, rim: 0 });
-    const lidTrim = makeToonMaterial({ color: 0x4a2c17, rim: 0, polygonOffset: true });
-    const lidPivot = new THREE.Group();
-    const lidR = 1.05; // covers the 0.95 hole with a little overhang
-    lidPivot.position.set(trap.position.x - lidR, 0.05, trap.position.z); // hinge at the wall-side (left) edge
-    const lid = new THREE.Mesh(new THREE.BoxGeometry(lidR * 2, 0.1, lidR * 2), lidMat);
-    lid.position.set(lidR, 0, 0); // extend inward from the hinge over the hole
-    lidPivot.add(lid);
-    for (const pz of [-0.62, 0, 0.62]) {
-      const plank = new THREE.Mesh(new THREE.BoxGeometry(lidR * 2 - 0.14, 0.14, 0.1), lidTrim);
-      plank.position.set(lidR, 0.02, pz);
-      lidPivot.add(plank);
-    }
-    const pull = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.03, 6, 14), lidTrim);
-    pull.rotation.x = Math.PI / 2;
-    pull.position.set(lidR * 1.55, 0.11, 0);
-    lidPivot.add(pull);
-    g.add(lidPivot);
-    this.trapLid = lidPivot;
-    // meshes a click can land on to drop into the cellar: the hole, its rim,
-    // the glow shaft and the hinged lid (see Game._shopPick)
-    this.trapTargets = [trap, ring, this.portalGlow, lidPivot];
-    // 0 = shut (flat over the hole), 1 = flung fully open. Doors start closed,
-    // so the cellar starts open; snap the lid + glow to match on the first tick.
-    this._trapAngle = 1;
-    this.trapdoorOpen = true;
 
     // display tables (2x2 grid, 2 slots each = 8 slots). Each table is a
     // buildable fixture: all but the first start un-built (their real mesh hidden,
@@ -465,7 +409,8 @@ export const buildMethods = {
     // the road out front, clamped shy of the shopfront (so nobody strolls into
     // the shop) and kept in front of the far buildings (so nobody clips a wall).
     this.streetRegion = {
-      xMax: 19,
+      // capped west of the cave mound so strollers never clip through its rocks
+      xMax: 8.5,
       nearZ: backZ - 1.0, // nearest the shop they'll drift
       farZ: roadFar + 0.6, // out to just in front of the far buildings
     };
@@ -475,6 +420,11 @@ export const buildMethods = {
 
     // billboard scenery lining the street outside (seeded so co-op peers match)
     populateStreet(g, rng(0xC0FFEE), { W, backZ, streetHalfX: this.streetHalfX });
+
+    // the cave at the end of the road: a rocky mouth closing off the street's
+    // east end — the dungeon's front door. Walking up to it steps inside (the
+    // walk-through trigger lives in Game._updateCaveTravel).
+    this._buildCaveMouth(mkGround);
 
     // the rest of the town: two empty rooms flanking the shop, two walk-in
     // buildings across the road, and the plaza floor beneath them all.
@@ -486,6 +436,46 @@ export const buildMethods = {
     // doors start shut: block the opening (added after nav bake so the grid
     // still treats the doorway as walkable for when they're opened)
     this.colliders.push(this._doorCollider);
+  },
+
+  // The cave mouth: a mound of stacked rock with a dark opening facing down
+  // the street, and a dirt apron where the road peters out. It sits just past
+  // the shop's east corner — the walk from the pit to the till is a few steps,
+  // with the whole ruined north row visible on the way. `caveMouthPos` is the
+  // walk-in spot the travel trigger watches.
+  _buildCaveMouth(mkGround) {
+    const g = this.group;
+    const rock = makeToonMaterial({ color: 0x5c5248, rim: 0 });
+    const rock2 = makeToonMaterial({ color: 0x6a5f52, rim: 0 });
+    const cx = 12.6, cz = -8.5; // on the road, just east of the shopfront
+    const mkRock = (w, h, d, x, y, z, mat = rock, ry = 0) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+      m.position.set(x, y, z);
+      m.rotation.y = ry;
+      g.add(m);
+      return m;
+    };
+    // two rough pillars + a lintel frame the opening; boulders pile around it
+    mkRock(2.2, 3.4, 1.6, cx, 1.7, cz - 2.0, rock, 0.18);
+    mkRock(2.2, 3.4, 1.6, cx, 1.7, cz + 2.0, rock2, -0.14);
+    mkRock(2.6, 1.6, 5.4, cx + 0.4, 3.6, cz, rock, 0.06);
+    mkRock(1.5, 1.9, 1.4, cx - 1.2, 0.95, cz - 2.6, rock2, 0.5);
+    mkRock(1.3, 1.5, 1.3, cx - 1.1, 0.75, cz + 2.7, rock, -0.4);
+    mkRock(1.0, 0.8, 1.0, cx - 1.9, 0.4, cz + 1.4, rock2, 0.3);
+    // the dark maw itself, facing west down the street
+    const maw = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.6, 2.6),
+      new THREE.MeshBasicMaterial({ color: 0x05060a })
+    );
+    maw.rotation.y = -Math.PI / 2;
+    maw.position.set(cx - 1.15, 1.3, cz);
+    g.add(maw);
+    // dirt apron where the road peters out into the hillside
+    const apron = mkGround(4.5, 6.5, cx - 2.6, cz, 0x6b5a45);
+    apron.position.y = 0.015;
+    // solid: the mound can't be walked through (the trigger fires first)
+    this.colliders.push({ x: cx, z: cz, hw: 1.8, hd: 3.4 });
+    this.caveMouthPos = new THREE.Vector3(cx - 1.4, 0, cz);
   },
 
   // Build the rest of the town around the shop: two empty rooms flanking it

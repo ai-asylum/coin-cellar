@@ -156,13 +156,12 @@ export const economyMethods = {
       this._syncStock();
       this._save();
       track("item_sold", { price, grade, combo: this.combo, haggled: true });
-      if (cust.isMayor) this._mayorFromCustomer(cust);
     } else {
       this.combo = 0;
       this.audio.deny();
-      // the Mayor won't take no for an answer during onboarding — put him back
-      // at the head of the counter so the haggle simply reopens
-      if (cust.isMayor) { cust.state = "want"; cust.ready = true; cust.strikes = 0; cust.t = 0; }
+      // the FTUE's scripted first shopper won't take no for an answer — put them
+      // back at the head of the counter so the haggle simply reopens
+      if (cust.scripted) { cust.state = "want"; cust.ready = true; cust.strikes = 0; cust.t = 0; }
     }
   },
 
@@ -186,7 +185,6 @@ export const economyMethods = {
     this._syncStock();
     this._save();
     track("item_sold", { price, grade: "good", combo: 0, haggled: false });
-    if (cust.isMayor) this._mayorFromCustomer(cust);
   },
 
   _saleJuice(price, grade, pos) {
@@ -329,8 +327,8 @@ export const economyMethods = {
       `a ${arch ? arch.name : "new"} family moves in`, 2.8);
     this._save();
     this._syncState();
-    // the Mayor's pointed lot just went up — he drops back by with a word
-    if (this._questArrow && this.shop.lots[i]?.interactPos.equals(this._questArrow.pos))
-      this._mayorAfterRestore();
+    // rebuilding is the player's own call (no quest for it) — but the town's
+    // first family is a moment, so the Mayor drops by with a word of praise
+    if (this.townPop() === 1) this._mayorAfterRestore();
   },
 };

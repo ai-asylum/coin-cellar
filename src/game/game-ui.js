@@ -485,13 +485,11 @@ export const uiMethods = {
       </div>
       <div class="admin-head"><b>${icon("crown")} FTUE jump</b><span>load a tutorial step</span></div>
       <div class="admin-grid">
-        <button data-a="tut:delve">${icon("hole")} 1 · Delve</button>
-        <button data-a="tut:loot">${itemIcon("meat") || icon("swords")} 2 · Loot</button>
-        <button data-a="tut:return">${icon("arrowDown")} 3 · Return</button>
-        <button data-a="tut:stock">${icon("box")} 4 · Stock</button>
-        <button data-a="tut:sell">${icon("speak")} 5 · Sell</button>
-        <button data-a="tut:mayor">${icon("crown")} 6 · Mayor</button>
-        <button data-a="tut:restock">${icon("hole")} 7 · Restock</button>
+        <button data-a="tut:cave">${icon("swords")} 1 · Cave</button>
+        <button data-a="tut:road">${icon("home")} 2 · Road</button>
+        <button data-a="tut:stock">${icon("box")} 3 · Stock</button>
+        <button data-a="tut:sell">${icon("speak")} 4 · Sell</button>
+        <button data-a="tut:delve">${icon("hole")} 5 · Delve</button>
       </div>
       <div class="admin-hints">keys: <b>WASD</b> move · <b>Shift/RMB</b> dash-attack · <b>E/Space</b> interact · <b>B</b> bag · <b>C</b> friends · <b>M</b> mute</div>
     `;
@@ -622,8 +620,11 @@ export const uiMethods = {
     // --- clean tutorial baseline ---------------------------------------------
     this.tutorial = null; // silence any in-flight step transitions during setup
     this._endMayorScene(); // tear down any in-flight Mayor cutscene
-    this._questArrow = null;
-    this._restockNudge = false;
+    this.hud.hideSpeak(); // drop any open bubble (its tap-callback chains old scenes)
+    this._cine = null;
+    this._doorScene = false;
+    this._bagStowed = false;
+    this.shop.doorLocked = false;
     this.gold = 100;
     this.hud.setGold(this.gold, false);
     for (const c of [...this.shop.customers]) this.shop._removeCustomer(c);
@@ -632,86 +633,70 @@ export const uiMethods = {
     for (const s of this.shop.slots) if (s.item) this.shop.unstockSlot(s);
     this._syncStock();
 
-    const wares = ["mushroom", "meat"]; // the FTUE's fixed starter loot
-    const genTutFloor = () => {
-      this.cellarHole = -1;
-      this.dungeon.dispose();
-      this.dungeon.generate(1, this.day * 1000 + Math.floor(Math.random() * 999), true);
+    const wares = ["crystal", "caveshroom", "rathide", "meat", "jelly"]; // the cave haul
+    const toShop = () => {
+      if (this.playerArea !== "shop") {
+        // climbing out of a delve first cleans up its state (lobby, bag, HP)
+        if (this.playerArea !== "cave") this._returnHome();
+        this.playerArea = "shop";
+        this.hud.showBag(false);
+        this.hud.setGoldCorner(false);
+      }
+      this.player.position.copy(this.shop.doorPos);
+      this.player.animator.prevPos.copy(this.player.position);
+      this._snapCamera();
     };
-    const toShop = () => { if (this.playerArea !== "shop") this._returnHome(); };
+    // "inside the shop, haul stowed, keys in hand" — the state most steps build on
+    const insideSetup = (tut) => {
+      toShop();
+      this.tutorial = tut;
+      this._doorScene = true;
+      this._bagStowed = true;
+      this.stash = [...wares];
+      this._syncInv();
+    };
 
     switch (step) {
-      case "delve":
+      case "cave":
+        // replay the whole opening: the cave, the slime kill, the wake-up lines
+        toShop(); // normalize area/HUD state before _tutStart flips it to the cave
+        this.inventory = wares.slice(0, -1); // the jelly arrives via the cinematic
+        this._syncInv();
+        this._tutStart();
+        break;
+
+      case "road":
         toShop();
-        this.tutorial = "delve";
-        this.player.position.copy(this.shop.trapdoorPos).add(_v.set(1.4, 0, 1.0));
-        this.player.animator.prevPos.copy(this.player.position);
-        this._snapCamera();
-        break;
-
-      case "loot":
-        genTutFloor();
-        this.tutorial = "delve"; // _enterDungeon advances delve -> loot
-        this._enterDungeon();
-        break;
-
-      case "return": {
-        genTutFloor();
-        this.tutorial = "return";
-        this._enterDungeon(); // sets area/camera; _tutAdvance("delve") no-ops, so it stays "return"
+        this.tutorial = "shop";
+        this.shop.doorLocked = true;
         this.inventory = [...wares];
         this._syncInv();
-        _v.copy(this.dungeon.stairsPos).add(DUNGEON_ORIGIN);
-        this.player.position.set(_v.x + 1.0, 0, _v.z + 1.0);
+        // stand where the cave spits you out, facing the shop
+        this.player.position.copy(this.shop.caveMouthPos).add(_v.set(-1.9, 0, 0));
+        this.player.heading = -Math.PI / 2;
         this.player.animator.prevPos.copy(this.player.position);
         this._snapCamera();
+        this._tutHint();
         break;
-      }
 
       case "stock":
-        toShop();
-        this.stash = [...wares];
-        this._syncInv();
-        this.tutorial = "stock";
+        insideSetup("stock");
+        this._ensureMayor(this._mayorWatchSpot()).state = "watch";
         this._tutHint();
         break;
 
       case "sell":
-        toShop();
-        this.stash = [...wares];
-        this._syncInv();
-        this.tutorial = "stock";
-        this._stockFromStash(0); // advances stock -> sell + hurries a customer in
+        insideSetup("stock");
+        this._ensureMayor(this._mayorWatchSpot()).state = "watch";
+        this._stockFromStash(0); // advances stock -> sell + brings the shopper in
         break;
 
-      case "mayor":
-        toShop();
-        this.tutorial = null;
-        this._mayorIntro();
-        return; // _mayorIntro opens its own sheet
-
-      case "restock": {
-        // post-restore state: the FTUE proper is done (tutorial null), the
-        // Mayor's target lot is already rebuilt, and the restock nudge is now
-        // steering the player back down for more stock (it clears on the next
-        // delve)
-        toShop();
-        this.shop.doorLocked = false;
-        this.tutorial = null;
-        this._questArrow = null;
-        const lotIdx = this._mayorTargetLot();
-        if (lotIdx >= 0 && !this.shop.lots[lotIdx]?.restored) {
-          this.shop.restoreLot(lotIdx);
-          this.townRestored[lotIdx] = true;
-          this.townResidents.push(this.shop.lots[lotIdx].resident);
-        }
-        this._restockNudge = true;
-        this.player.position.copy(this.shop.trapdoorPos).add(_v.set(1.4, 0, 1.0));
-        this.player.animator.prevPos.copy(this.player.position);
-        this._snapCamera();
-        this.hud.toast(`${icon("hole")} Restock the inventory — head back down to the cellar for more stock`);
+      case "delve":
+        // the send-off: sale done, Mayor gone, arrow pointing down the road at
+        // the cave (the step completes on the first descent into the cellar)
+        insideSetup("delve");
+        this._tutHint();
         break;
-      }
     }
     this._save();
   },

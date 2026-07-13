@@ -1,6 +1,7 @@
-// Delve flow: the trapdoor, the shared cellar lobby and its trapdoor mouths,
-// cellar shortcuts, the pre-delve pack menu, the hole-dive cutscene, entering /
-// leaving dungeons, descending floors and the boss-gate cluster. Attached to
+// Delve flow: the cave's cellar descent, the walk-through between road and
+// cave, the shared cellar lobby and its trapdoor mouths, cellar shortcuts, the
+// pre-delve pack menu, the hole-dive cutscene, entering / leaving dungeons,
+// descending floors and the boss-gate cluster. Attached to
 // Game.prototype via Object.assign, so `this` is the live Game instance. NB:
 // `_snapCamera` stays in game.js (it drives the retained update()/camera
 // offsets) — the methods here reach it through `this` as usual.
@@ -23,11 +24,10 @@ const _v = new THREE.Vector3();
 
 export const dungeonFlowMethods = {
   _delve() {
-    // the guided first day is a one-way trip: once you've hauled up your first
-    // stock, the cellar stays shut so the FTUE can walk you through stocking and
-    // selling before you delve again
+    // the guided first day holds the descent shut until the FTUE has walked
+    // you through selling — the send-off's "delve" step is the first real trip
     if (this.tutorial && this.tutorial !== "delve") {
-      this.hud.toast(`${icon("box")} Finish setting up shop before delving again`);
+      this.hud.toast(`${icon("box")} Finish setting up shop first`);
       return;
     }
     // before dropping down: gear up and pick supplies from the storeroom
@@ -35,24 +35,50 @@ export const dungeonFlowMethods = {
     this._startDelve();
   },
 
-  // Dropping through the trapdoor lands in the shared cellar lobby — the old
-  // tutorial cellar, whose trapdoor mouths are the real dungeon entrances. The
-  // tutorial keeps the old direct drop: a private single-floor cellar on a
-  // random seed, no lobby (cellarHole stays -1 so _enterDungeon never joins one).
+  // The descent at the cave's deepest point drops into the shared cellar
+  // lobby, whose trapdoor mouths are the real dungeon entrances — the player
+  // picks a mouth there, no shortcut straight into dungeon 1.
   _startDelve() {
-    // heading down clears the post-Mayor restock nudge
-    this._restockNudge = false;
-    if (this.tutorial) {
-      this.cellarHole = -1;
-      if (!this.dungeon.active)
-        this.dungeon.generate(1, this.day * 1000 + Math.floor(Math.random() * 999), true);
-      // plunge down the cellar trapdoor into the private tutorial floor
-      this._beginHoleDive(this.shop.trapdoorPos, () => this._enterDungeon());
-      return;
+    this._beginHoleDive(this.cave.descentPos, () => this._enterCellar());
+  },
+
+  // Walk-through travel between the village road and the cave at its east end
+  // (both directions are proximity triggers, no button). Landing spots sit
+  // clear of the opposite trigger so the pair can't ping-pong.
+  _updateCaveTravel() {
+    if (this._holeDive || this._cine || this._respawnT >= 0 || this.gameOver) return;
+    const p = this.player.position;
+    if (this.playerArea === "cave") {
+      if (p.distanceTo(this.cave.exitPos) < 1.25) this._exitCave();
+    } else if (this.playerArea === "shop" && this.shop.caveMouthPos) {
+      if (p.distanceTo(this.shop.caveMouthPos) < 1.5) this._enterCave();
     }
-    // always drop down the shop trapdoor into the shared cellar lobby, then let
-    // the player pick a mouth there — no shortcut straight into dungeon 1
-    this._beginHoleDive(this.shop.trapdoorPos, () => this._enterCellar());
+  },
+
+  _enterCave() {
+    this.playerArea = "cave";
+    this.player.position.copy(this.cave.exitPos).add(_v.set(0, 0, 1.8));
+    this.player.heading = 0; // walking south, into the dark
+    this.player.animator.prevPos.copy(this.player.position);
+    this.hud.showHearts(false);
+    this.hud.showBag(true);
+    this.hud.setGoldCorner(true);
+    this.audio.stairs();
+    this._snapCamera();
+  },
+
+  _exitCave() {
+    this.playerArea = "shop";
+    // step out beside the rocky mouth at the road's east end
+    this.player.position.copy(this.shop.caveMouthPos).add(_v.set(-1.9, 0, 0));
+    this.player.heading = -Math.PI / 2; // face west, down the road
+    this.player.animator.prevPos.copy(this.player.position);
+    this.hud.showBag(false);
+    this.hud.setGoldCorner(false);
+    this.audio.stairs();
+    this._snapCamera();
+    // the FTUE's first walk-out is a beat of its own (banner + the road line)
+    if (this.tutorial === "exit") this._onFtueCaveExit();
   },
 
   _enterCellar() {
@@ -71,6 +97,8 @@ export const dungeonFlowMethods = {
     this._snapCamera();
     this.lobby.join("cellar");
     this.hud.banner(`${icon("hole")} The Cellar`, "", 2.6);
+    // the FTUE's send-off step completes on the first real descent
+    this._tutAdvance("delve");
   },
 
   // Confirm sheet at a cellar mouth's lip. The first is always open; a deeper
@@ -290,7 +318,7 @@ export const dungeonFlowMethods = {
   // A short "jump into the hole" cutscene before the next area loads: the
   // player springs up over the mouth, then plunges down the dark shaft,
   // spinning and shrinking away into the black. Purely cosmetic and local —
-  // used both for the shop's cellar trapdoor and each cellar mouth. `center` is
+  // used both for the cave's cellar descent and each cellar mouth. `center` is
   // the mouth to dive into; `after` runs the real transition once it wraps up.
   _beginHoleDive(center, after) {
     const c = this.player;
@@ -392,7 +420,6 @@ export const dungeonFlowMethods = {
       bossFloor ? (this._hasBossKey() ? "unlock the sealed door" : "find a Brass Key to breach the boss door") : "",
       bossFloor ? 2.6 : 1.6
     );
-    this._tutAdvance("delve");
     track("dungeon_entered", {
       floor: this.dungeon.floor,
       place,
@@ -401,26 +428,29 @@ export const dungeonFlowMethods = {
     });
   },
 
+  // "Go up" from the cellar or a dungeon: climb back out into the cave beside
+  // its descent — the bag deposits itself into the storeroom on the way, and
+  // the walk down the road to the shop is the homecoming.
   _returnHome() {
-    this.playerArea = "shop";
+    this.playerArea = "cave";
     this._floorDesync = false;
     this._pendingLead = null;
     this.lobby.leave();
     this._depositBag();
-    // a trip home patches you up — no day/night rest to do it any more
+    // a trip back up patches you up — no day/night rest to do it any more
     this.hp = this.maxHp;
     this.hud.setHearts(this.hp, this.maxHp);
     this.hud.showHearts(false);
-    this.hud.showBag(false);
+    this.hud.showBag(true);
     this.hud.showGold(true);
-    this.hud.setGoldCorner(false);
+    this.hud.setGoldCorner(true);
     if (this.hud.sheetOpen) this.hud.hideSheet();
-    this.player.position.copy(this.shop.trapdoorPos).add(_v.set(1.2, 0, 0.5));
+    this.player.position.copy(this.cave.descentPos).add(_v.set(0, 0, -1.9));
+    this.player.heading = Math.PI; // facing the daylight, homeward
     this.player.animator.prevPos.copy(this.player.position);
     this.audio.stairs();
     this._snapCamera();
-    this.hud.banner(`${icon("shop")} Back to the shop`, "", 1.4);
-    this._tutAdvance("return");
+    this.hud.banner(`${icon("hole")} Back to the surface`, "", 1.4);
     track("returned_home", { deepest: this.today?.deepest ?? 0, gold: this.gold });
     this._save();
   },

@@ -28,11 +28,15 @@ export const combatMethods = {
   // a foe only counts when the offset to it points the same way as the dash
   // (dot product > 0), so you never snap backwards onto something behind you.
   _nearestEnemyWithin(range, dirX, dirZ) {
-    if (this.playerArea !== "dungeon" || !this.dungeon.active) return null;
+    // in the FTUE cave the only things to snap onto are the ambient rats
+    const targets = this.playerArea === "dungeon" && this.dungeon.active ? this.dungeon.enemies
+      : this.playerArea === "cave" && this.cave ? this.cave.rats
+      : null;
+    if (!targets) return null;
     const p = this.player.position;
     let best = null, bestD = range * range;
-    for (const e of this.dungeon.enemies) {
-      if (e.deadT >= 0) continue;
+    for (const e of targets) {
+      if (e.deadT >= 0 || e.creature.dead) continue;
       const dx = e.creature.position.x - p.x;
       const dz = e.creature.position.z - p.z;
       const d = dx * dx + dz * dz;
@@ -94,6 +98,10 @@ export const combatMethods = {
   // guest sends the hit and lets the host echo it back.
   _dashStrike() {
     if (this._dashT < 0 || !this._dashHitIds) return;
+    if (this.playerArea === "cave" && this.cave) {
+      this.cave.dashHit(this.player);
+      return;
+    }
     if (this.playerArea !== "dungeon" || !this.dungeon.active) return;
     this.dungeon.dashHit(this.player, this._dashDmg, this, {
       crit: this._dashCrit, hitIds: this._dashHitIds,

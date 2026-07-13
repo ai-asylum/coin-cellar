@@ -559,7 +559,9 @@ button { font-family: inherit; cursor: pointer; }
 .dlg-portrait {
   /* sit behind the box (underneath) but tall enough to peek above its top edge */
   position: absolute; left: 26px; bottom: 0; z-index: 1;
-  height: min(42vh, 360px); width: auto;
+  /* fluid: scales with the smaller viewport dimension so it grows on desktop
+     yet stays sensible on short/narrow phones */
+  height: clamp(240px, 52vmin, 520px); width: auto;
   filter: drop-shadow(0 6px 14px rgba(30, 16, 4, 0.45));
   animation: portraitin 0.28s ease-out; pointer-events: none;
 }
@@ -572,12 +574,13 @@ button { font-family: inherit; cursor: pointer; }
   padding: 12px 16px 10px; animation: portraitin 0.24s ease-out;
 }
 .dlg-name {
-  font-size: 14px; font-weight: 900; letter-spacing: 0.4px; text-transform: uppercase;
+  font-size: clamp(15px, 2.2vmin, 24px); font-weight: 900; letter-spacing: 0.4px; text-transform: uppercase;
   color: var(--wood-dark); margin-bottom: 4px;
 }
-.dlg-text { font-size: 17px; font-weight: 700; color: var(--ink); line-height: 1.35; min-height: 24px; }
+/* fluid body text: bigger baseline, scales with the viewport for mobile/desktop */
+.dlg-text { font-size: clamp(19px, 3.4vmin, 34px); font-weight: 700; color: var(--ink); line-height: 1.35; min-height: 24px; }
 .dlg-cta {
-  margin-top: 8px; font-size: 12px; font-weight: 800; color: var(--wood);
+  margin-top: 8px; font-size: clamp(13px, 1.8vmin, 20px); font-weight: 800; color: var(--wood);
   text-align: right; opacity: 0.85; animation: dlgnext 1.1s ease-in-out infinite;
 }
 /* nudge the "▸ next" hint toward the right edge, as if sliding off-screen */
@@ -587,8 +590,7 @@ button { font-family: inherit; cursor: pointer; }
 }
 @media (max-width: 720px) {
   #dialog { height: 32vh; min-height: 150px; }
-  .dlg-portrait { left: 14px; height: min(34vh, 260px); }
-  .dlg-text { font-size: 15px; }
+  .dlg-portrait { left: 14px; }
 }
 .hg-capitalism {
   font-size: 22px; font-weight: 900; color: var(--wood-dark);

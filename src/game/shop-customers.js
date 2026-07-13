@@ -18,8 +18,9 @@ export const customerMethods = {
   // who shops here). Runs on the host regardless of where the player is, so
   // trade — and passive plain-table income — keeps ticking over while you delve.
   _pumpFlow(dt) {
-    // During the first-run tutorial the crowd is hand-scripted: the one and only
-    // customer is the Mayor (see spawnMayorCustomer), so hold the auto-flow.
+    // During the first-run tutorial the crowd is hand-scripted: the one and
+    // only customer is the FTUE's first shopper (see spawnScriptedCustomer),
+    // so hold the auto-flow.
     if (this.game.tutorial) return;
     if (this.stockedCount() === 0 || this.customers.length >= MAX_CUSTOMERS) return;
     this._spawnT -= dt;
@@ -37,24 +38,24 @@ export const customerMethods = {
     this._spawnT = Math.min(this._spawnT, delay);
   },
 
-  // The FTUE's scripted first shopper: the Mayor himself, in disguise as an
-  // ordinary customer. He walks in, buys the player's first item, and — once
-  // the sale lands — drops the act and reveals who he is (see _mayorFromCustomer).
-  // Built with the Mayor's fixed variant so his body matches the dialogue bust,
-  // forced to buy, and given endless patience so onboarding can't stall out.
-  spawnMayorCustomer(variant) {
+  // The FTUE's scripted first shopper: an ordinary villager who walks in the
+  // moment the first table is stocked, makes a beeline for it, and always
+  // commits (see _decide's mustBuy) — a plain-table purchase at sticker price,
+  // so the player's first sale simply happens before their eyes. Haggling
+  // waits for the vitrine. Endless patience so onboarding can't stall out.
+  spawnScriptedCustomer(seed = 4242) {
     const game = this.game;
-    const creature = new BlockyCreature(variant, { height: 1.5 });
+    const creature = new BlockyCreature(variantForSeed(seed), { height: 1.5 });
     creature.position.set(-this.streetHalfX, 0, this.streetWalkZ);
     creature.heading = Math.PI / 2;
     this.group.add(creature);
     const cust = {
       id: game.net.newId(),
-      seed: 4242,
+      seed,
       creature,
       arch: ARCHETYPES[1] || ARCHETYPES[0],
       mode: "buy",
-      isMayor: true,
+      scripted: true,
       sellItem: null,
       minSell: 0,
       sellSpot: new THREE.Vector3(0, 0, 1.2),
@@ -78,15 +79,6 @@ export const customerMethods = {
     this.customers.push(cust);
     game.audio.doorbell();
     return cust;
-  },
-
-  // Hand a customer's body over to a scripted scene (the Mayor cutscene): clear
-  // their emote and pull them out of the shopper sim, but leave the creature in
-  // the world for the caller to drive. Unlike _removeCustomer it never disposes.
-  detachCustomer(cust) {
-    this._clearEmote(cust);
-    this.customers = this.customers.filter((x) => x !== cust);
-    return cust.creature;
   },
 
   // Cosmetic pedestrians that mill about the whole street — not just a single

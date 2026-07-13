@@ -173,8 +173,6 @@ export class Shop {
 
   // ------------------------------------------------------------ customers
   update(dt, elapsed) {
-    // idle slot sparkle
-    this.portalGlow.material.opacity = 0.35 + Math.sin(elapsed * 2.5) * 0.15;
     for (const s of this.shafts) s.userData.update(dt, elapsed);
     this._updateLighting(dt);
 
@@ -228,28 +226,6 @@ export class Shop {
       }
     }
 
-    // The cellar trapdoor stands open all day (decoupled from the shopfront,
-    // which trades continuously) so you can drop down whenever you like.
-    this._trapAngle += (1 - this._trapAngle) * Math.min(1, dt * 5);
-    if (this.trapLid) this.trapLid.rotation.z = this._trapAngle * 1.9; // swings up to lean on the left wall
-    this.trapdoorOpen = this._trapAngle > 0.5;
-    // the glowing shaft below only shows once the lid's cracked open
-    this.portalGlow.visible = this._trapAngle > 0.06;
-
-    // pulse the interact-affordance rings and gate them on whether that spot is
-    // actually usable right now: the trapdoor while the cellar's open, the doors
-    // while they're shut (an open, customer-filled doorway needs no prompt).
-    const pulse = Math.sin(elapsed * 3);
-    // once the player's close enough to trigger the interact ring on this spot,
-    // hide our faint hint donut so the two rings don't stack.
-    const hl = this.game.highlight;
-    const hlOn = (p) => hl && hl.visible && hl.position.distanceTo(p) < 1.2;
-    if (this.trapHint) {
-      this.trapHint.visible = this.trapdoorOpen && !hlOn(this.trapdoorPos);
-      this.trapHint.material.opacity = 0.16 + pulse * 0.08;
-      const s = 1 + pulse * 0.08;
-      this.trapHint.scale.set(s, 1, s);
-    }
     // the doorway only blocks the player once it's actually shut (no customers
     // left to path out through it)
     const hasDoorCollider = this.colliders.includes(this._doorCollider);
@@ -280,8 +256,9 @@ export class Shop {
     const game = this.game;
     const eng = game.engine;
 
-    // resolve the target palette for the current place
-    const p = game.playerArea === "dungeon" ? DUNGEON_PAL : SHOP_PAL;
+    // resolve the target palette for the current place (the FTUE cave shares
+    // the dungeon's moody underground look)
+    const p = game.playerArea === "dungeon" || game.playerArea === "cave" ? DUNGEON_PAL : SHOP_PAL;
     _tSky.copy(p.sky); _tGround.copy(p.ground); _tSun.copy(p.sun); _tBg.copy(p.bg); _tShaft.copy(p.shaft);
     const hemiI = p.hemiI, sunI = p.sunI;
 

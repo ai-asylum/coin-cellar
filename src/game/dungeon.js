@@ -67,8 +67,10 @@ export class Dungeon {
     const isBoss = !tutorial && isBossFloor(floorN);
     this.isBoss = isBoss;
 
-    // --- grid: non-overlapping rooms linked by wide L-shaped corridors
-    const GW = 25, GH = isBoss ? 30 : 24;
+    // --- grid: non-overlapping rooms linked by wide L-shaped corridors.
+    // The grid runs tall on purpose: the game is played portrait on mobile, so
+    // floors sprawl along the screen's long (y) axis rather than across it.
+    const GW = 18, GH = isBoss ? 40 : 32;
     // boss arena rectangle + its 2-wide doorway (only meaningful on the boss floor)
     const BW = 9, BH = 6, BX = Math.floor((GW - BW) / 2), BY = 1;
     const gateX = BX + Math.floor(BW / 2) - 1, gateY = BY + BH;
@@ -87,8 +89,9 @@ export class Dungeon {
     const nRooms = 8 + Math.min(4, Math.floor(floorN / 2)) + Math.floor(r() * 3);
     // rejection-sample room rects that keep a 1-cell gap from their neighbours
     for (let tries = 0; rooms.length < nRooms && tries < nRooms * 14; tries++) {
+      // rooms lean taller than wide to match the portrait grid
       const w = 3 + Math.floor(r() * 3);
-      const h = 3 + Math.floor(r() * 3);
+      const h = 3 + Math.floor(r() * 4);
       const x = 1 + Math.floor(r() * (GW - w - 2));
       const y = yMin + Math.floor(r() * (GH - h - yMin - 1));
       const overlaps = rooms.some((o) =>
