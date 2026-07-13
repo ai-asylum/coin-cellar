@@ -12,7 +12,7 @@ import { makeLightShaft } from "../core/godrays.js";
 import { rng } from "../core/engine.js";
 import { FLOORS_PER_DUNGEON } from "./dungeon.js";
 import { DEFAULT_THEME } from "./dungeon-data.js";
-import { CELL, makeStairs, makeDescent, makeFloorGeometry, buildAssetFloor, buildAssetWalls, scatterAssetProps } from "./dungeon-geometry.js";
+import { CELL, makeStairs, makeDescent, makeFloorGeometry, buildAssetFloor, buildAssetWalls, scatterAssetProps, modelCollider } from "./dungeon-geometry.js";
 import { scatterDungeonDecor } from "./decor.js";
 import { dungeonAssetsReady, dungeonPalette } from "./dungeon-assets.js";
 
@@ -141,6 +141,7 @@ export class Cellar {
     stairs.updateMatrixWorld(true);
     const sb = new THREE.Box3().setFromObject(stairs);
     stairs.position.x += exitLocal.x - CELL / 2 - sb.min.x; // top step meets the wall
+    this.colliders.push(modelCollider(stairs, CELLAR_ORIGIN));
     this.group.add(stairs);
     const homeShaft = makeLightShaft({ color: 0xffd9a0, length: 4.6, topWidth: 0.55, bottomWidth: 2.4, opacity: 0.34, tilt: 0.24, spin: 1.2, motes: 12 });
     homeShaft.position.set(exitLocal.x, 3.4, exitLocal.z);
@@ -158,6 +159,7 @@ export class Cellar {
         // flush (no lift) so the closed grate lid swings clear of the steps
         const descent = makeDescent(0.02);
         descent.position.copy(local);
+        this.colliders.push(modelCollider(descent, CELLAR_ORIGIN));
         this.group.add(descent);
       } else {
         // no kit → no cut-out cell; keep the old flat dark mouth

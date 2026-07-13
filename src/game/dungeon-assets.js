@@ -26,7 +26,7 @@ const FILES = {
   key: "key",
   brazier: "torch_lit", floorTorch: "torch_lit", wallTorch: "torch_mounted",
   pillar: "pillar", crates: "crates_stacked", rubble: "rubble_large",
-  table: "table_medium", coins: "coin_stack_large", banner: "banner_red",
+  table: "table_medium", banner: "banner_red",
 };
 
 // kit authored on a 4u grid; CELL (dungeon-geometry) is 2.4 → 2.4/4 = 0.6

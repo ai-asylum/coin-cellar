@@ -254,6 +254,9 @@ export const buildMethods = {
     lidPivot.add(pull);
     g.add(lidPivot);
     this.trapLid = lidPivot;
+    // meshes a click can land on to drop into the cellar: the hole, its rim,
+    // the glow shaft and the hinged lid (see Game._shopPick)
+    this.trapTargets = [trap, ring, this.portalGlow, lidPivot];
     // 0 = shut (flat over the hole), 1 = flung fully open. Doors start closed,
     // so the cellar starts open; snap the lid + glow to match on the first tick.
     this._trapAngle = 1;

@@ -179,6 +179,16 @@ export class Game {
     this.remote = null; // {creature, buf:[{t,x,z,h}], area}
     this.highlight = this._makeHighlight();
 
+    // click-to-interact in the shop: a left click straight onto a display slot,
+    // a customer with a deal, or the cellar trapdoor opens it without walking
+    // up. The raw screen point is stashed here and resolved in _updatePlayer.
+    this._ray = new THREE.Raycaster();
+    this._pendingClick = null;
+    const clickArea = document.getElementById("app");
+    if (clickArea) clickArea.addEventListener("mousedown", (e) => {
+      if (e.button === 0) this._pendingClick = { x: e.clientX, y: e.clientY };
+    });
+
     this._wireHud();
     this._initFullscreenGate();
     this._initLandscapeLock();
@@ -402,7 +412,19 @@ export class Game {
     if (act.focus && act.hint && !sheetBlocked && !this.gameOver)
       this.hud.interactHint(act.focus, act.hint, this.input.isTouch ? "" : "E");
     else this.hud.hideInteractHint();
-    if (!sheetBlocked && this._dashT < 0) {
+    // direct click-to-interact (shop only): a left click that lands on a display
+    // slot, a customer with a deal, or the cellar trapdoor opens it straight
+    // away — no walking up. Handled here so it can swallow this frame's press
+    // and keep the proximity action below from firing on top of it.
+    let clickHandled = false;
+    if (this._pendingClick) {
+      if (this.playerArea === "shop" && !sheetBlocked && !this.gameOver && this._dashT < 0) {
+        const tgt = this._shopPick(this._pendingClick.x, this._pendingClick.y);
+        if (tgt) { this._doShopClick(tgt); clickHandled = true; }
+      }
+      this._pendingClick = null;
+    }
+    if (!sheetBlocked && this._dashT < 0 && !clickHandled) {
       // E / interact button: fire the context action (portal, stairs, chest, …)
       if (this.input.interactEdge && hasInteract && act.fn) act.fn();
       // primary button / Space / click acts only above ground — while delving it
@@ -663,6 +685,82 @@ export class Game {
       if (d < bd) { bd = d; best = slot; }
     }
     return best;
+  }
+
+  // Raycast a shop click (screen point) against the interactable fixtures and
+  // return what it hit: a display `slot`, a `customer` you can deal with, or the
+  // `trapdoor`. Null when the click misses everything actionable.
+  _shopPick(clientX, clientY) {
+    const shop = this.shop;
+    if (!shop) return null;
+    const local = viewport.toLocal(clientX, clientY);
+    _ndc.set((local.x / viewport.w) * 2 - 1, -((local.y / viewport.h) * 2 - 1));
+    this._ray.setFromCamera(_ndc, this.engine.camera);
+
+    // candidate roots paired with what they represent; we intersect them all
+    // and map the nearest hit back through its ancestry to the owning fixture.
+    const pairs = [];
+    for (const cust of shop.customers) {
+      const dealable = (cust.state === "want" && cust.slot?.item) ||
+        (cust.state === "offer" && cust.sellItem);
+      if (dealable && cust.creature) pairs.push([cust.creature, { type: "customer", cust }]);
+    }
+    if (shop.trapTargets) for (const o of shop.trapTargets) pairs.push([o, { type: "trapdoor" }]);
+    for (const table of shop.tables) pairs.push([table.group, { type: "table", table }]);
+    for (const slot of shop.slots) if (slot.mesh) pairs.push([slot.mesh, { type: "slot", slot }]);
+
+    const objs = pairs.map((p) => p[0]);
+    const hits = this._ray.intersectObjects(objs, true);
+    if (!hits.length) return null;
+    const hit = hits[0];
+    let meta = null;
+    for (let o = hit.object; o && !meta; o = o.parent) {
+      const idx = objs.indexOf(o);
+      if (idx >= 0) meta = pairs[idx][1];
+    }
+    if (!meta) return null;
+    // a click on a table body resolves to the nearest slot on that table
+    if (meta.type === "table") {
+      let best = null, bd = Infinity;
+      for (const s of meta.table.slots) {
+        const d = (s.pos.x - hit.point.x) ** 2 + (s.pos.z - hit.point.z) ** 2;
+        if (d < bd) { bd = d; best = s; }
+      }
+      return best ? { type: "slot", slot: best } : null;
+    }
+    return meta;
+  }
+
+  // Run the interaction for a clicked shop fixture — mirrors the proximity
+  // context action, so clicking a slot / customer / trapdoor does exactly what
+  // walking up and pressing E would.
+  _doShopClick(target) {
+    if (target.type === "trapdoor") {
+      const tutBlocksCellar = this.tutorial && this.tutorial !== "delve";
+      if (tutBlocksCellar || !this.shop.trapdoorOpen) return;
+      this._delve();
+      return;
+    }
+    if (target.type === "customer") {
+      const cust = target.cust;
+      if (cust.state === "want" && cust.slot?.item) this._haggle(cust);
+      else if (cust.state === "offer" && cust.sellItem) this._buyFrom(cust);
+      return;
+    }
+    if (target.type === "slot") {
+      const slot = target.slot;
+      const table = slot.table;
+      if (table && !table.repaired) {
+        // only offer the repair once the tutorial's first house is up (matches
+        // the proximity gate in _contextAction)
+        if (this.townPop() > 0) this._repairTable(this.shop.tables.indexOf(table));
+        return;
+      }
+      if (slot.disabled) return;
+      if (slot.item) this._replaceMenu(slot);
+      else if (this.stash.length > 0) this._placeMenu(slot);
+      else this.hud.toast("Storeroom's empty — delve for stock.");
+    }
   }
 
   // ================================================================ combat
@@ -1035,6 +1133,7 @@ const PICKUP_PULL_MAX = 16;
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _focus = new THREE.Vector3();
+const _ndc = new THREE.Vector2();
 const _camShop = new THREE.Vector3(0, 10.2, 8.6);
 const _camDungeon = new THREE.Vector3(0, 8.4, 8.2);
 // the cellar lobby is the tutorial cellar — frame it exactly like a dungeon floor

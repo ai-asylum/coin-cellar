@@ -315,15 +315,15 @@ export function modelCollider(mesh, origin = _ORIGIN0, shrink = 0.85) {
 // Returns a record per placed prop — its mesh, world-space collider, smash-burst
 // colour and whether it's structural — so the caller can fold the colliders into
 // the floor's list and wire the smashable ones into the decor pipeline.
-const _CLUTTER = ["barrel", "barrelSmall", "box", "boxSmall", "crates", "table", "rubble", "coins", "pillar", "floorTorch"];
+const _CLUTTER = ["barrel", "barrelSmall", "box", "boxSmall", "crates", "table", "rubble", "pillar", "floorTorch"];
 // structural pieces hold the ceiling up: struck, they spark and clank but never
 // break. Everything else in the clutter list smashes like the billboard decor.
 const _STRUCTURAL = new Set(["pillar", "floorTorch"]);
-// smash-burst colour per prop (wood browns, gold for the coin stack, stone grey)
+// smash-burst colour per prop (wood browns, stone grey)
 const _KIT_BURST = {
   barrel: 0x8a5a33, barrelSmall: 0x8a5a33, table: 0x8a5a33,
   box: 0xa8794a, boxSmall: 0xa8794a, crates: 0xa8794a,
-  rubble: 0xa9a2b4, coins: 0xf0c04a,
+  rubble: 0xa9a2b4,
 };
 export function scatterAssetProps(group, r, rooms, cellPos, opts = {}) {
   if (!dungeonAssetsReady()) return [];

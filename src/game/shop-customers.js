@@ -188,7 +188,9 @@ export const customerMethods = {
     // where a lot of the profit lives. During the first-run tutorial, though,
     // hold everyone to buyers so a brand-new player learns to *sell* before
     // they're ever offered something to buy.
-    const mode = !game.tutorial && Math.random() < SELLER_CHANCE ? "sell" : "buy";
+    // Sellers temporarily disabled: everyone arrives as a buyer.
+    // const mode = !game.tutorial && Math.random() < SELLER_CHANCE ? "sell" : "buy";
+    const mode = "buy";
     let sellItem = null, minSell = 0;
     if (mode === "sell") {
       // Sellers bring better goods as the shop grows: the *lowest* tier they'll

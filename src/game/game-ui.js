@@ -246,27 +246,49 @@ export const uiMethods = {
     });
   },
 
+  // Shared builder for the two per-table storeroom menus. "Place" (empty table)
+  // and "Replace" (occupied table) differ only in the title, an optional
+  // "take back" row for the item already on show, and which action a storeroom
+  // pick triggers. The sheet floats right above the slot so the choices land
+  // under the cursor instead of at the bottom of the screen.
+  _tableMenu(slot, { title, shownItem, onPick, onTakeBack }) {
+    const slotIdx = this.shop.slots.indexOf(slot);
+    const shownRow = shownItem
+      ? `<div class="inv-grid swap-grid">
+          <button class="inv-item shown ti-${shownItem.tier}" id="take-back">${itemIcon(shownItem.icon)}<small>${shownItem.name}</small><span>take back</span></button>
+        </div>`
+      : "";
+    const el = this.hud.showSheet(`
+      <div class="sheet-title"><span class="big-emoji">${icon("box")}</span>
+        <div><b>${title}</b></div>
+        <button class="icon-btn" id="bag-close">${icon("close")}</button></div>
+      ${shownRow}
+      <div class="inv-grid swap-grid">${this._stashRows() || "<small class='empty'>storeroom empty — nothing to swap in</small>"}</div>
+    `, "sheet-card");
+    el.querySelector("#bag-close").onclick = () => this.hud.hideSheet();
+    if (onTakeBack) {
+      el.querySelector("#take-back").onclick = () => {
+        onTakeBack();
+        this.hud.hideSheet();
+      };
+    }
+    el.querySelectorAll(".inv-grid .inv-item[data-i]").forEach((btn) => {
+      btn.onclick = () => {
+        onPick(Number(btn.dataset.i), slotIdx);
+        this.hud.hideSheet();
+      };
+    });
+    this.hud.anchorSheetAbove(slot.pos);
+  },
+
   // Placement menu opened by the context action at a specific empty table.
   _placeMenu(slot) {
     if (this.hud.sheetOpen) return this.hud.hideSheet();
     if (this.stash.length === 0) return this.hud.toast("Storeroom is empty — go delve!");
-    const slotIdx = this.shop.slots.indexOf(slot);
-    const el = this.hud.showSheet(`
-      <div class="sheet-title"><span class="big-emoji">${icon("box")}</span>
-        <div><b>Place on this table</b></div>
-        <button class="icon-btn" id="bag-close">${icon("close")}</button></div>
-      <div class="inv-grid">${this._stashRows()}</div>
-    `, "sheet-card");
-    el.querySelector("#bag-close").onclick = () => this.hud.hideSheet();
-    el.querySelectorAll(".inv-item").forEach((btn) => {
-      btn.onclick = () => {
-        this._stockFromStash(Number(btn.dataset.i), slotIdx);
-        this.hud.hideSheet();
-      };
+    this._tableMenu(slot, {
+      title: "Place on this table",
+      onPick: (i, slotIdx) => this._stockFromStash(i, slotIdx),
     });
-    // same as the replace menu: float the choices right above the slot so the
-    // storeroom picks land under the cursor.
-    this.hud.anchorSheetAbove(slot.pos);
   },
 
   // Opened by the context action at an occupied table: pick a storeroom item
@@ -274,31 +296,12 @@ export const uiMethods = {
   // already on show to pull it off the table entirely.
   _replaceMenu(slot) {
     if (this.hud.sheetOpen) return this.hud.hideSheet();
-    const slotIdx = this.shop.slots.indexOf(slot);
-    const cur = ITEMS[slot.item];
-    const el = this.hud.showSheet(`
-      <div class="sheet-title"><span class="big-emoji">${icon("box")}</span>
-        <div><b>Replace on this table</b><br/><small>tap a storeroom item to swap it in, or the shown item to take it back</small></div>
-        <button class="icon-btn" id="bag-close">${icon("close")}</button></div>
-      <div class="inv-grid">
-        <button class="inv-item shown ti-${cur.tier}" id="take-back">${itemIcon(cur.icon)}<small>${cur.name}</small><span>take back</span></button>
-      </div>
-      <div class="inv-grid">${this._stashRows() || "<small class='empty'>storeroom empty — nothing to swap in</small>"}</div>
-    `, "sheet-card");
-    el.querySelector("#bag-close").onclick = () => this.hud.hideSheet();
-    el.querySelector("#take-back").onclick = () => {
-      this._unstock(slot);
-      this.hud.hideSheet();
-    };
-    el.querySelectorAll(".inv-grid .inv-item[data-i]").forEach((btn) => {
-      btn.onclick = () => {
-        this._swapFromStash(Number(btn.dataset.i), slotIdx);
-        this.hud.hideSheet();
-      };
+    this._tableMenu(slot, {
+      title: "Replace on this table",
+      shownItem: ITEMS[slot.item],
+      onPick: (i, slotIdx) => this._swapFromStash(i, slotIdx),
+      onTakeBack: () => this._unstock(slot),
     });
-    // pop the menu open right above the table slot being edited so the swap
-    // choices land under the cursor instead of at the bottom of the screen.
-    this.hud.anchorSheetAbove(slot.pos);
   },
 
   // Swap the item on a filled table for one from the storeroom: the displayed

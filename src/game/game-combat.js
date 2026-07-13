@@ -23,9 +23,11 @@ const SAFE_ZONE_FLOOR = 3;
 const AUTOAIM_RANGE = 3.2;
 
 export const combatMethods = {
-  // Offset to the nearest living foe within `range` (or null if the floor's
-  // clear nearby). Used to bend the dash onto a target so it auto-aims.
-  _nearestEnemyWithin(range) {
+  // Offset to the nearest living foe within `range` that lies in front of the
+  // dash (or null if none). `dirX/dirZ` is the intended (unit) dash direction;
+  // a foe only counts when the offset to it points the same way as the dash
+  // (dot product > 0), so you never snap backwards onto something behind you.
+  _nearestEnemyWithin(range, dirX, dirZ) {
     if (this.playerArea !== "dungeon" || !this.dungeon.active) return null;
     const p = this.player.position;
     let best = null, bestD = range * range;
@@ -34,7 +36,10 @@ export const combatMethods = {
       const dx = e.creature.position.x - p.x;
       const dz = e.creature.position.z - p.z;
       const d = dx * dx + dz * dz;
-      if (d < bestD && d > 0.0001) { bestD = d; best = { dx, dz, dist: Math.sqrt(d) }; }
+      if (d >= bestD || d <= 0.0001) continue;
+      // only aim at foes ahead of the dash direction
+      if (dx * dirX + dz * dirZ <= 0) continue;
+      bestD = d; best = { dx, dz, dist: Math.sqrt(d) };
     }
     return best;
   },
@@ -57,9 +62,10 @@ export const combatMethods = {
       dz = Math.cos(this.player.heading);
     }
     // auto-aim: snap the lunge onto the nearest foe ONLY when one is close enough
-    // for the dash to actually reach it (the lunge travels ~2 units). A foe
-    // further out is left alone so you keep dashing where you're steering.
-    const target = this._nearestEnemyWithin(AUTOAIM_RANGE);
+    // for the dash to actually reach it (the lunge travels ~2 units) AND it sits
+    // in front of the way you're dashing (dot product). A foe further out or
+    // behind you is left alone so you keep dashing where you're steering.
+    const target = this._nearestEnemyWithin(AUTOAIM_RANGE, dx, dz);
     if (target) { dx = target.dx / target.dist; dz = target.dz / target.dist; }
 
     this._dashDX = dx;

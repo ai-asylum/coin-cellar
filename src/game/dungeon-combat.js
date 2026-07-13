@@ -396,7 +396,12 @@ export const combatMethods = {
     const g = new THREE.Group();
     g.position.set(lx, 0, lz);
     // the stairs themselves, over a glowing disc with a brighter outer ring
-    g.add(makeStairs(descend ? "down" : "up"));
+    const stairMesh = makeStairs(descend ? "down" : "up");
+    g.add(stairMesh);
+    // solid footprint fitted to the flight (not the wide glow disc), so you
+    // brush against the stairs and step up to them to travel
+    const stairsCollider = modelCollider(stairMesh, DUNGEON_ORIGIN);
+    this.colliders.push(stairsCollider);
     const disc = new THREE.Mesh(
       new THREE.CircleGeometry(1.05, 28).rotateX(-Math.PI / 2),
       new THREE.MeshBasicMaterial({ color: discColor, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false })
@@ -414,7 +419,7 @@ export const combatMethods = {
     shaft.position.set(lx, 3.4, lz);
     this.group.add(shaft);
     this.shafts.push(shaft);
-    this.bossStairs = { pos: new THREE.Vector3(wx, 0, wz), mesh: g, disc, ring, descend };
+    this.bossStairs = { pos: new THREE.Vector3(wx, 0, wz), mesh: g, disc, ring, descend, collider: stairsCollider };
   },
 
   /** x/z are WORLD coordinates. `opts.flyFrom` ({x,z}) makes the drop arc out
@@ -458,6 +463,11 @@ export const combatMethods = {
     if (!this.stairsHidden) return;
     this.stairsHidden = false;
     for (const mesh of this._stairsMeshes || []) mesh.visible = true;
+    // the flight is solid now that it's back — land its held-back collider
+    if (this._hiddenStairsCollider) {
+      this.colliders.push(this._hiddenStairsCollider);
+      this._hiddenStairsCollider = null;
+    }
   },
 
   openChest(chest) {

@@ -272,6 +272,7 @@ export class Dungeon {
       // lobby's trapdoor mouths — see makeDescent)
       const descent = makeDescent();
       descent.position.copy(this.stairsPos);
+      this.colliders.push(modelCollider(descent, DUNGEON_ORIGIN));
       this.group.add(descent);
     }
 
@@ -285,6 +286,11 @@ export class Dungeon {
     const upStairs = makeStairs("up");
     upStairs.position.copy(this.upStairsPos);
     if (tutorial) upStairs.rotation.y = -Math.PI / 2; // rise toward the far wall
+    const upStairsCollider = modelCollider(upStairs, DUNGEON_ORIGIN);
+    // the tutorial flight is inert & invisible until the chest is cracked, so
+    // its collider stays out of play until revealStairs() lands it
+    if (tutorial) this._hiddenStairsCollider = upStairsCollider;
+    else this.colliders.push(upStairsCollider);
     this.group.add(upStairs);
     const upGlow = new THREE.Mesh(
       new THREE.CircleGeometry(0.7, 20).rotateX(-Math.PI / 2),
