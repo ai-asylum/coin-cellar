@@ -29,7 +29,7 @@ const ROOM = { x: 1, y: 1, w: 4, h: 7, cx: 2, cy: 4 };
 const EXIT_CELL = { x: 2, y: 8 }; // the daylight gap in the south rim
 const SPAWN_CELL = { x: 2, y: 2 }; // the FTUE wake-up spot, facing the light
 const DESCENT_CELL = { x: 2, y: 1 }; // the sunk stairs down to the cellar lobby
-const SOLID_NOOKS = [[1, 7], [4, 7], [4, 3], [1, 4]]; // corners left un-dug
+const SOLID_NOOKS = [[4, 3], [1, 4]]; // mid-tunnel bulges left un-dug
 const cellPos = (x, y) => new THREE.Vector3((x - GW / 2 + 0.5) * CELL, 0, (y - GH / 2 + 0.5) * CELL);
 
 export class Cave {
@@ -66,6 +66,18 @@ export class Cave {
       for (let x = ROOM.x; x < ROOM.x + ROOM.w; x++) open[y][x] = true;
     for (const [x, y] of SOLID_NOOKS) open[y][x] = false;
     open[EXIT_CELL.y][EXIT_CELL.x] = true;
+    // the south rim (the daylight side) would stand between the camera and the
+    // room, so its wall MESHES are skipped entirely — the fence stays (the
+    // colliders below still read the real `open` grid), but nothing ever
+    // blocks the view in. The wall builders get their own taller grid where
+    // the room's width runs open through the rim and a few phantom rows
+    // beyond it: the side walls continue south framing the daylight, and the
+    // grid-edge closing strip lands far below the camera frame.
+    const wallGH = GH + 3;
+    const wallOpen = Array.from({ length: wallGH }, (_, y) =>
+      y < GH ? [...open[y]] : new Array(GW).fill(false));
+    for (let y = GH - 1; y < wallGH; y++)
+      for (let x = ROOM.x; x < ROOM.x + ROOM.w; x++) wallOpen[y][x] = true;
 
     // --- floor + walls: the dungeon-kit recipe with the Rat Warren's burrowed
     // browns, so the cave already speaks the dungeon's visual language
@@ -80,7 +92,7 @@ export class Cave {
       this.group.add(buildAssetFloor(open, GW, GH, cellPos, floorTint, floorHoles));
       // own occluder material (the dungeon re-tints the shared one every floor)
       this._wallMat = makeToonMaterial({ map: dungeonPalette(), rim: 0, occlude: true });
-      const walls = buildAssetWalls(open, GW, GH, cellPos, wallTint, this._wallMat);
+      const walls = buildAssetWalls(wallOpen, GW, wallGH, cellPos, wallTint, this._wallMat);
       this.group.add(walls.mesh);
     } else {
       this.group.add(new THREE.Mesh(
@@ -89,12 +101,12 @@ export class Cave {
       ));
       this._wallMat = makeToonMaterial({ color: new THREE.Color(palette[1]).multiplyScalar(0.55).getHex(), rim: 0, occlude: true });
       const wallCellsFallback = [];
-      for (let y = 0; y < GH; y++)
+      for (let y = 0; y < wallGH; y++)
         for (let x = 0; x < GW; x++) {
-          if (open[y][x]) continue;
+          if (wallOpen[y][x]) continue;
           let touches = false;
           for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]])
-            if (open[y + dy]?.[x + dx]) touches = true;
+            if (wallOpen[y + dy]?.[x + dx]) touches = true;
           if (touches) wallCellsFallback.push([x, y]);
         }
       const wallGeo = new THREE.BoxGeometry(CELL, 1.7, CELL);
@@ -233,7 +245,9 @@ export class Cave {
     if (this.game.playerArea !== "cave") return;
     feedOccluder(this._wallMat, this.game.player, this.game.engine.camera);
     for (const s of this.shafts) s.userData.update(dt, elapsed);
-    this.glare.material.opacity = 0.75 + Math.sin(elapsed * 1.7) * 0.12;
+    // with the south wall gone the glare shows face-on — keep it soft enough
+    // that the floor still reads through the daylight
+    this.glare.material.opacity = 0.5 + Math.sin(elapsed * 1.7) * 0.1;
 
     // the slime idles (and, once the cinematic fells it, chars + dissolves)
     if (this.slime) {
