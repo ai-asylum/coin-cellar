@@ -1,0 +1,2009 @@
+{
+  "version": 1,
+  "tables": [
+    {
+      "x": -4.22,
+      "z": -0.94,
+      "yaw": 1.56,
+      "cost": 200
+    },
+    {
+      "x": -4.18,
+      "z": 1.72,
+      "yaw": 1.56,
+      "cost": 200
+    },
+    {
+      "x": -0.38,
+      "z": 1.69,
+      "yaw": 1.56,
+      "cost": 200
+    },
+    {
+      "x": -0.3,
+      "z": -0.82,
+      "yaw": 1.56,
+      "cost": 200
+    }
+  ],
+  "fancy": {
+    "x": 2.6,
+    "z": -2.8,
+    "yaw": 0,
+    "cost": 1000
+  },
+  "lots": [
+    {
+      "x": -4.8,
+      "z": -14.9,
+      "yaw": 0,
+      "kind": "plot",
+      "cost": 100,
+      "resident": 1,
+      "before": [
+        {
+          "shape": "ground",
+          "size": [
+            3.8,
+            2.8
+          ],
+          "pos": [
+            0,
+            0.02,
+            0
+          ],
+          "color": "#6b5a45"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.12,
+            0.9,
+            0.12
+          ],
+          "pos": [
+            -1.7,
+            0.45,
+            1.3
+          ],
+          "color": "#8a6a44"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.12,
+            0.9,
+            0.12
+          ],
+          "pos": [
+            -0.85,
+            0.45,
+            1.3
+          ],
+          "color": "#8a6a44"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.12,
+            0.9,
+            0.12
+          ],
+          "pos": [
+            0,
+            0.45,
+            1.3
+          ],
+          "color": "#8a6a44"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.12,
+            0.9,
+            0.12
+          ],
+          "pos": [
+            0.85,
+            0.45,
+            1.3
+          ],
+          "color": "#8a6a44"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.12,
+            0.9,
+            0.12
+          ],
+          "pos": [
+            1.7,
+            0.45,
+            1.3
+          ],
+          "color": "#8a6a44"
+        },
+        {
+          "shape": "box",
+          "size": [
+            3.6,
+            0.12,
+            0.12
+          ],
+          "pos": [
+            0,
+            0.7,
+            1.3
+          ],
+          "color": "#8a6a44"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.16,
+            1.4,
+            0.16
+          ],
+          "pos": [
+            0,
+            0.7,
+            1.3
+          ],
+          "color": "#5c4a30"
+        },
+        {
+          "shape": "box",
+          "size": [
+            1.2,
+            0.7,
+            0.1
+          ],
+          "pos": [
+            0,
+            1.3,
+            1.3
+          ],
+          "color": "#ffdf9c",
+          "mat": "basic"
+        }
+      ],
+      "after": [
+        {
+          "shape": "box",
+          "size": [
+            3.6,
+            2.6,
+            2.6
+          ],
+          "pos": [
+            0,
+            1.3,
+            0
+          ],
+          "color": "#cbb489"
+        },
+        {
+          "shape": "cone",
+          "size": [
+            2.9,
+            1.5,
+            4
+          ],
+          "pos": [
+            0,
+            3.35,
+            0
+          ],
+          "yaw": 0.785,
+          "color": "#9a4a3a"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.9,
+            1.6,
+            0.12
+          ],
+          "pos": [
+            0,
+            0.8,
+            1.34
+          ],
+          "color": "#5c3720"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.9,
+            0.9,
+            0.12
+          ],
+          "pos": [
+            1.05,
+            1.5,
+            1.34
+          ],
+          "color": "#ffdf9c",
+          "mat": "basic"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.5,
+            1,
+            0.5
+          ],
+          "pos": [
+            1,
+            3.4,
+            -0.3
+          ],
+          "color": "#6e4526"
+        }
+      ]
+    },
+    {
+      "x": 4.8,
+      "z": -14.9,
+      "yaw": 0,
+      "kind": "plot",
+      "cost": 700,
+      "resident": 1,
+      "before": [
+        {
+          "shape": "ground",
+          "size": [
+            3.8,
+            2.8
+          ],
+          "pos": [
+            0,
+            0.02,
+            0
+          ],
+          "color": "#6b5a45"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.12,
+            0.9,
+            0.12
+          ],
+          "pos": [
+            -1.7,
+            0.45,
+            1.3
+          ],
+          "color": "#8a6a44"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.12,
+            0.9,
+            0.12
+          ],
+          "pos": [
+            -0.85,
+            0.45,
+            1.3
+          ],
+          "color": "#8a6a44"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.12,
+            0.9,
+            0.12
+          ],
+          "pos": [
+            0,
+            0.45,
+            1.3
+          ],
+          "color": "#8a6a44"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.12,
+            0.9,
+            0.12
+          ],
+          "pos": [
+            0.85,
+            0.45,
+            1.3
+          ],
+          "color": "#8a6a44"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.12,
+            0.9,
+            0.12
+          ],
+          "pos": [
+            1.7,
+            0.45,
+            1.3
+          ],
+          "color": "#8a6a44"
+        },
+        {
+          "shape": "box",
+          "size": [
+            3.6,
+            0.12,
+            0.12
+          ],
+          "pos": [
+            0,
+            0.7,
+            1.3
+          ],
+          "color": "#8a6a44"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.16,
+            1.4,
+            0.16
+          ],
+          "pos": [
+            0,
+            0.7,
+            1.3
+          ],
+          "color": "#5c4a30"
+        },
+        {
+          "shape": "box",
+          "size": [
+            1.2,
+            0.7,
+            0.1
+          ],
+          "pos": [
+            0,
+            1.3,
+            1.3
+          ],
+          "color": "#ffdf9c",
+          "mat": "basic"
+        }
+      ],
+      "after": [
+        {
+          "shape": "box",
+          "size": [
+            3.6,
+            2.6,
+            2.6
+          ],
+          "pos": [
+            0,
+            1.3,
+            0
+          ],
+          "color": "#cbb489"
+        },
+        {
+          "shape": "cone",
+          "size": [
+            2.9,
+            1.5,
+            4
+          ],
+          "pos": [
+            0,
+            3.35,
+            0
+          ],
+          "yaw": 0.785,
+          "color": "#9a4a3a"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.9,
+            1.6,
+            0.12
+          ],
+          "pos": [
+            0,
+            0.8,
+            1.34
+          ],
+          "color": "#5c3720"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.9,
+            0.9,
+            0.12
+          ],
+          "pos": [
+            1.05,
+            1.5,
+            1.34
+          ],
+          "color": "#ffdf9c",
+          "mat": "basic"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.5,
+            1,
+            0.5
+          ],
+          "pos": [
+            1,
+            3.4,
+            -0.3
+          ],
+          "color": "#6e4526"
+        }
+      ]
+    },
+    {
+      "x": -9.6,
+      "z": -14.9,
+      "yaw": 0,
+      "kind": "plot",
+      "cost": 1200,
+      "resident": 2,
+      "before": [
+        {
+          "shape": "ground",
+          "size": [
+            3.8,
+            2.8
+          ],
+          "pos": [
+            0,
+            0.02,
+            0
+          ],
+          "color": "#6b5a45"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.12,
+            0.9,
+            0.12
+          ],
+          "pos": [
+            -1.7,
+            0.45,
+            1.3
+          ],
+          "color": "#8a6a44"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.12,
+            0.9,
+            0.12
+          ],
+          "pos": [
+            -0.85,
+            0.45,
+            1.3
+          ],
+          "color": "#8a6a44"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.12,
+            0.9,
+            0.12
+          ],
+          "pos": [
+            0,
+            0.45,
+            1.3
+          ],
+          "color": "#8a6a44"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.12,
+            0.9,
+            0.12
+          ],
+          "pos": [
+            0.85,
+            0.45,
+            1.3
+          ],
+          "color": "#8a6a44"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.12,
+            0.9,
+            0.12
+          ],
+          "pos": [
+            1.7,
+            0.45,
+            1.3
+          ],
+          "color": "#8a6a44"
+        },
+        {
+          "shape": "box",
+          "size": [
+            3.6,
+            0.12,
+            0.12
+          ],
+          "pos": [
+            0,
+            0.7,
+            1.3
+          ],
+          "color": "#8a6a44"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.16,
+            1.4,
+            0.16
+          ],
+          "pos": [
+            0,
+            0.7,
+            1.3
+          ],
+          "color": "#5c4a30"
+        },
+        {
+          "shape": "box",
+          "size": [
+            1.2,
+            0.7,
+            0.1
+          ],
+          "pos": [
+            0,
+            1.3,
+            1.3
+          ],
+          "color": "#ffdf9c",
+          "mat": "basic"
+        }
+      ],
+      "after": [
+        {
+          "shape": "box",
+          "size": [
+            3.6,
+            2.6,
+            2.6
+          ],
+          "pos": [
+            0,
+            1.3,
+            0
+          ],
+          "color": "#7d9bd0"
+        },
+        {
+          "shape": "cone",
+          "size": [
+            2.9,
+            1.5,
+            4
+          ],
+          "pos": [
+            0,
+            3.35,
+            0
+          ],
+          "yaw": 0.785,
+          "color": "#39557f"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.9,
+            1.6,
+            0.12
+          ],
+          "pos": [
+            0,
+            0.8,
+            1.34
+          ],
+          "color": "#5c3720"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.9,
+            0.9,
+            0.12
+          ],
+          "pos": [
+            1.05,
+            1.5,
+            1.34
+          ],
+          "color": "#ffdf9c",
+          "mat": "basic"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.5,
+            1,
+            0.5
+          ],
+          "pos": [
+            1,
+            3.4,
+            -0.3
+          ],
+          "color": "#6e4526"
+        }
+      ]
+    },
+    {
+      "x": 9.6,
+      "z": -14.9,
+      "yaw": 0,
+      "kind": "plot",
+      "cost": 1800,
+      "resident": 2,
+      "before": [
+        {
+          "shape": "ground",
+          "size": [
+            3.8,
+            2.8
+          ],
+          "pos": [
+            0,
+            0.02,
+            0
+          ],
+          "color": "#6b5a45"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.12,
+            0.9,
+            0.12
+          ],
+          "pos": [
+            -1.7,
+            0.45,
+            1.3
+          ],
+          "color": "#8a6a44"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.12,
+            0.9,
+            0.12
+          ],
+          "pos": [
+            -0.85,
+            0.45,
+            1.3
+          ],
+          "color": "#8a6a44"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.12,
+            0.9,
+            0.12
+          ],
+          "pos": [
+            0,
+            0.45,
+            1.3
+          ],
+          "color": "#8a6a44"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.12,
+            0.9,
+            0.12
+          ],
+          "pos": [
+            0.85,
+            0.45,
+            1.3
+          ],
+          "color": "#8a6a44"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.12,
+            0.9,
+            0.12
+          ],
+          "pos": [
+            1.7,
+            0.45,
+            1.3
+          ],
+          "color": "#8a6a44"
+        },
+        {
+          "shape": "box",
+          "size": [
+            3.6,
+            0.12,
+            0.12
+          ],
+          "pos": [
+            0,
+            0.7,
+            1.3
+          ],
+          "color": "#8a6a44"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.16,
+            1.4,
+            0.16
+          ],
+          "pos": [
+            0,
+            0.7,
+            1.3
+          ],
+          "color": "#5c4a30"
+        },
+        {
+          "shape": "box",
+          "size": [
+            1.2,
+            0.7,
+            0.1
+          ],
+          "pos": [
+            0,
+            1.3,
+            1.3
+          ],
+          "color": "#ffdf9c",
+          "mat": "basic"
+        }
+      ],
+      "after": [
+        {
+          "shape": "box",
+          "size": [
+            3.6,
+            2.6,
+            2.6
+          ],
+          "pos": [
+            0,
+            1.3,
+            0
+          ],
+          "color": "#7d9bd0"
+        },
+        {
+          "shape": "cone",
+          "size": [
+            2.9,
+            1.5,
+            4
+          ],
+          "pos": [
+            0,
+            3.35,
+            0
+          ],
+          "yaw": 0.785,
+          "color": "#39557f"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.9,
+            1.6,
+            0.12
+          ],
+          "pos": [
+            0,
+            0.8,
+            1.34
+          ],
+          "color": "#5c3720"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.9,
+            0.9,
+            0.12
+          ],
+          "pos": [
+            1.05,
+            1.5,
+            1.34
+          ],
+          "color": "#ffdf9c",
+          "mat": "basic"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.5,
+            1,
+            0.5
+          ],
+          "pos": [
+            1,
+            3.4,
+            -0.3
+          ],
+          "color": "#6e4526"
+        }
+      ]
+    },
+    {
+      "x": -14.4,
+      "z": -14.9,
+      "yaw": 0,
+      "kind": "ruin",
+      "cost": 3000,
+      "resident": 2,
+      "before": [
+        {
+          "shape": "ground",
+          "size": [
+            3.8,
+            2.8
+          ],
+          "pos": [
+            0,
+            0.02,
+            0
+          ],
+          "color": "#4a4038"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.6,
+            1.5,
+            0.6
+          ],
+          "pos": [
+            -1.3,
+            0.75,
+            -0.4
+          ],
+          "color": "#6a6258"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.6,
+            1,
+            0.6
+          ],
+          "pos": [
+            1.2,
+            0.5,
+            -0.4
+          ],
+          "color": "#6a6258"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.6,
+            0.6,
+            0.6
+          ],
+          "pos": [
+            0.1,
+            0.3,
+            -0.4
+          ],
+          "color": "#6a6258"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.432,
+            0.432,
+            0.432
+          ],
+          "pos": [
+            0.509,
+            0.216,
+            -0.093
+          ],
+          "color": "#585048"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.303,
+            0.303,
+            0.303
+          ],
+          "pos": [
+            0.411,
+            0.152,
+            0.875
+          ],
+          "color": "#585048"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.307,
+            0.307,
+            0.307
+          ],
+          "pos": [
+            1.323,
+            0.153,
+            -0.189
+          ],
+          "color": "#585048"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.453,
+            0.453,
+            0.453
+          ],
+          "pos": [
+            1.317,
+            0.227,
+            0.04
+          ],
+          "color": "#585048"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.394,
+            0.394,
+            0.394
+          ],
+          "pos": [
+            -1.219,
+            0.197,
+            -0.775
+          ],
+          "color": "#585048"
+        }
+      ],
+      "after": [
+        {
+          "shape": "box",
+          "size": [
+            3.6,
+            2.6,
+            2.6
+          ],
+          "pos": [
+            0,
+            1.3,
+            0
+          ],
+          "color": "#7d9bd0"
+        },
+        {
+          "shape": "cone",
+          "size": [
+            2.9,
+            1.5,
+            4
+          ],
+          "pos": [
+            0,
+            3.35,
+            0
+          ],
+          "yaw": 0.785,
+          "color": "#39557f"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.9,
+            1.6,
+            0.12
+          ],
+          "pos": [
+            0,
+            0.8,
+            1.34
+          ],
+          "color": "#5c3720"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.9,
+            0.9,
+            0.12
+          ],
+          "pos": [
+            1.05,
+            1.5,
+            1.34
+          ],
+          "color": "#ffdf9c",
+          "mat": "basic"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.5,
+            1,
+            0.5
+          ],
+          "pos": [
+            1,
+            3.4,
+            -0.3
+          ],
+          "color": "#6e4526"
+        }
+      ]
+    },
+    {
+      "x": 14.4,
+      "z": -14.9,
+      "yaw": 0,
+      "kind": "ruin",
+      "cost": 4500,
+      "resident": 3,
+      "before": [
+        {
+          "shape": "ground",
+          "size": [
+            3.8,
+            2.8
+          ],
+          "pos": [
+            0,
+            0.02,
+            0
+          ],
+          "color": "#4a4038"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.6,
+            1.5,
+            0.6
+          ],
+          "pos": [
+            -1.3,
+            0.75,
+            -0.4
+          ],
+          "color": "#6a6258"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.6,
+            1,
+            0.6
+          ],
+          "pos": [
+            1.2,
+            0.5,
+            -0.4
+          ],
+          "color": "#6a6258"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.6,
+            0.6,
+            0.6
+          ],
+          "pos": [
+            0.1,
+            0.3,
+            -0.4
+          ],
+          "color": "#6a6258"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.315,
+            0.315,
+            0.315
+          ],
+          "pos": [
+            -1.169,
+            0.158,
+            -0.023
+          ],
+          "color": "#585048"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.367,
+            0.367,
+            0.367
+          ],
+          "pos": [
+            -0.326,
+            0.183,
+            0.993
+          ],
+          "color": "#585048"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.373,
+            0.373,
+            0.373
+          ],
+          "pos": [
+            -0.01,
+            0.187,
+            0.496
+          ],
+          "color": "#585048"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.411,
+            0.411,
+            0.411
+          ],
+          "pos": [
+            0.29,
+            0.205,
+            -0.569
+          ],
+          "color": "#585048"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.425,
+            0.425,
+            0.425
+          ],
+          "pos": [
+            -0.981,
+            0.213,
+            0.563
+          ],
+          "color": "#585048"
+        }
+      ],
+      "after": [
+        {
+          "shape": "box",
+          "size": [
+            3.6,
+            2.6,
+            2.6
+          ],
+          "pos": [
+            0,
+            1.3,
+            0
+          ],
+          "color": "#a87ab0"
+        },
+        {
+          "shape": "cone",
+          "size": [
+            2.9,
+            1.5,
+            4
+          ],
+          "pos": [
+            0,
+            3.35,
+            0
+          ],
+          "yaw": 0.785,
+          "color": "#6a3b6f"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.9,
+            1.6,
+            0.12
+          ],
+          "pos": [
+            0,
+            0.8,
+            1.34
+          ],
+          "color": "#5c3720"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.9,
+            0.9,
+            0.12
+          ],
+          "pos": [
+            1.05,
+            1.5,
+            1.34
+          ],
+          "color": "#ffdf9c",
+          "mat": "basic"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.5,
+            1,
+            0.5
+          ],
+          "pos": [
+            1,
+            3.4,
+            -0.3
+          ],
+          "color": "#6e4526"
+        }
+      ]
+    },
+    {
+      "x": -19.2,
+      "z": -14.9,
+      "yaw": 0,
+      "kind": "ruin",
+      "cost": 7000,
+      "resident": 3,
+      "before": [
+        {
+          "shape": "ground",
+          "size": [
+            3.8,
+            2.8
+          ],
+          "pos": [
+            0,
+            0.02,
+            0
+          ],
+          "color": "#4a4038"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.6,
+            1.5,
+            0.6
+          ],
+          "pos": [
+            -1.3,
+            0.75,
+            -0.4
+          ],
+          "color": "#6a6258"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.6,
+            1,
+            0.6
+          ],
+          "pos": [
+            1.2,
+            0.5,
+            -0.4
+          ],
+          "color": "#6a6258"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.6,
+            0.6,
+            0.6
+          ],
+          "pos": [
+            0.1,
+            0.3,
+            -0.4
+          ],
+          "color": "#6a6258"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.466,
+            0.466,
+            0.466
+          ],
+          "pos": [
+            1.427,
+            0.233,
+            -0.239
+          ],
+          "color": "#585048"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.546,
+            0.546,
+            0.546
+          ],
+          "pos": [
+            1.043,
+            0.273,
+            0.256
+          ],
+          "color": "#585048"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.397,
+            0.397,
+            0.397
+          ],
+          "pos": [
+            0.531,
+            0.198,
+            -0.798
+          ],
+          "color": "#585048"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.52,
+            0.52,
+            0.52
+          ],
+          "pos": [
+            0.82,
+            0.26,
+            -0.046
+          ],
+          "color": "#585048"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.29,
+            0.29,
+            0.29
+          ],
+          "pos": [
+            0.693,
+            0.145,
+            0.287
+          ],
+          "color": "#585048"
+        }
+      ],
+      "after": [
+        {
+          "shape": "box",
+          "size": [
+            3.6,
+            2.6,
+            2.6
+          ],
+          "pos": [
+            0,
+            1.3,
+            0
+          ],
+          "color": "#a87ab0"
+        },
+        {
+          "shape": "cone",
+          "size": [
+            2.9,
+            1.5,
+            4
+          ],
+          "pos": [
+            0,
+            3.35,
+            0
+          ],
+          "yaw": 0.785,
+          "color": "#6a3b6f"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.9,
+            1.6,
+            0.12
+          ],
+          "pos": [
+            0,
+            0.8,
+            1.34
+          ],
+          "color": "#5c3720"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.9,
+            0.9,
+            0.12
+          ],
+          "pos": [
+            1.05,
+            1.5,
+            1.34
+          ],
+          "color": "#ffdf9c",
+          "mat": "basic"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.5,
+            1,
+            0.5
+          ],
+          "pos": [
+            1,
+            3.4,
+            -0.3
+          ],
+          "color": "#6e4526"
+        }
+      ]
+    },
+    {
+      "x": 19.34,
+      "z": -14.92,
+      "yaw": 0,
+      "kind": "ruin",
+      "cost": 9500,
+      "resident": 3,
+      "before": [
+        {
+          "shape": "ground",
+          "size": [
+            3.8,
+            2.8
+          ],
+          "pos": [
+            0,
+            0.02,
+            0
+          ],
+          "color": "#4a4038"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.6,
+            1.5,
+            0.6
+          ],
+          "pos": [
+            -1.3,
+            0.75,
+            -0.4
+          ],
+          "color": "#6a6258"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.6,
+            1,
+            0.6
+          ],
+          "pos": [
+            1.2,
+            0.5,
+            -0.4
+          ],
+          "color": "#6a6258"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.6,
+            0.6,
+            0.6
+          ],
+          "pos": [
+            0.1,
+            0.3,
+            -0.4
+          ],
+          "color": "#6a6258"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.477,
+            0.477,
+            0.477
+          ],
+          "pos": [
+            -0.227,
+            0.238,
+            0.636
+          ],
+          "color": "#585048"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.378,
+            0.378,
+            0.378
+          ],
+          "pos": [
+            0.114,
+            0.189,
+            0.131
+          ],
+          "color": "#585048"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.288,
+            0.288,
+            0.288
+          ],
+          "pos": [
+            -1.441,
+            0.144,
+            0.985
+          ],
+          "color": "#585048"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.336,
+            0.336,
+            0.336
+          ],
+          "pos": [
+            -0.455,
+            0.168,
+            -0.828
+          ],
+          "color": "#585048"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.295,
+            0.295,
+            0.295
+          ],
+          "pos": [
+            0.219,
+            0.148,
+            0.582
+          ],
+          "color": "#585048"
+        }
+      ],
+      "after": [
+        {
+          "shape": "box",
+          "size": [
+            3.6,
+            2.6,
+            2.6
+          ],
+          "pos": [
+            0,
+            1.3,
+            0
+          ],
+          "color": "#a87ab0"
+        },
+        {
+          "shape": "cone",
+          "size": [
+            2.9,
+            1.5,
+            4
+          ],
+          "pos": [
+            0,
+            3.35,
+            0
+          ],
+          "yaw": 0.785,
+          "color": "#6a3b6f"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.9,
+            1.6,
+            0.12
+          ],
+          "pos": [
+            0,
+            0.8,
+            1.34
+          ],
+          "color": "#5c3720"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.9,
+            0.9,
+            0.12
+          ],
+          "pos": [
+            1.05,
+            1.5,
+            1.34
+          ],
+          "color": "#ffdf9c",
+          "mat": "basic"
+        },
+        {
+          "shape": "box",
+          "size": [
+            0.5,
+            1,
+            0.5
+          ],
+          "pos": [
+            1,
+            3.4,
+            -0.3
+          ],
+          "color": "#6e4526"
+        }
+      ]
+    }
+  ],
+  "decor": [
+    {
+      "cat": "trees",
+      "path": "decor/trees/Tree_Yellow_07.png",
+      "x": -21.287,
+      "z": -16.733,
+      "height": 4.804
+    },
+    {
+      "cat": "trees",
+      "path": "decor/trees/Tree_Yellow_07.png",
+      "x": -3.62,
+      "z": -18.98,
+      "height": 4.055
+    },
+    {
+      "cat": "trees",
+      "path": "decor/trees/Tree_Pink_05.png",
+      "x": -19.29,
+      "z": -20.17,
+      "height": 4.942
+    },
+    {
+      "cat": "trees",
+      "path": "decor/trees/Tree_Green_10.png",
+      "x": -9.67,
+      "z": -19.81,
+      "height": 4.783
+    },
+    {
+      "cat": "trees",
+      "path": "decor/trees/Tree_Pink_05.png",
+      "x": -25.4,
+      "z": -0.44,
+      "height": 4.167
+    },
+    {
+      "cat": "trees",
+      "path": "decor/trees/Tree_Green_10.png",
+      "x": -11.87,
+      "z": -16.732,
+      "height": 3.904
+    },
+    {
+      "cat": "trees",
+      "path": "decor/trees/Tree_Pink_12.png",
+      "x": 13.11,
+      "z": 2.38,
+      "height": 3.907
+    },
+    {
+      "cat": "trees",
+      "path": "decor/trees/Tree_Pink_12.png",
+      "x": -5.85,
+      "z": -18.3,
+      "height": 3.446
+    },
+    {
+      "cat": "trees",
+      "path": "decor/trees/Tree_Green_14.png",
+      "x": 21.88,
+      "z": 0.59,
+      "height": 4.458
+    },
+    {
+      "cat": "trees",
+      "path": "decor/trees/Tree_Yellow_15.png",
+      "x": 1.64,
+      "z": -15.89,
+      "height": 4.741
+    },
+    {
+      "cat": "trees",
+      "path": "decor/trees/Tree_Orange_04.png",
+      "x": -16.13,
+      "z": 3.68,
+      "height": 5.077
+    },
+    {
+      "cat": "trees",
+      "path": "decor/trees/Tree_Green_03.png",
+      "x": -10.53,
+      "z": -21.32,
+      "height": 4.199
+    },
+    {
+      "cat": "trees",
+      "path": "decor/trees/Tree_Pink_05.png",
+      "x": 3.14,
+      "z": -18.56,
+      "height": 3.875
+    },
+    {
+      "cat": "trees",
+      "path": "decor/trees/Birch_Green_01.png",
+      "x": 11.31,
+      "z": -20.15,
+      "height": 4.211
+    },
+    {
+      "cat": "trees",
+      "path": "decor/trees/Tree_Green_14.png",
+      "x": 6.72,
+      "z": -18.59,
+      "height": 4.324
+    },
+    {
+      "cat": "trees",
+      "path": "decor/trees/Tree_Orange_04.png",
+      "x": 3.95,
+      "z": -20.88,
+      "height": 4.947
+    },
+    {
+      "cat": "trees",
+      "path": "decor/trees/Birch_Green_01.png",
+      "x": 19.94,
+      "z": -2.98,
+      "height": 4.801
+    },
+    {
+      "cat": "trees",
+      "path": "decor/trees/Birch_Green_01.png",
+      "x": 10.21,
+      "z": -20.05,
+      "height": 5.041
+    },
+    {
+      "cat": "trees",
+      "path": "decor/trees/Tree_Yellow_15.png",
+      "x": 17.59,
+      "z": 1.04,
+      "height": 3.466
+    },
+    {
+      "cat": "trees",
+      "path": "decor/trees/Tree_Green_10.png",
+      "x": 10.36,
+      "z": -0.3,
+      "height": 5.002
+    },
+    {
+      "cat": "trees",
+      "path": "decor/trees/Tree_Green_14.png",
+      "x": 15.13,
+      "z": -17.99,
+      "height": 4.771
+    },
+    {
+      "cat": "trees",
+      "path": "decor/trees/Tree_Orange_09.png",
+      "x": 19.8,
+      "z": -18.26,
+      "height": 3.43
+    },
+    {
+      "cat": "trees",
+      "path": "decor/trees/Tree_Yellow_15.png",
+      "x": -10.79,
+      "z": 0.72,
+      "height": 4.473
+    },
+    {
+      "cat": "smallTrees",
+      "path": "decor/trees/Small_Tree_Green_02.png",
+      "x": -20.468,
+      "z": -11.434,
+      "height": 1.322
+    },
+    {
+      "cat": "trees",
+      "path": "decor/trees/Tree_Green_14.png",
+      "x": 13.74,
+      "z": -1.57,
+      "height": 3.9
+    },
+    {
+      "cat": "bushes",
+      "path": "decor/bushes/Bush_Green_02.png",
+      "x": 20.238,
+      "z": -11.477,
+      "height": 1.609
+    },
+    {
+      "cat": "trees",
+      "path": "decor/trees/Tree_Pink_05.png",
+      "x": -9.84,
+      "z": -2.44,
+      "height": 3.684
+    },
+    {
+      "cat": "smallTrees",
+      "path": "decor/trees/Small_Tree_Green_01.png",
+      "x": -11.19,
+      "z": -18.21,
+      "height": 2.143
+    },
+    {
+      "cat": "trees",
+      "path": "decor/trees/Tree_Pink_12.png",
+      "x": 10.94,
+      "z": -5.36,
+      "height": 3.702
+    },
+    {
+      "cat": "smallTrees",
+      "path": "decor/trees/Small_Tree_Green_02.png",
+      "x": 7.962,
+      "z": -9.649,
+      "height": 1.724
+    },
+    {
+      "cat": "bushes",
+      "path": "decor/bushes/Bush_Green_02.png",
+      "x": -5.7,
+      "z": -5.502,
+      "height": 0.917
+    },
+    {
+      "cat": "flowers",
+      "path": "decor/flowers/Autumn_Flower_02.png",
+      "x": -0.203,
+      "z": -5.511,
+      "height": 0.375
+    },
+    {
+      "cat": "flowers",
+      "path": "decor/flowers/DeepForest_Flower_01.png",
+      "x": 1.111,
+      "z": -5.493,
+      "height": 0.373
+    },
+    {
+      "cat": "flowers",
+      "path": "decor/flowers/Forest_Flower_02.png",
+      "x": 2.294,
+      "z": -5.076,
+      "height": 0.467
+    },
+    {
+      "cat": "flowers",
+      "path": "decor/flowers/DeepForest_Flower_01.png",
+      "x": 4.072,
+      "z": -5.428,
+      "height": 0.407
+    },
+    {
+      "cat": "flowers",
+      "path": "decor/flowers/Autumn_Flower_02.png",
+      "x": 5.028,
+      "z": -5.34,
+      "height": 0.408
+    },
+    {
+      "cat": "flowers",
+      "path": "decor/flowers/Forest_Flower_01.png",
+      "x": -5.976,
+      "z": -5.763,
+      "height": 0.374
+    },
+    {
+      "cat": "flowers",
+      "path": "decor/flowers/Autumn_Flower_02.png",
+      "x": -6.738,
+      "z": -5.846,
+      "height": 0.349
+    },
+    {
+      "cat": "flowers",
+      "path": "decor/flowers/Forest_Flower_01.png",
+      "x": -6.747,
+      "z": -6.041,
+      "height": 0.317
+    },
+    {
+      "cat": "flowers",
+      "path": "decor/flowers/Autumn_Flower_01.png",
+      "x": 5.983,
+      "z": -6.131,
+      "height": 0.38
+    },
+    {
+      "cat": "flowers",
+      "path": "decor/flowers/Autumn_Flower_01.png",
+      "x": 6.267,
+      "z": -5.266,
+      "height": 0.427
+    },
+    {
+      "cat": "flowers",
+      "path": "decor/flowers/Forest_Flower_02.png",
+      "x": 6.87,
+      "z": -6.186,
+      "height": 0.358
+    }
+  ]
+}

@@ -5,9 +5,10 @@
 import * as THREE from "three";
 import { makeToonMaterial } from "../core/toon.js";
 import { makeLightShaft } from "../core/godrays.js";
-import { populateStreet } from "./decor.js";
-import { rng } from "../core/engine.js";
+import { placeStreetDecor } from "./decor.js";
+import { buildStreetTerrain } from "./street-terrain.js";
 import { SHOP, MAX_CUSTOMERS } from "./shop-data.js";
+import { getLayout } from "./layout-store.js";
 
 // The two buyable back rooms' doorways, cut through the shop's low back wall
 // (pre-rotation coords): door centres along x, and each gap's half-width.
@@ -231,23 +232,20 @@ export const buildMethods = {
       this.queueSpots.push(new THREE.Vector3(qHeadX - i * 0.95, 0, qZ));
     }
 
-    // display tables (2x2 grid, 2 slots each = 8 slots). Long axis along
-    // pre-rotation z, so on screen the shelves read HORIZONTAL, stacked in two
-    // rows down the narrow room. Each table is a buildable fixture: all but
-    // the first start un-built (their real mesh hidden, slots unusable, a
-    // glowing floor outline marking the footprint) until the player pays to
+    // display tables (2 slots each). Placement — position and yaw per table —
+    // comes from layout.json (authored in the overworld editor); the long axis
+    // reads HORIZONTAL on screen at yaw 0. Each table is a buildable fixture:
+    // all but the first start un-built (their real mesh hidden, slots unusable,
+    // a glowing floor outline marking the footprint) until the player pays to
     // build them — see repairTable / _applyTableState. `this.tables` groups
     // every table's meshes + slots + build cost so the game glue can offer
     // the "Repair" prompt and persist what's been built.
+    // The first table in layout order — the free starter shelf — is the one
+    // that comes ready to stock, so keep it nearest the door in the editor.
     this.tables = [];
-    // pre-rotation spots → on screen: two columns (clear of the vitrine along
-    // the road wall and of the counter's queue), two rows down the room. The
-    // first — the free starter shelf — sits nearest the door.
-    const tablePts = [
-      [-0.8, -0.2], [-0.8, 2.2],
-      [1.6, -0.2], [1.6, 2.2],
-    ];
-    tablePts.forEach(([tx, tz], ti) => {
+    const layout = getLayout();
+    layout.tables.forEach((def, ti) => {
+      const tx = def.x, tz = def.z, yaw = def.yaw || 0;
       const t = new THREE.Group();
       const top = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.14, 2.2), woodMat);
       top.position.y = 0.78;
@@ -259,31 +257,34 @@ export const buildMethods = {
       const outline = makeFloorOutline(1.3, 2.4);
       t.add(outline);
       t.position.set(tx, 0, tz);
+      t.rotation.y = yaw;
       g.add(t);
-      this.colliders.push({ x: tx, z: tz, hw: 0.6, hd: 1.15 });
+      // colliders stay axis-aligned: take the AABB of the yawed footprint
+      const cb = rotAABB(0.6, 1.15, yaw);
+      this.colliders.push({ x: tx, z: tz, hw: cb.hw, hd: cb.hd });
       const table = {
         group: t,
         meshes: [top, legs],
         origMats: [woodMat, wood2],
         outline,
-        cost: 200,
+        cost: def.cost ?? 200,
         fancy: false,
         repaired: ti === 0, // only the first shelf comes ready to stock
         slots: [],
-        interactPos: new THREE.Vector3(tx + 1.05, 0, tz),
+        interactPos: offV(tx, tz, 1.05, 0, yaw),
       };
       for (const dz of [-0.55, 0.55]) {
         const slot = {
-          pos: new THREE.Vector3(tx, 0.86, tz + dz),
-          browsePos: new THREE.Vector3(tx + 1.05, 0, tz + dz),
+          pos: offV(tx, tz, 0, dz, yaw, 0.86),
+          browsePos: offV(tx, tz, 1.05, dz, yaw),
           // standing spots on every side of the table, so a shopper can view
           // the item from whichever side is nearest / reachable rather than
           // always squeezing to one face (see _browseSpotFor)
           browseSpots: [
-            new THREE.Vector3(tx + 1.05, 0, tz + dz), // one long face
-            new THREE.Vector3(tx - 1.05, 0, tz + dz), // the other
-            new THREE.Vector3(tx, 0, tz + 1.6),       // near end
-            new THREE.Vector3(tx, 0, tz - 1.6),       // far end
+            offV(tx, tz, 1.05, dz, yaw),  // one long face
+            offV(tx, tz, -1.05, dz, yaw), // the other
+            offV(tx, tz, 0, 1.6, yaw),    // near end
+            offV(tx, tz, 0, -1.6, yaw),   // far end
           ],
           item: null,
           mesh: null,
@@ -301,7 +302,8 @@ export const buildMethods = {
     // placed on it glows (see stockItem). Replaces the old window-sill slots.
     const velvetMat = makeToonMaterial({ color: 0x6a1f2e, rim: 0 });
     const goldMat = makeToonMaterial({ color: 0xe6c26a, rim: 0 });
-    const fancyCx = winCx, fancyZ = backZ + 1.7;
+    const fDef = layout.fancy;
+    const fancyCx = fDef.x, fancyZ = fDef.z, fYaw = fDef.yaw || 0;
     const fancy = new THREE.Group();
     const fLegs = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.74, 0.9), wood2);
     fLegs.position.y = 0.37;
@@ -313,8 +315,10 @@ export const buildMethods = {
     const fancyOutline = makeFloorOutline(3.7, 1.5);
     fancy.add(fancyOutline);
     fancy.position.set(fancyCx, 0, fancyZ);
+    fancy.rotation.y = fYaw;
     g.add(fancy);
-    this.colliders.push({ x: fancyCx, z: fancyZ, hw: 1.75, hd: 0.66 });
+    const fcb = rotAABB(1.75, 0.66, fYaw);
+    this.colliders.push({ x: fancyCx, z: fancyZ, hw: fcb.hw, hd: fcb.hd });
     // the prized vitrine is the priciest fixture to restore (1000g) and, like
     // the plain shelves, starts broken until the player pays to bring it back.
     const fancyTable = {
@@ -322,23 +326,23 @@ export const buildMethods = {
       meshes: [fLegs, fTrim, fTop],
       origMats: [wood2, goldMat, velvetMat],
       outline: fancyOutline,
-      cost: 1000,
+      cost: fDef.cost ?? 1000,
       fancy: true,
       repaired: false,
       slots: [],
-      interactPos: new THREE.Vector3(fancyCx, 0, fancyZ + 1.15),
+      interactPos: offV(fancyCx, fancyZ, 0, 1.15, fYaw),
     };
     for (const dx of [-1.05, 0, 1.05]) {
       const slot = {
-        pos: new THREE.Vector3(fancyCx + dx, 0.92, fancyZ),
-        browsePos: new THREE.Vector3(fancyCx + dx, 0, fancyZ + 1.15),
+        pos: offV(fancyCx, fancyZ, dx, 0, fYaw, 0.92),
+        browsePos: offV(fancyCx, fancyZ, dx, 1.15, fYaw),
         // the vitrine hugs the back wall, so its back side is walled off — the
         // reachable spots are the front and the two flanks (blocked ones are
         // filtered out in _browseSpotFor)
         browseSpots: [
-          new THREE.Vector3(fancyCx + dx, 0, fancyZ + 1.15), // front
-          new THREE.Vector3(fancyCx + 2.25, 0, fancyZ),      // right
-          new THREE.Vector3(fancyCx - 2.25, 0, fancyZ),      // left
+          offV(fancyCx, fancyZ, dx, 1.15, fYaw),  // front
+          offV(fancyCx, fancyZ, 2.25, 0, fYaw),   // right
+          offV(fancyCx, fancyZ, -2.25, 0, fYaw),  // left
         ],
         item: null,
         mesh: null,
@@ -410,13 +414,10 @@ export const buildMethods = {
     // a shallow gutter running down the middle of the road (drainage channel)
     mkGround(streetW, 0.8, 0, (paveFar + roadFar) / 2, 0x565049).position.y = 0.004;
 
-    // the far flanks that frame the street; the middle is taken up by the two
-    // walk-in buildings built in _buildTown().
-    const facadeZ = roadFar - 0.3;
     // the far flanks used to be flat painted facades; they're now the town's
     // restoration lots — run-down ruins and boarded-up empty plots the player
     // pays the Mayor's fund to rebuild into houses (see _buildLots / restoreLot).
-    this._buildLots(mkWall, mkGround, facadeZ);
+    this._buildLots();
 
     // street lamps flanking the doorway
     for (const sx of [-6.5, 6.5]) {
@@ -448,8 +449,11 @@ export const buildMethods = {
     this.doorPos = new THREE.Vector3(doorCx, 0, backZ - 1.3); // outside: door step
     this.doorInside = new THREE.Vector3(doorCx, 0, backZ + 1.2); // threshold just inside
 
-    // billboard scenery lining the street outside (seeded so co-op peers match)
-    populateStreet(g, rng(0xC0FFEE), { W, backZ, streetHalfX: this.streetHalfX });
+    // billboard scenery lining the street outside, placed from layout.json
+    // (explicit data, so co-op peers match by construction). The sprite list
+    // is kept in layout order so the overworld editor can map sprites back
+    // to their entries.
+    this.decorSprites = placeStreetDecor(g, layout.decor);
 
     // the cave at the end of the road: a rocky mouth closing off the street's
     // east end — the dungeon's front door. Walking up to it steps inside (the
@@ -459,6 +463,15 @@ export const buildMethods = {
     // the rest of the town: two empty rooms flanking the shop, two walk-in
     // buildings across the road, and the plaza floor beneath them all.
     this._buildTown(mkWall, mkGround, wallMat2, wood2, roadFar, streetW, wallH, backZ);
+
+    // primitive-built terrain under and around it all: the meadow, cobbles,
+    // turf patches, boulders and horizon hills (cave centre mirrors
+    // _buildCaveMouth, ground stop-line mirrors _buildTown's backLimit)
+    buildStreetTerrain(g, {
+      streetW, backZ, paveFar, roadFar,
+      backLimit: roadFar - 3.0,
+      cave: { x: -12.6, z: -8.5 },
+    });
 
     // quarter-turn the whole town so the road runs down the screen (portrait
     // play): the cave mouth lands at the bottom, the ruined row along the far
@@ -699,89 +712,88 @@ export const buildMethods = {
   },
 
   // ---- town restoration lots -----------------------------------------------
-  // The run-down flanks of the street: four sites the player rebuilds with the
-  // Mayor's fund. Two start as boarded-up empty plots (fenced dirt), two as
-  // stone ruins. Each holds a hidden finished-house model that's revealed when
-  // restored; a new resident then moves in (a distinct customer archetype who
-  // shops here, quickening and enriching the foot traffic — see _spawnCustomer).
-  _buildLots(mkWall, mkGround, facadeZ) {
+  // The run-down flanks of the street: the sites the player rebuilds with the
+  // Mayor's fund. Every lot comes from layout.json — position, yaw, cost, the
+  // resident archetype it brings, and the two primitive-part models it swaps
+  // between: `before` (boarded-up plot / stone ruin) and `after` (the finished
+  // house revealed by restoreLot; a new resident then moves in — a distinct
+  // customer archetype who shops here, quickening and enriching the foot
+  // traffic — see _spawnCustomer). Both states are hand-editable per lot in
+  // the overworld editor.
+  _buildLots() {
     this.lots = [];
-    const toon = (color) => makeToonMaterial({ color, rim: 0 });
-    const litWin = () => new THREE.MeshBasicMaterial({ color: 0xffdf9c });
-    // cx, kind, cost, resident archetype index (into ARCHETYPES). An unbroken
-    // row of houses across the street now that the walk-in buildings are gone —
-    // cheapest plots near the middle, pricier ruins out on the flanks.
-    const defs = [
-      { cx: -4.8, kind: "plot", cost: 100, resident: 1 }, // Regular — the Mayor's first ask, one good sale covers it
-      { cx: 4.8, kind: "plot", cost: 700, resident: 1 }, // Regular
-      { cx: -9.6, kind: "plot", cost: 1200, resident: 2 }, // Wealthy
-      { cx: 9.6, kind: "plot", cost: 1800, resident: 2 }, // Wealthy
-      { cx: -14.4, kind: "ruin", cost: 3000, resident: 2 }, // Wealthy
-      { cx: 14.4, kind: "ruin", cost: 4500, resident: 3 }, // Collector
-      { cx: -19.2, kind: "ruin", cost: 7000, resident: 3 }, // Collector
-      { cx: 19.2, kind: "ruin", cost: 9500, resident: 3 }, // Collector
-    ];
-    const z0 = facadeZ - 0.6; // footprint sits just behind the old facade line
-    for (const def of defs) {
-      const { cx } = def;
-      const before = new THREE.Group();
-      const after = new THREE.Group();
+    for (const def of getLayout().lots) {
+      const yaw = def.yaw || 0;
+      const lotGroup = new THREE.Group();
+      lotGroup.position.set(def.x, 0, def.z);
+      lotGroup.rotation.y = yaw;
+      this.group.add(lotGroup);
+      const before = buildLotParts(def.before);
+      const after = buildLotParts(def.after);
       after.visible = false;
-      this.group.add(before, after);
+      lotGroup.add(before, after);
 
-      // --- finished house (revealed on restore) -----------------------------
-      const bodyCol = def.resident >= 3 ? 0xa87ab0 : def.resident >= 2 ? 0x7d9bd0 : 0xcbb489;
-      const roofCol = def.resident >= 3 ? 0x6a3b6f : def.resident >= 2 ? 0x39557f : 0x9a4a3a;
-      after.add(mkWall(3.6, 2.6, 2.6, cx, 1.3, z0, toon(bodyCol)));
-      const roof = new THREE.Mesh(new THREE.ConeGeometry(2.9, 1.5, 4), toon(roofCol));
-      roof.rotation.y = Math.PI / 4;
-      roof.position.set(cx, 3.35, z0);
-      after.add(roof);
-      after.add(mkWall(0.9, 1.6, 0.12, cx, 0.8, z0 + 1.34, toon(0x5c3720))); // door
-      const win = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, 0.12), litWin());
-      win.position.set(cx + 1.05, 1.5, z0 + 1.34);
-      after.add(win);
-      const chimney = mkWall(0.5, 1.0, 0.5, cx + 1.0, 3.4, z0 - 0.3, toon(0x6e4526));
-      after.add(chimney);
-
-      // --- ruined / empty-plot "before" state -------------------------------
-      const dirt = mkGround(3.8, 2.8, cx, z0, def.kind === "ruin" ? 0x4a4038 : 0x6b5a45);
-      dirt.position.y = 0.02;
-      before.add(dirt);
-      if (def.kind === "ruin") {
-        // a few broken stone wall stubs + scattered rubble
-        for (const [dx, h] of [[-1.3, 1.5], [1.2, 1.0], [0.1, 0.6]]) {
-          before.add(mkWall(0.6, h, 0.6, cx + dx, h / 2, z0 - 0.4, toon(0x6a6258)));
-        }
-        for (let k = 0; k < 5; k++) {
-          const s = 0.25 + Math.random() * 0.3;
-          before.add(mkWall(s, s, s, cx + (Math.random() - 0.5) * 3, s / 2, z0 + (Math.random() - 0.5) * 2, toon(0x585048)));
-        }
-      } else {
-        // boarded-up empty plot: a low picket fence around the dirt + a sign post
-        const fenceMat = toon(0x8a6a44);
-        for (let fx = cx - 1.7; fx <= cx + 1.7; fx += 0.85) {
-          before.add(mkWall(0.12, 0.9, 0.12, fx, 0.45, z0 + 1.3, fenceMat)); // front posts
-        }
-        before.add(mkWall(3.6, 0.12, 0.12, cx, 0.7, z0 + 1.3, fenceMat)); // front rail
-        before.add(mkWall(0.16, 1.4, 0.16, cx, 0.7, z0 + 1.3, toon(0x5c4a30))); // sign post
-        const board = mkWall(1.2, 0.7, 0.1, cx, 1.3, z0 + 1.3, litWin());
-        before.add(board);
-      }
-
-      // seal the flank (as the old facade did) and never let anyone walk the lot
-      const collider = { x: cx, z: z0, hw: 2.0, hd: 1.5 };
+      // seal the flank (as the old facade did) and never let anyone walk the
+      // lot; colliders stay axis-aligned, so take the yawed footprint's AABB
+      const cb = rotAABB(2.0, 1.5, yaw);
+      const collider = { x: def.x, z: def.z, hw: cb.hw, hd: cb.hd };
       this.colliders.push(collider);
 
       this.lots.push({
-        ...def,
-        before, after, collider,
+        kind: def.kind, cost: def.cost, resident: def.resident,
+        group: lotGroup, before, after, collider,
         restored: false,
-        interactPos: new THREE.Vector3(cx, 0, facadeZ + 1.7), // stand on the road side
+        interactPos: offV(def.x, def.z, 0, 2.3, yaw), // stand on the road side
       });
     }
   },
 };
+
+// ---- layout helpers ---------------------------------------------------------
+// Rotate a local (dx, dz) offset by yaw around Y (three.js convention:
+// (x, z) → (x·cosθ + z·sinθ, −x·sinθ + z·cosθ)).
+function rotXZ(dx, dz, yaw) {
+  const c = Math.cos(yaw), s = Math.sin(yaw);
+  return { x: dx * c + dz * s, z: -dx * s + dz * c };
+}
+
+// A world anchor at centre (cx, cz) plus a yaw-rotated local offset — used for
+// slot positions, browse spots and interact spots on yawed fixtures.
+function offV(cx, cz, dx, dz, yaw, y = 0) {
+  const o = rotXZ(dx, dz, yaw);
+  return new THREE.Vector3(cx + o.x, y, cz + o.z);
+}
+
+// The axis-aligned bounding half-extents of a yawed (hw, hd) footprint — the
+// collision system only speaks AABBs, so yawed fixtures block their AABB.
+function rotAABB(hw, hd, yaw) {
+  const c = Math.abs(Math.cos(yaw)), s = Math.abs(Math.sin(yaw));
+  return { hw: hw * c + hd * s, hd: hw * s + hd * c };
+}
+
+// Build one lot state (before/after) from its layout part specs: primitive
+// meshes in lot-local coordinates. Each mesh remembers its part index so the
+// overworld editor can map a click back to the layout entry.
+//   { shape: "box"|"cone"|"ground", size, pos: [x,y,z], yaw?, color, mat? }
+//   box: size [w,h,d] · cone: size [radius,height,segments] · ground: size [w,d]
+function buildLotParts(parts) {
+  const group = new THREE.Group();
+  parts.forEach((p, k) => {
+    let geo;
+    if (p.shape === "cone") geo = new THREE.ConeGeometry(p.size[0], p.size[1], p.size[2] ?? 8);
+    else if (p.shape === "ground") geo = new THREE.PlaneGeometry(p.size[0], p.size[1]).rotateX(-Math.PI / 2);
+    else geo = new THREE.BoxGeometry(p.size[0], p.size[1], p.size[2]);
+    const mat = p.mat === "basic"
+      ? new THREE.MeshBasicMaterial({ color: p.color })
+      : makeToonMaterial({ color: p.color, rim: 0 });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(p.pos[0], p.pos[1], p.pos[2]);
+    mesh.rotation.y = p.yaw || 0;
+    mesh.userData.partIndex = k;
+    group.add(mesh);
+  });
+  return group;
+}
 
 // A slim white donut that lies on the floor to flag an interaction spot —
 // same footprint and additive glow as the interact highlight ring, just a thin

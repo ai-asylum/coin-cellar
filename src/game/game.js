@@ -26,6 +26,14 @@ import { narrativeMethods } from "./game-narrative.js";
 import { combatMethods } from "./game-combat.js";
 import { economyMethods } from "./game-economy.js";
 import { dungeonFlowMethods } from "./game-dungeon-flow.js";
+import { setLayout } from "./layout-store.js";
+import layoutData from "./layout.json";
+
+// The game builds the town from the bundled layout (the overworld editor —
+// /editor.html in dev — writes this file through the /api/layout endpoint).
+// Injected via the store so the editor can feed the same build code a live
+// copy instead; see layout-store.js.
+setLayout(layoutData);
 
 // New shopkeepers wake up in the FTUE cave with a day's spelunking haul
 // already in the bag — the goods that the closed shop (and the Mayor's offer)

@@ -102,60 +102,18 @@ export const DECOR = {
 };
 
 // ----------------------------------------------------------- shop street
-// Dress the street glimpsed through the shopfront: a treeline banked against
-// the far facade, leafy trees flanking the doorway well clear of the walking
-// lanes, and bushes / flower tufts freckling the pavement by the wall. Purely
-// cosmetic; added straight into the shop group, built once and never touched.
-export function populateStreet(group, r, { W, backZ, streetHalfX }) {
-  const add = (cat, x, z, height, tint = null) => {
-    const s = decorSprite(pick(r, DECOR[cat]), { height, tint });
-    s.position.set(x, 0, z);
+// Dress the street glimpsed through the shopfront from explicit placements
+// (src/game/layout.json `decor`, authored in the overworld editor — the old
+// seeded scatter was baked into that file once and is hand-tuned from there).
+// Purely cosmetic; added straight into the shop group. Returns the sprite
+// groups in placement order so the editor can map them back to the layout.
+export function placeStreetDecor(group, placements) {
+  return placements.map((p) => {
+    const s = decorSprite(p.path, { height: p.height });
+    s.position.set(p.x, 0, p.z);
     group.add(s);
     return s;
-  };
-
-  // street geometry (mirrors Shop._build): the road opens up out front and is
-  // fully walkable now, so trees are kept to the *edges* — banked as a leafy
-  // backdrop behind the row of restored houses, anchoring the far ends, and
-  // flanking the shopfront — never scattered across the open ground where
-  // they'd clutter the road or sprout out of the paving.
-  const roadFar = backZ - 9.5;
-  // the far side of the street is now a continuous row of restoration houses
-  // (see Shop._buildLots), sitting at z ≈ roadFar - 0.9. Bank a treeline just
-  // behind them so it reads as a wooded edge rising over the rooftops.
-  const backdropZ = roadFar - 2.4;
-  for (let x = -21; x <= 21; x += 1.6 + r() * 0.7) {
-    add("trees", x + (r() - 0.5) * 0.6, backdropZ - r() * 0.5, 3.4 + r() * 1.8);
-  }
-  // a taller clump anchoring each far end of the row, spilling toward the road
-  for (const side of [-1, 1]) {
-    add("trees", side * (21 + r() * 0.9), roadFar - 0.4 + r() * 1.0, 3.6 + r() * 1.4);
-    if (r() < 0.6)
-      add(r() < 0.6 ? "smallTrees" : "bushes", side * (20.2 + r()), roadFar + 1.4 + r() * 1.2, 1.3 + r());
-  }
-
-  // leafy trees flanking the shopfront, out past the pedestrian lanes so they
-  // never overlap a walking customer
-  for (const side of [-1, 1]) {
-    add("trees", side * (streetHalfX + 1.6 + r()), backZ - 2.0 - r() * 1.4, 3.0 + r() * 1.3);
-    add(r() < 0.5 ? "smallTrees" : "bushes", side * (streetHalfX + 0.4 + r() * 0.8), backZ - 4.2 - r() * 1.5, 1.4 + r());
-  }
-
-  // bushes + flower tufts hugging the base of the shopfront wall (the sliver of
-  // pavement the customers never tread), skipping the doorway and window
-  const doorCx = -3.0;
-  for (let x = -W / 2 + 0.8; x <= W / 2 - 0.8; x += 1.1 + r() * 0.5) {
-    if (Math.abs(x - doorCx) < 1.9) continue; // keep the doorstep clear
-    const z = backZ - 0.55 - r() * 0.5;
-    if (r() < 0.4) add("bushes", x, z, 0.8 + r() * 0.5);
-    else add("flowers", x + (r() - 0.5) * 0.4, z, 0.34 + r() * 0.22);
-  }
-  // a few flower clusters further out on the pavement corners
-  for (const side of [-1, 1]) {
-    for (let i = 0; i < 3; i++) {
-      add("flowers", side * (4.5 + r() * 3), backZ - 0.7 - r() * 1.1, 0.3 + r() * 0.2);
-    }
-  }
+  });
 }
 
 // Burst colour for each destructible prop, keyed by catalogue category. Stones

@@ -103,18 +103,16 @@ export class Dungeon {
     }
     }
 
-    // On the boss floor the arrival spot is room 0, so make room 0 the room
-    // that sits FARTHEST from the sealed door. Otherwise the player can spawn
-    // right beside the gate and stumble into the boss fight unintentionally —
-    // this pushes the entrance to the opposite end of the floor. (The stairs,
-    // picked farthest-from-entrance below, then land back near the door.)
-    if (isBoss && rooms.length > 1) {
-      const gcx = gateX + 0.5, gcy = BY + BH + 2; // grid cell just below the doorway
-      let bi = 0, bd = -Infinity;
-      for (let i = 0; i < rooms.length; i++) {
-        const d = Math.abs(rooms[i].cx - gcx) + Math.abs(rooms[i].cy - gcy);
-        if (d > bd) { bd = d; bi = i; }
-      }
+    // The arrival spot is room 0, and every floor reads bottom-to-top: the
+    // entrance sits toward the BOTTOM of the grid (high y — nearest the
+    // camera) and the way onward toward the top, so make room 0 the
+    // bottom-most room. On boss floors this doubles as spawn safety — the
+    // sealed door is up top past the arena, so the player can't drop in
+    // beside the gate and stumble into the boss fight unintentionally.
+    if (!tutorial && rooms.length > 1) {
+      let bi = 0, by = -Infinity;
+      for (let i = 0; i < rooms.length; i++)
+        if (rooms[i].cy > by) { by = rooms[i].cy; bi = i; }
       if (bi !== 0) { const t = rooms[0]; rooms[0] = rooms[bi]; rooms[bi] = t; }
     }
 
@@ -178,13 +176,15 @@ export class Dungeon {
 
     const cellPos = (x, y) => new THREE.Vector3((x - GW / 2 + 0.5) * CELL, 0, (y - GH / 2 + 0.5) * CELL);
 
-    // Pick the descent (down-stairs) room now — the one farthest from the
-    // arrival room — so the floor can leave a pit under it that the sunk stair
-    // flight drops into. (Boss/tutorial floors have no down-stairs, so no pit.)
-    let _farRoom = rooms[0], _farD = -1;
+    // Pick the descent (down-stairs) room now — the TOP-most room, opposite
+    // end of the grid from the bottom entrance, so every delve runs entrance
+    // (bottom) to exit (top) — and so the floor can leave a pit under it that
+    // the sunk stair flight drops into. (Boss/tutorial floors have no
+    // down-stairs, so no pit.)
+    let _farRoom = rooms[0], _farY = Infinity;
     for (const room of rooms) {
-      const d = Math.abs(room.cx - rooms[0].cx) + Math.abs(room.cy - rooms[0].cy);
-      if (d > _farD) { _farD = d; _farRoom = room; }
+      if (room === rooms[0]) continue;
+      if (room.cy < _farY) { _farY = room.cy; _farRoom = room; }
     }
     const hasDown = !tutorial && !isBoss;
     const floorHoles = hasDown ? new Set([`${_farRoom.cx},${_farRoom.cy}`]) : null;
@@ -253,20 +253,21 @@ export class Dungeon {
 
     // --- two flights of stairs now, one up and one down. The up-stairs stand
     // at the arrival spot (room 0) and lead back out of the cellar; the
-    // down-stairs go in the room farthest from the entrance for a longer
-    // descent (never on boss floors — the way deeper there opens past the
-    // boss). On the tutorial floor the lone room holds the arrival spot and the
-    // up-stairs against opposite walls so there's room to breathe.
+    // down-stairs go in the top-most room, opposite the bottom entrance (never
+    // on boss floors — the way deeper there opens past the boss). On the
+    // tutorial floor the lone room holds the arrival spot against the bottom
+    // wall and the up-stairs against the top, same bottom-to-top read as every
+    // other floor.
     const rm0 = rooms[0];
-    const entranceCell = tutorial ? { x: rm0.x + 1, y: rm0.cy } : { x: rm0.cx, y: rm0.cy };
+    const entranceCell = tutorial ? { x: rm0.cx, y: rm0.y + rm0.h - 2 } : { x: rm0.cx, y: rm0.cy };
     this.entrancePos = cellPos(entranceCell.x, entranceCell.y);
     this.entranceCell = entranceCell;
     // start with the entrance room revealed
     this.reveal(this.entrancePos.x + DUNGEON_ORIGIN.x, this.entrancePos.z + DUNGEON_ORIGIN.z);
 
-    // down-stairs go in the room farthest from the entrance for a longer descent
+    // down-stairs go in the top-most room, the far end of the climb
     // (_farRoom was chosen above so the floor pit lines up under the flight)
-    const stairsCell = tutorial ? { x: rm0.x + rm0.w - 2, y: rm0.cy } : { x: _farRoom.cx, y: _farRoom.cy };
+    const stairsCell = tutorial ? { x: rm0.cx, y: rm0.y + 1 } : { x: _farRoom.cx, y: _farRoom.cy };
     this.stairsPos = cellPos(stairsCell.x, stairsCell.y);
     this.stairsCell = stairsCell;
     this.hasDownStairs = hasDown;
@@ -280,15 +281,15 @@ export class Dungeon {
     }
 
     // up-stairs: the way back out. On normal floors they rise at the arrival
-    // spot; on the tutorial floor they take the far wall instead and stay
+    // spot; on the tutorial floor they take the top wall instead and stay
     // hidden until the chest is cracked, so the first objective is unmistakably
     // "smash the chest" — revealStairs() (called from openChest) brings the
-    // stairs + their light shaft back in.
+    // stairs + their light shaft back in. (The default flight already rises
+    // toward -z, into the top wall, so no turn is needed.)
     this.upStairsPos = tutorial ? this.stairsPos.clone() : this.entrancePos.clone();
     this.upStairsCell = tutorial ? stairsCell : entranceCell;
     const upStairs = makeStairs("up");
     upStairs.position.copy(this.upStairsPos);
-    if (tutorial) upStairs.rotation.y = -Math.PI / 2; // rise toward the far wall
     const upStairsCollider = modelCollider(upStairs, DUNGEON_ORIGIN);
     // the tutorial flight is inert & invisible until the chest is cracked, so
     // its collider stays out of play until revealStairs() lands it
@@ -399,7 +400,7 @@ export class Dungeon {
     if (tutorial) {
       const chest = makeChest();
       chest.position.copy(cellPos(rooms[0].cx, rooms[0].cy));
-      chest.rotation.y = -Math.PI / 2;
+      // front (clasp) faces +z, toward the player walking up from the entrance
       this.colliders.push(modelCollider(chest, DUNGEON_ORIGIN));
       this.group.add(chest);
       this.chests.push({ mesh: chest, opened: false, id: 0 });
