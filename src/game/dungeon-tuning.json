@@ -1,0 +1,742 @@
+{
+  "GEN": {
+    "gw": 18,
+    "gh": 32,
+    "ghBoss": 40,
+    "roomsBase": 8,
+    "roomsCap": 4,
+    "roomsRand": 3,
+    "roomMin": 3,
+    "roomWRand": 3,
+    "roomHRand": 4,
+    "loopBase": 1,
+    "loopRand": 2,
+    "enemyBase": 4,
+    "enemyRand": 3,
+    "spawnCapBase": 6,
+    "spawnCapPer": 2,
+    "chestBase": 1,
+    "chestRand": 2,
+    "keyChance": 0.4
+  },
+  "GEN_BY_FLOOR": {
+    "1": {
+      "gh": 22,
+      "gw": 10
+    },
+    "2": {
+      "gw": 12
+    },
+    "3": {
+      "gw": 12
+    }
+  },
+  "HOLE_THEMES": [
+    {
+      "palettes": [
+        [
+          11040106,
+          9199445
+        ],
+        [
+          10251093,
+          8345155
+        ],
+        [
+          9068365,
+          7294013
+        ]
+      ],
+      "torch": [
+        16751197,
+        16765773
+      ],
+      "shafts": [
+        16759162,
+        14262374
+      ],
+      "decor": {
+        "tint": 13943472,
+        "weights": {
+          "mushrooms": 0.15,
+          "stones": 0.4,
+          "dead": 0.25,
+          "bones": 0.2
+        }
+      }
+    },
+    {
+      "palettes": [
+        [
+          6263720,
+          5077644
+        ],
+        [
+          5539742,
+          4352637
+        ],
+        [
+          4881043,
+          3693936
+        ]
+      ],
+      "torch": [
+        6148351,
+        7329480
+      ],
+      "shafts": [
+        9418495,
+        7329480
+      ],
+      "decor": {
+        "tint": 12111832,
+        "weights": {
+          "mushrooms": 0.35,
+          "stones": 0.55,
+          "dead": 0.05,
+          "bones": 0.05
+        }
+      }
+    },
+    {
+      "palettes": [
+        [
+          11049610,
+          9207664
+        ],
+        [
+          10128506,
+          8220768
+        ],
+        [
+          9075818,
+          7168080
+        ]
+      ],
+      "torch": [
+        16771524,
+        16751197
+      ],
+      "shafts": [
+        16767392,
+        15261896
+      ],
+      "decor": {
+        "tint": 14735560,
+        "weights": {
+          "mushrooms": 0.1,
+          "stones": 0.25,
+          "dead": 0.25,
+          "bones": 0.4
+        }
+      }
+    },
+    {
+      "palettes": [
+        [
+          6986352,
+          5603164
+        ],
+        [
+          6130790,
+          4747858
+        ],
+        [
+          5209432,
+          3892037
+        ]
+      ],
+      "torch": [
+        7329480,
+        10120703
+      ],
+      "shafts": [
+        7329480,
+        9418495
+      ],
+      "decor": {
+        "tint": 12375230,
+        "weights": {
+          "mushrooms": 0.55,
+          "stones": 0.25,
+          "dead": 0.15,
+          "bones": 0.05
+        }
+      }
+    }
+  ],
+  "DUNGEON_MIX": [
+    [
+      [
+        "rat"
+      ],
+      [
+        "skitter",
+        "slime",
+        "goblin",
+        "rat"
+      ],
+      [
+        "slime",
+        "goblin",
+        "wisp",
+        "archer",
+        "rat"
+      ]
+    ],
+    [
+      [
+        "puddle",
+        "snapper",
+        "rat"
+      ],
+      [
+        "puddle",
+        "snapper",
+        "angler",
+        "rat"
+      ],
+      [
+        "snapper",
+        "angler",
+        "puddle",
+        "puddle",
+        "rat"
+      ]
+    ],
+    [
+      [
+        "rattler",
+        "gravewisp",
+        "rat"
+      ],
+      [
+        "rattler",
+        "gravewisp",
+        "boneguard",
+        "rat"
+      ],
+      [
+        "rattler",
+        "boneguard",
+        "gravewisp",
+        "boneguard",
+        "rat"
+      ]
+    ],
+    [
+      [
+        "sporeling",
+        "gloomcaster",
+        "rat"
+      ],
+      [
+        "sporeling",
+        "gloomcaster",
+        "mossbrute",
+        "rat"
+      ],
+      [
+        "gloomcaster",
+        "sporeling",
+        "mossbrute",
+        "mossbrute",
+        "rat"
+      ]
+    ]
+  ],
+  "ENEMY_KINDS": {
+    "rat": {
+      "hp": 2,
+      "dmg": 0,
+      "speed": 3.4,
+      "aggro": 4,
+      "gold": [
+        2,
+        6
+      ],
+      "behavior": "flee",
+      "harmless": true,
+      "windup": 0.3,
+      "reach": 0.9,
+      "glow": [
+        0.5,
+        0.35,
+        0.3
+      ],
+      "loot": [
+        "rathide"
+      ],
+      "dropRate": 0.3
+    },
+    "skitter": {
+      "hp": 2,
+      "dmg": 1,
+      "speed": 2.9,
+      "aggro": 7,
+      "gold": [
+        3,
+        8
+      ],
+      "behavior": "swarm",
+      "windup": 0.28,
+      "reach": 1.05,
+      "glow": [
+        0.6,
+        0.15,
+        0.15
+      ],
+      "loot": [
+        "egg",
+        "caveshroom"
+      ]
+    },
+    "slime": {
+      "hp": 4,
+      "dmg": 1,
+      "speed": 1.9,
+      "aggro": 6,
+      "gold": [
+        4,
+        10
+      ],
+      "behavior": "lunge",
+      "windup": 0.5,
+      "reach": 1.5,
+      "glow": [
+        0.15,
+        0.55,
+        0.2
+      ],
+      "loot": [
+        "jelly",
+        "caveshroom"
+      ]
+    },
+    "goblin": {
+      "hp": 5,
+      "dmg": 1,
+      "speed": 3,
+      "aggro": 8,
+      "gold": [
+        8,
+        16
+      ],
+      "behavior": "strafe",
+      "windup": 0.34,
+      "reach": 1.35,
+      "glow": [
+        0.6,
+        0.2,
+        0.1
+      ],
+      "loot": [
+        "meat",
+        "bread"
+      ]
+    },
+    "wisp": {
+      "hp": 3,
+      "dmg": 1,
+      "speed": 3.2,
+      "aggro": 9,
+      "gold": [
+        6,
+        12
+      ],
+      "behavior": "caster",
+      "windup": 0.55,
+      "band": [
+        4.5,
+        7.5
+      ],
+      "projSpeed": 3.8,
+      "projColor": 12160255,
+      "glow": [
+        0.4,
+        0.25,
+        0.7
+      ],
+      "loot": [
+        "lantern"
+      ]
+    },
+    "archer": {
+      "hp": 4,
+      "dmg": 1,
+      "speed": 2.7,
+      "aggro": 10,
+      "gold": [
+        10,
+        20
+      ],
+      "behavior": "archer",
+      "windup": 0.42,
+      "band": [
+        5,
+        9
+      ],
+      "projSpeed": 6.5,
+      "projColor": 9429247,
+      "glow": [
+        0.15,
+        0.5,
+        0.7
+      ],
+      "loot": [
+        "bread",
+        "ring"
+      ]
+    },
+    "brute": {
+      "hp": 12,
+      "dmg": 2,
+      "speed": 1.6,
+      "aggro": 7,
+      "gold": [
+        25,
+        45
+      ],
+      "behavior": "slam",
+      "windup": 0.72,
+      "reach": 2.4,
+      "glow": [
+        0.75,
+        0.1,
+        0.05
+      ],
+      "loot": [
+        "fang",
+        "meat"
+      ]
+    },
+    "puddle": {
+      "hp": 6,
+      "dmg": 1,
+      "speed": 1.7,
+      "aggro": 7,
+      "gold": [
+        6,
+        14
+      ],
+      "behavior": "lunge",
+      "windup": 0.55,
+      "reach": 1.6,
+      "glow": [
+        0.1,
+        0.4,
+        0.75
+      ],
+      "splitInto": "puddling",
+      "loot": [
+        "jelly",
+        "potion"
+      ]
+    },
+    "puddling": {
+      "hp": 1,
+      "dmg": 1,
+      "speed": 3.4,
+      "aggro": 9,
+      "gold": [
+        1,
+        3
+      ],
+      "behavior": "swarm",
+      "windup": 0.24,
+      "reach": 0.9,
+      "glow": [
+        0.15,
+        0.45,
+        0.75
+      ],
+      "loot": [
+        "jelly"
+      ],
+      "dropRate": 0.15
+    },
+    "snapper": {
+      "hp": 5,
+      "dmg": 1,
+      "speed": 3.1,
+      "aggro": 8,
+      "gold": [
+        8,
+        16
+      ],
+      "behavior": "strafe",
+      "windup": 0.3,
+      "reach": 1.2,
+      "glow": [
+        0.1,
+        0.5,
+        0.6
+      ],
+      "loot": [
+        "egg",
+        "meat"
+      ]
+    },
+    "angler": {
+      "hp": 4,
+      "dmg": 1,
+      "speed": 2.6,
+      "aggro": 10,
+      "gold": [
+        10,
+        20
+      ],
+      "behavior": "geyser",
+      "windup": 0.85,
+      "band": [
+        4,
+        7
+      ],
+      "reach": 1.8,
+      "glow": [
+        0.1,
+        0.5,
+        0.9
+      ],
+      "loot": [
+        "lantern",
+        "potion"
+      ]
+    },
+    "rattler": {
+      "hp": 3,
+      "dmg": 1,
+      "speed": 3.6,
+      "aggro": 9,
+      "gold": [
+        6,
+        12
+      ],
+      "behavior": "swarm",
+      "windup": 0.24,
+      "reach": 1,
+      "glow": [
+        0.8,
+        0.75,
+        0.5
+      ],
+      "loot": [
+        "fang"
+      ]
+    },
+    "gravewisp": {
+      "hp": 5,
+      "dmg": 1,
+      "speed": 3,
+      "aggro": 10,
+      "gold": [
+        10,
+        20
+      ],
+      "behavior": "caster",
+      "windup": 0.5,
+      "band": [
+        4.5,
+        8
+      ],
+      "projSpeed": 5.2,
+      "projColor": 16771496,
+      "glow": [
+        0.85,
+        0.8,
+        0.4
+      ],
+      "loot": [
+        "bell",
+        "caveshroom"
+      ]
+    },
+    "boneguard": {
+      "hp": 9,
+      "dmg": 2,
+      "speed": 2,
+      "aggro": 9,
+      "gold": [
+        18,
+        34
+      ],
+      "behavior": "charger",
+      "windup": 0.7,
+      "reach": 1.6,
+      "glow": [
+        0.9,
+        0.85,
+        0.6
+      ],
+      "loot": [
+        "key",
+        "bomb"
+      ]
+    },
+    "sporeling": {
+      "hp": 2,
+      "dmg": 2,
+      "speed": 3.3,
+      "aggro": 10,
+      "gold": [
+        4,
+        9
+      ],
+      "behavior": "bomber",
+      "windup": 0.6,
+      "reach": 1.9,
+      "glow": [
+        0.75,
+        0.3,
+        0.9
+      ],
+      "loot": [
+        "caveshroom"
+      ]
+    },
+    "gloomcaster": {
+      "hp": 5,
+      "dmg": 1,
+      "speed": 3,
+      "aggro": 11,
+      "gold": [
+        12,
+        24
+      ],
+      "behavior": "blinker",
+      "windup": 0.6,
+      "band": [
+        4,
+        8
+      ],
+      "projSpeed": 5.5,
+      "projColor": 13929727,
+      "glow": [
+        0.6,
+        0.25,
+        0.85
+      ],
+      "loot": [
+        "gem",
+        "potion"
+      ]
+    },
+    "mossbrute": {
+      "hp": 14,
+      "dmg": 2,
+      "speed": 1.6,
+      "aggro": 8,
+      "gold": [
+        28,
+        50
+      ],
+      "behavior": "slam",
+      "windup": 0.75,
+      "reach": 2.5,
+      "glow": [
+        0.4,
+        0.85,
+        0.4
+      ],
+      "loot": [
+        "feather",
+        "fang"
+      ]
+    },
+    "boss": {
+      "hp": 70,
+      "dmg": 2,
+      "speed": 1.7,
+      "aggro": 15,
+      "gold": [
+        0,
+        0
+      ],
+      "behavior": "boss",
+      "windup": 0.78,
+      "reach": 3.4,
+      "glow": [
+        0.95,
+        0.08,
+        0.05
+      ],
+      "projSpeed": 3.6,
+      "projColor": 16742989
+    }
+  },
+  "BOSSES": [
+    {
+      "name": "Broodmother of the Warren",
+      "awaken": "the Broodmother skitters from her nest",
+      "hp": 58,
+      "speed": 2.25,
+      "windup": 0.66,
+      "reach": 2.7,
+      "rotation": [
+        "pounce",
+        "charge",
+        "pounce",
+        "burst"
+      ],
+      "minions": [
+        "skitter",
+        "skitter",
+        "skitter"
+      ],
+      "projSpeed": 3.2,
+      "projColor": 16757338
+    },
+    {
+      "name": "The Drowned Maw",
+      "awaken": "something vast heaves out of the deep",
+      "hp": 92,
+      "speed": 1.25,
+      "windup": 0.95,
+      "reach": 3.2,
+      "rotation": [
+        "deluge",
+        "burst",
+        "deluge",
+        "charge"
+      ],
+      "minions": [
+        "puddling",
+        "puddling",
+        "snapper"
+      ],
+      "burstN": 10,
+      "projSpeed": 2.9,
+      "projColor": 6148351
+    },
+    {
+      "name": "Ogre King of the Hollow",
+      "awaken": "the Ogre King awakens",
+      "minions": [
+        "rattler",
+        "rattler",
+        "boneguard"
+      ]
+    },
+    {
+      "name": "Sovereign of the Gloom",
+      "awaken": "the marsh-lights bend toward their sovereign",
+      "hp": 62,
+      "speed": 2,
+      "windup": 0.75,
+      "reach": 2.4,
+      "rotation": [
+        "blink",
+        "burst",
+        "blink",
+        "charge"
+      ],
+      "minions": [
+        "gloomcaster",
+        "sporeling",
+        "sporeling"
+      ],
+      "projSpeed": 4,
+      "projColor": 7329480
+    }
+  ]
+}

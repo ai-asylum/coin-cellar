@@ -6,10 +6,15 @@
 // catalogue always reflects the current game — it can't drift.
 import * as THREE from "three";
 
-import { ITEMS, itemSprite, EQUIP_DROPS } from "../game/items.js";
+import { ITEMS, itemSprite, itemMesh, EQUIP_DROPS } from "../game/items.js";
+import { makeChest, makeGate, makeStairs, makeDescent } from "../game/dungeon-geometry.js";
+import { makeCaveMouth, buildLotParts } from "../game/shop-build.js";
+import layoutData from "../game/layout.json";
+import { weaponMesh } from "../game/gear.js";
 import { ENEMY_KINDS, DUNGEON_MIX, HOLE_THEMES, DUNGEON_LOOT, BOSSES, bossDefFor, FLOORS_PER_DUNGEON } from "../game/dungeon.js";
-import { HOLE_DEFS } from "../game/cellar.js";
+import { HOLE_DEFS } from "../game/cave.js";
 import { ARCHETYPES } from "../game/shop.js";
+import { NPCS, CROWD_NPCS, PERSONALITIES, personalityName, personalityArchetype, TIMES_OF_DAY } from "../game/npc-data.js";
 import { Creature } from "../chargen/creature.js";
 import { BlockyCreature, variantForSeed } from "../chargen/blocky.js";
 import { CHAR_VARIANTS, loadCharacters } from "../chargen/assets.js";
@@ -61,7 +66,15 @@ function card(entry) {
   const sw = (entry.swatches || []).length
     ? `<div class="swatches">${entry.swatches.map(([l, n]) => swatch(l, n)).join("")}</div>`
     : "";
-  return `<article class="card${tierCls}">${head}${visual}${desc}${stats}${sw}</article>`;
+  const lines = (entry.lines || []).length
+    ? `<ul class="card-lines">${entry.lines.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>`
+    : (entry.lineGroups || []).length
+      ? entry.lineGroups
+          .filter((g) => (g.lines || []).length)
+          .map((g) => `<div class="card-lines-group"><span class="card-lines-time">${esc(g.label)}</span><ul class="card-lines">${g.lines.map((l) => `<li>${esc(l)}</li>`).join("")}</ul></div>`)
+          .join("")
+      : "";
+  return `<article class="card${tierCls}">${head}${visual}${desc}${stats}${sw}${lines}</article>`;
 }
 
 // Entries are cards, except `{ section, icon? }` markers which render as a
@@ -448,21 +461,71 @@ function buildEnemies() {
 }
 
 function buildCustomers() {
-  const totalW = ARCHETYPES.reduce((s, a) => s + a.w, 0);
+  // Each townsperson shops as a fixed archetype set by their personality, so the
+  // crowd's wealth mix is just the count of townsfolk per archetype (reserved
+  // story cameos don't join the ambient crowd, so they're left out).
+  const counts = new Map(ARCHETYPES.map((a) => [a.name, 0]));
+  for (const npc of CROWD_NPCS) {
+    const name = personalityArchetype(npc);
+    counts.set(name, (counts.get(name) || 0) + 1);
+  }
+  const total = CROWD_NPCS.length || 1;
   // representative body seeds — just varied so each card shows a different face
   const seeds = [1003, 1041, 1207, 1338];
-  return ARCHETYPES.map((a, i) => ({
-    title: a.name,
-    id: a.name.toLowerCase(),
-    icon: icon(a.moods),
-    badges: [{ text: `${Math.round((a.w / totalW) * 100)}% of crowd`, kind: "" }],
-    visual: `<div class="model3d" data-kind="customer" data-seed="${seeds[i % seeds.length]}"></div>`,
-    stats: [
-      ["Markup they tolerate", `${a.lo.toFixed(2)}× – ${a.hi.toFixed(2)}×`],
-      ["Chance to make an offer", Math.round(a.buy * 100) + "%"],
-      ["Spawn weight", a.w],
-    ],
-  }));
+  return ARCHETYPES.map((a, i) => {
+    const n = counts.get(a.name) || 0;
+    return {
+      title: a.name,
+      id: a.name.toLowerCase(),
+      icon: icon(a.moods),
+      badges: [{ text: `${Math.round((n / total) * 100)}% of crowd`, kind: "" }],
+      visual: `<div class="model3d" data-kind="customer" data-seed="${seeds[i % seeds.length]}"></div>`,
+      stats: [
+        ["Markup they tolerate", `${a.lo.toFixed(2)}× – ${a.hi.toFixed(2)}×`],
+        ["Chance to make an offer", Math.round(a.buy * 100) + "%"],
+        ["Townsfolk of this type", n],
+      ],
+    };
+  });
+}
+
+// The named townsfolk: every shopper and street passer-by is one of these
+// residents — a fixed skin, a personality voice, and their own small talk.
+// Grouped by personality so the temperaments read at a glance.
+function buildNpcs() {
+  const cards = [];
+  const order = Object.keys(PERSONALITIES);
+  const byPersona = new Map(order.map((k) => [k, []]));
+  for (const npc of NPCS) (byPersona.get(npc.personality) || []).push(npc);
+
+  for (const key of order) {
+    const persona = PERSONALITIES[key];
+    const group = byPersona.get(key);
+    if (!group || !group.length) continue;
+    cards.push({ section: `${persona.name} — ${persona.blurb} · shops as ${persona.archetype}`, icon: icon(persona.mood) });
+    for (const npc of group) {
+      const badges = [{ text: personalityName(npc), kind: "" }, { text: personalityArchetype(npc), kind: "" }];
+      if (npc.reserved) badges.push({ text: "STORY CAMEO", kind: "boss" });
+      cards.push({
+        title: npc.name,
+        id: `${npc.id} · character-${npc.variant}`,
+        icon: icon(persona.mood),
+        badges,
+        visual: `<div class="model3d" data-kind="blocky" data-variant="${npc.variant}"></div>`,
+        stats: [
+          ["Personality", personalityName(npc)],
+          ["Shops as", personalityArchetype(npc)],
+          ["Skin", `character-${npc.variant}`],
+          ["Role", npc.reserved ? "Scripted cameo" : "Shopper / passer-by"],
+        ],
+        lineGroups: TIMES_OF_DAY.map((t) => ({
+          label: `${t[0].toUpperCase()}${t.slice(1)}`,
+          lines: npc.lines?.[t] || [],
+        })),
+      });
+    }
+  }
+  return cards;
 }
 
 // The character art roster: the Kenney "Blocky Characters" pack the hero and
@@ -526,6 +589,174 @@ function buildFloors() {
   return cards;
 }
 
+// --- town & world models ---------------------------------------------------
+// The buildings and set-dressing of the overworld: the dungeon's cave mouth
+// and every restoration lot's two states (the boarded-up plot / stone ruin,
+// and the finished house it becomes). Built by the exact game constructors —
+// makeCaveMouth and buildLotParts from shop-build.js, fed the committed
+// layout.json — so the catalogue mirrors the real village.
+
+const cap = (s) => String(s).charAt(0).toUpperCase() + String(s).slice(1);
+
+// key -> factory, shared by buildTown (reads the breakdown) and mountPreviews
+// (builds the live View). Repopulated on every buildTown() call.
+const _townFactories = new Map();
+
+function buildTown() {
+  _townFactories.clear();
+  const cards = [];
+
+  const add = (key, entry, make) => {
+    _townFactories.set(key, make);
+    let bd = { meshes: 0, parts: [] };
+    try {
+      bd = primitiveBreakdown(make());
+    } catch (err) {
+      console.error("town build failed", key, err);
+    }
+    cards.push({
+      ...entry,
+      badges: [{ text: `${bd.meshes} ${bd.meshes === 1 ? "part" : "parts"}` }, ...(entry.badges || [])],
+      desc: entry.desc ?? (bd.parts.length ? `Assembled from ${bd.parts.join(", ")}.` : undefined),
+      visual: `<div class="model3d" data-kind="town" data-town="${key}"></div>`,
+    });
+  };
+
+  // the dungeon's front door — the rocky mouth capping the village road
+  cards.push({ section: "Dungeon entrance", icon: icon("hole") });
+  add("cave", {
+    title: "Cave Mouth",
+    id: "dungeon entrance",
+    icon: icon("hole"),
+    desc: "The rocky maw at the top of the road — walking into it steps down to the cave lobby and its four trapdoors.",
+  }, () => makeCaveMouth());
+
+  // the restoration lots: each is a buildable plot the Mayor's fund rebuilds.
+  // Show the finished houses first, then the derelict states they start in.
+  const lots = layoutData.lots || [];
+  cards.push({ section: "Village houses — restored", icon: icon("home") });
+  lots.forEach((lot, i) => {
+    add(`house:${i}`, {
+      title: `${cap(lot.kind)} house ${i + 1}`,
+      id: `lot ${i + 1} · restored`,
+      icon: icon("home"),
+      badges: [{ text: `${lot.cost}g`, kind: "price" }],
+      desc: `The finished home revealed when lot ${i + 1} is rebuilt; a new resident then moves in and shops here.`,
+    }, () => buildLotParts(lot.after));
+  });
+  cards.push({ section: "Derelict lots — before restoration", icon: icon("hole") });
+  lots.forEach((lot, i) => {
+    add(`ruin:${i}`, {
+      title: lot.kind === "ruin" ? `Stone ruin ${i + 1}` : `Boarded plot ${i + 1}`,
+      id: `lot ${i + 1} · ${lot.kind}`,
+      icon: icon("hole"),
+      badges: [{ text: lot.kind.toUpperCase() }],
+      desc: `The run-down site the player pays ${lot.cost}g to rebuild into ${lot.kind === "ruin" ? "the house above" : "a home"}.`,
+    }, () => buildLotParts(lot.before));
+  });
+
+  return cards;
+}
+
+// --- primitive models ------------------------------------------------------
+// Every mesh the game assembles by hand from raw THREE primitives (boxes,
+// cylinders, spheres…) instead of a loaded art asset. The same constructors
+// the game ships are called here, so the per-card geometry breakdown is the
+// real thing. The dungeon fixtures fall back to their primitive form because
+// the admin never loads the KayKit pack (dungeonAssetsReady() stays false).
+
+const GEO_LABEL = {
+  BoxGeometry: "Box", CylinderGeometry: "Cylinder", SphereGeometry: "Sphere",
+  ConeGeometry: "Cone", TorusGeometry: "Torus", CapsuleGeometry: "Capsule",
+  OctahedronGeometry: "Octahedron", IcosahedronGeometry: "Icosahedron",
+  ExtrudeGeometry: "Extruded shape", PlaneGeometry: "Plane",
+};
+
+// Tally the geometry primitives a model is composed of, e.g. "3× Cylinder,
+// 2× Sphere" — read straight off the built meshes so it can't drift.
+function primitiveBreakdown(model) {
+  const counts = new Map();
+  let meshes = 0;
+  model.traverse((o) => {
+    if (o.isMesh && o.geometry) {
+      meshes++;
+      const type = o.geometry.type || "Geometry";
+      const label = GEO_LABEL[type] || type.replace(/Geometry$/, "");
+      counts.set(label, (counts.get(label) || 0) + 1);
+    }
+  });
+  const parts = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([label, n]) => `${n}× ${label}`);
+  return { meshes, parts };
+}
+
+// key -> factory, shared by the card builder (which builds one to read its
+// breakdown) and mountPreviews (which builds another for the live View).
+// Repopulated on every buildPrimitives() call.
+const _primFactories = new Map();
+
+function buildPrimitives() {
+  _primFactories.clear();
+  const cards = [];
+
+  const add = (key, entry, make) => {
+    _primFactories.set(key, make);
+    let bd = { meshes: 0, parts: [] };
+    try {
+      bd = primitiveBreakdown(make());
+    } catch (err) {
+      console.error("primitive build failed", key, err);
+    }
+    cards.push({
+      ...entry,
+      icon: entry.icon ?? icon("box"),
+      badges: [{ text: `${bd.meshes} ${bd.meshes === 1 ? "part" : "parts"}` }, ...(entry.badges || [])],
+      desc: bd.parts.length ? `Assembled from ${bd.parts.join(", ")}.` : entry.desc,
+      visual: `<div class="model3d" data-kind="prim" data-prim="${key}"></div>`,
+    });
+  };
+
+  // every sellable item's tiny toon prop (the in-world / dungeon-drop mesh —
+  // the Merchandise tab shows the flat icon art; this is the 3D model behind it)
+  cards.push({ section: "Merchandise props", icon: icon("box") });
+  for (const it of Object.values(ITEMS)) {
+    add(`item:${it.id}`, {
+      title: it.name,
+      id: it.id,
+      tier: it.tier,
+      icon: itemIcon(it.icon),
+      badges: [{ text: `T${it.tier}`, kind: `tier tier${it.tier}` }],
+    }, () => itemMesh(it.id));
+  }
+
+  // static dungeon set-dressing built in dungeon-geometry.js
+  cards.push({ section: "Dungeon fixtures", icon: icon("chest") });
+  const fixtures = [
+    ["fx:chestWood", "Treasure Chest", "chest · wood", () => makeChest("wood")],
+    ["fx:chestIron", "Iron Chest", "chest · iron", () => makeChest("iron")],
+    ["fx:gate", "Boss Portcullis", "gate", () => makeGate()],
+    ["fx:stairsUp", "Ascending Stairs", "stairs · up", () => makeStairs("up")],
+    ["fx:stairsDown", "Descending Stairs", "stairs · down", () => makeStairs("down")],
+    ["fx:descent", "Descent Shaft", "descent", () => makeDescent()],
+  ];
+  for (const [key, title, id, make] of fixtures) add(key, { title, id }, make);
+
+  // the in-hand weapon meshes gear.js builds per weapon type (distinct from the
+  // shelf props above — these are sized and oriented to sit in the hero's hand)
+  cards.push({ section: "Wielded weapons", icon: icon("swords") });
+  const weapons = [
+    ["wp:wsword", "wsword", "Pine Sword"],
+    ["wp:bow", "bow", "Hunter's Bow"],
+    ["wp:staff", "staff", "Oak Staff"],
+  ];
+  for (const [key, wid, title] of weapons) {
+    add(key, { title: `${title} — wielded`, id: `${wid} · in-hand` }, () => weaponMesh(wid));
+  }
+
+  return cards;
+}
+
 // --- preview mounting ------------------------------------------------------
 
 function mountPreviews(root) {
@@ -535,6 +766,12 @@ function mountPreviews(root) {
       if (kind === "item") {
         const model = itemSprite(el.dataset.item);
         views.push(new View(el, model, { disposeModel: false }));
+      } else if (kind === "prim") {
+        const make = _primFactories.get(el.dataset.prim);
+        if (make) views.push(new View(el, make(), { disposeModel: false }));
+      } else if (kind === "town") {
+        const make = _townFactories.get(el.dataset.town);
+        if (make) views.push(new View(el, make(), { disposeModel: false }));
       } else if (kind === "enemy") {
         const k = el.dataset.enemy;
         const def = ENEMY_KINDS[k];
@@ -564,8 +801,11 @@ const TABS = [
   { id: "loot", icon: "chest", label: "Loot", build: buildLoot, unit: "item" },
   { id: "enemies", icon: "ogre", label: "Monsters", build: buildEnemies, unit: "monster" },
   { id: "customers", icon: "faceHappy", label: "Shoppers", build: buildCustomers, unit: "archetype" },
+  { id: "npcs", icon: "people", label: "Townsfolk", build: buildNpcs, unit: "resident" },
   { id: "cast", icon: "people", label: "Cast", build: buildCast, unit: "character" },
   { id: "floors", icon: "hole", label: "Dungeon", build: buildFloors, unit: "floor" },
+  { id: "town", icon: "shop", label: "Town", build: buildTown, unit: "model" },
+  { id: "prims", icon: "box", label: "Primitives", build: buildPrimitives, unit: "model" },
 ];
 
 function render(tabId) {

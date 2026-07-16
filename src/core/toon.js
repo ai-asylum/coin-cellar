@@ -76,8 +76,13 @@ export function toonRamp() {
   return _ramp;
 }
 
+// Ceiling on the points an occluder material can track at once (the hero plus
+// up to this many live enemies); enemies past it are dropped by feedOccluder.
+const MAX_OCCLUDERS = 8;
+
 // `occlude`: when true, fragments that sit on the line between the camera and
-// the tracked point (uPlayer) dither away, so a wall can't hide the player.
+// any tracked point (the hero's torso, plus live enemies) dither away, so a
+// wall can't hide the player or the foes bearing down on them.
 // Feed it live positions every frame via mat.userData.shader.uniforms.
 export function makeToonMaterial({ color = 0xffffff, map = null, vertexColors = false, rim = 0.5, rimColor = 0xbfd7ff, occlude = false, dissolve = false, polygonOffset = false } = {}) {
   const mat = new THREE.MeshToonMaterial({
@@ -143,11 +148,17 @@ export function makeToonMaterial({ color = 0xffffff, map = null, vertexColors = 
           outgoingLight += uRimColor * rimF * uRim;`;
       }
       if (occlude) {
-        shader.uniforms.uPlayer = { value: new THREE.Vector3() };
+        // one tracked point per occluder: the hero's torso plus any live
+        // enemies fed in each frame, so walls between the camera and anything
+        // that matters dither away instead of hiding it (see feedOccluder)
+        shader.uniforms.uOccluders = { value: Array.from({ length: MAX_OCCLUDERS }, () => new THREE.Vector3()) };
+        shader.uniforms.uOccluderCount = { value: 1 };
         shader.uniforms.uCamPos = { value: new THREE.Vector3() };
         shader.uniforms.uFadeRadius = { value: 1.7 };
         common += `
-          uniform vec3 uPlayer;
+          #define MAX_OCCLUDERS ${MAX_OCCLUDERS}
+          uniform vec3 uOccluders[MAX_OCCLUDERS];
+          uniform int uOccluderCount;
           uniform vec3 uCamPos;
           uniform float uFadeRadius;
           varying vec3 vWorldPos;
@@ -166,14 +177,21 @@ export function makeToonMaterial({ color = 0xffffff, map = null, vertexColors = 
              _wp = modelMatrix * _wp;
              vWorldPos = _wp.xyz;`
           );
+        // take the strongest cutout across every tracked point: a fragment
+        // between the camera and the hero OR any enemy dithers away
         inject += `
-          vec3 _ab = uPlayer - uCamPos;
-          float _t = dot(vWorldPos - uCamPos, _ab) / max(dot(_ab, _ab), 1e-4);
-          vec3 _closest = uCamPos + _ab * clamp(_t, 0.0, 1.0);
-          float _d = distance(vWorldPos, _closest);
-          // fade only fragments between the camera and the player, near the ray
-          float _occ = 1.0 - smoothstep(uFadeRadius * 0.5, uFadeRadius, _d);
-          _occ *= smoothstep(0.02, 0.14, _t) * (1.0 - smoothstep(0.88, 1.0, _t));
+          float _occ = 0.0;
+          for (int _i = 0; _i < MAX_OCCLUDERS; _i++) {
+            if (_i >= uOccluderCount) break;
+            vec3 _ab = uOccluders[_i] - uCamPos;
+            float _t = dot(vWorldPos - uCamPos, _ab) / max(dot(_ab, _ab), 1e-4);
+            vec3 _closest = uCamPos + _ab * clamp(_t, 0.0, 1.0);
+            float _d = distance(vWorldPos, _closest);
+            // fade only fragments between the camera and the point, near the ray
+            float _o = 1.0 - smoothstep(uFadeRadius * 0.5, uFadeRadius, _d);
+            _o *= smoothstep(0.02, 0.14, _t) * (1.0 - smoothstep(0.88, 1.0, _t));
+            _occ = max(_occ, _o);
+          }
           if (_occ * 0.85 > ign(gl_FragCoord.xy)) discard;`;
       }
       shader.fragmentShader = shader.fragmentShader
@@ -185,15 +203,36 @@ export function makeToonMaterial({ color = 0xffffff, map = null, vertexColors = 
   return mat;
 }
 
-// Drive an `occlude:true` material's see-through cutout: feed it the camera and
-// the tracked point (the player's torso) so walls on the line between them
-// dither away. Safe to call before the shader has compiled (no-op until then).
+// Drive an `occlude:true` material's see-through cutout: feed it the camera,
+// the player's torso, and (optionally) a list of live enemies so walls on the
+// line between the camera and any of them dither away. `enemies` items just
+// need a `.position` (and optionally `.height`); nearer-the-camera enemies win
+// if there are more than MAX_OCCLUDERS. Safe to call before the shader has
+// compiled (no-op until then).
 const _torso = new THREE.Vector3();
-export function feedOccluder(mat, player, cam, torsoFrac = 0.6) {
+export function feedOccluder(mat, player, cam, torsoFrac = 0.6, enemies = null) {
   const sh = mat && mat.userData && mat.userData.shader;
-  if (!sh || !sh.uniforms.uPlayer) return;
+  if (!sh || !sh.uniforms.uOccluders) return;
+  const slots = sh.uniforms.uOccluders.value;
+  let n = 0;
   _torso.copy(player.position).setY((player.height ?? 1) * torsoFrac);
-  sh.uniforms.uPlayer.value.copy(_torso);
+  slots[n++].copy(_torso);
+  if (enemies && enemies.length) {
+    // keep the enemies closest to the camera when we overflow the slots — they
+    // are the ones most likely to end up tucked behind a near wall
+    let list = enemies;
+    const room = slots.length - n;
+    if (enemies.length > room) {
+      list = [...enemies].sort(
+        (a, b) => a.position.distanceToSquared(cam.position) - b.position.distanceToSquared(cam.position)
+      );
+    }
+    for (const e of list) {
+      if (n >= slots.length) break;
+      slots[n++].copy(e.position).setY((e.height ?? 1) * torsoFrac);
+    }
+  }
+  sh.uniforms.uOccluderCount.value = n;
   sh.uniforms.uCamPos.value.copy(cam.position);
 }
 

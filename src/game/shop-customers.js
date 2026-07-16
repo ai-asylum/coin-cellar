@@ -8,8 +8,27 @@ import { BlockyCreature, variantForSeed, HARD_SEED } from "../chargen/blocky.js"
 import { ITEMS, LOOT_BY_TIER } from "./items.js";
 import { rng, pick, clamp } from "../core/engine.js";
 import { ARCHETYPES, SELLER_CHANCE, MAX_CUSTOMERS } from "./shop-data.js";
+import { CROWD_NPCS, npcById, npcByVariant, personalityArchetype } from "./npc-data.js";
 
 const _d = new THREE.Vector3();
+
+// Resolve a townsperson's fixed shopper characteristic (see npc-data.js) to its
+// ARCHETYPES entry, so the same face always haggles in character. Falls back to
+// the everyday "Regular" temperament if a personality has no archetype set.
+const _archByName = new Map(ARCHETYPES.map((a) => [a.name, a]));
+function archetypeForNpc(npc) {
+  return _archByName.get(personalityArchetype(npc)) || ARCHETYPES[1] || ARCHETYPES[0];
+}
+
+// How close the player must be for a townsperson to notice them: slow to a
+// curious amble and turn to face them as they pass.
+const NPC_NOTICE_R = 2.2;
+// Townsfolk carry themselves at an unhurried, Animal-Crossing-ish pace: a
+// gentle steady turn, slightly slowed limbs, and a relaxed stroll.
+const NPC_TURN_RATE = 2.6; // rad/s — a soft, unhurried pivot
+const NPC_ANIM_SCALE = 0.85; // slightly slower gait
+const NPC_WALK_MUL = 0.8; // relaxed base walking speed
+const NPC_NOTICE_MUL = 0.3; // extra slow-down when ambling past the player
 
 export const customerMethods = {
   // Trickle shoppers in all day: as long as something's on the shelves and we
@@ -25,7 +44,12 @@ export const customerMethods = {
     if (this.stockedCount() === 0 || this.customers.length >= MAX_CUSTOMERS) return;
     this._spawnT -= dt;
     if (this._spawnT > 0) return;
-    this._spawnCustomer();
+    const sent = this._spawnCustomer();
+    if (!sent) {
+      // nobody free to recruit this instant — check back shortly for a stroller
+      this._spawnT = 0.5;
+      return;
+    }
     // more residents → livelier street: base ~5.5s, easing down toward ~1.8s
     const pop = this.game.townPop ? this.game.townPop() : 0;
     const interval = Math.max(1.8, 5.5 - pop * 0.5);
@@ -45,15 +69,29 @@ export const customerMethods = {
   // waits for the vitrine. Endless patience so onboarding can't stall out.
   spawnScriptedCustomer(seed = 4242) {
     const game = this.game;
-    const creature = new BlockyCreature(variantForSeed(seed), { height: 1.5 });
-    creature.position.copy(this.streetEndS); // in from the village end
-    creature.heading = Math.PI; // walking north, up toward the shop door
+    const npc = this._allocNpc(seed) || CROWD_NPCS[0];
+    const creature = new BlockyCreature(npc.variant, {
+      height: 1.5,
+      turnRate: NPC_TURN_RATE,
+      animScale: NPC_ANIM_SCALE,
+    });
+    // FTUE's first shopper enters fast: spawn just outside the shop, aligned
+    // with the door and 4m out, so he steps in almost immediately instead of
+    // trudging the whole street up from the village end.
+    const outward = this.doorPos.clone().sub(this.doorInside).setY(0).normalize();
+    const scriptedSpawn = this.doorPos.clone().addScaledVector(outward, 4);
+    creature.position.copy(scriptedSpawn);
+    creature.heading = Math.atan2(
+      this.doorInside.x - scriptedSpawn.x,
+      this.doorInside.z - scriptedSpawn.z,
+    ); // facing the shop door
     this.group.add(creature);
     const cust = {
       id: game.net.newId(),
       seed,
+      npc,
       creature,
-      arch: ARCHETYPES[1] || ARCHETYPES[0],
+      arch: archetypeForNpc(npc),
       mode: "buy",
       scripted: true,
       sellItem: null,
@@ -90,13 +128,20 @@ export const customerMethods = {
     const game = this.game;
     if (!game.gameOver) {
       this._passerT -= dt;
-      if (this._passerT <= 0 && this.passersby.length < 5) {
+      if (this._passerT <= 0 && this.passersby.length < 3) {
         this._passerT = 1.6 + Math.random() * 3;
         this._spawnPasserby();
       }
     }
     for (const p of [...this.passersby]) {
       const c = p.creature;
+      if (p.chatting) {
+        // paused for a chat with the player — face them and idle in place
+        const pp = game.player.position;
+        c.heading = Math.atan2(pp.x - c.position.x, pp.z - c.position.z);
+        c.update(dt, elapsed);
+        continue;
+      }
       p.life -= dt;
       if (p.pause > 0) {
         p.pause -= dt; // loitering — stand still but keep the idle anim ticking
@@ -109,14 +154,22 @@ export const customerMethods = {
           if (p.life <= 0) { p.tx = p.exitX; p.tz = p.exitZ; p.life = -1e9; p.pause = 0; }
           else { this._pickPasserTarget(p); p.pause = Math.random() < 0.4 ? 0.6 + Math.random() * 1.4 : 0; }
         } else {
-          c.position.x += (dx / d) * p.speed * dt;
-          c.position.z += (dz / d) * p.speed * dt;
-          c.heading = Math.atan2(dx, dz);
+          // slow to a curious amble and glance over when the player's right
+          // beside them, then pick the pace back up once they've passed
+          const pp = game.player.position;
+          const near = Math.hypot(pp.x - c.position.x, pp.z - c.position.z) < NPC_NOTICE_R;
+          const spd = p.speed * (near ? NPC_NOTICE_MUL : NPC_WALK_MUL);
+          c.position.x += (dx / d) * spd * dt;
+          c.position.z += (dz / d) * spd * dt;
+          c.heading = near
+            ? Math.atan2(pp.x - c.position.x, pp.z - c.position.z)
+            : Math.atan2(dx, dz);
         }
       }
       c.update(dt, elapsed);
       // retire once they've reached the exit point beyond the street edge
       if (p.life <= -1e8 && Math.abs(c.position.z) > this.streetRegion.alongMax + 2.4) {
+        this._freeNpc(p.npc);
         c.dispose();
         this.passersby = this.passersby.filter((x) => x !== p);
       }
@@ -134,7 +187,10 @@ export const customerMethods = {
 
   _spawnPasserby() {
     const R = this.streetRegion;
-    const creature = makeCustomerBody(Math.floor(Math.random() * 1e6));
+    const npc = this._allocNpc();
+    if (!npc) return; // no free skin right now — skip this stroller
+    const seed = Math.floor(Math.random() * 1e6);
+    const creature = makeCustomerBody(npc, seed);
     // in from (and back out through) the village end — the south. The north
     // end is capped by the cave mound, so nobody strolls out of the rocks.
     const span = R.alongMax + 2.5;
@@ -143,6 +199,8 @@ export const customerMethods = {
     this.group.add(creature);
     const p = {
       creature,
+      npc,
+      seed, // carried over if this stroller is later recruited into the shop
       speed: 1.0 + Math.random() * 0.9,
       life: 10 + Math.random() * 14, // seconds of milling before they head off
       pause: 0,
@@ -154,27 +212,72 @@ export const customerMethods = {
     this.passersby.push(p);
   },
 
+  // Hand out a townsperson whose skin isn't already on screen — and never the
+  // player's own skin (nor the co-op partner's), so a shopper is never a
+  // doppelgänger of anyone the players control. Returns null when every crowd
+  // skin is taken (the spawn just waits for one to free up). `seed`, when
+  // given, keeps the pick stable for a repeat body.
+  _allocNpc(seed = null) {
+    const taken = this._npcInUse;
+    const heroV = this.game.player?.variant;
+    const mateV = this.game.remote?.creature?.variant;
+    const free = CROWD_NPCS.filter(
+      (n) => !taken.has(n.variant) && n.variant !== heroV && n.variant !== mateV
+    );
+    if (!free.length) return null;
+    const npc = seed != null
+      ? free[Math.abs(Math.floor(seed)) % free.length]
+      : pick(rng(Math.random() * 1e9), free);
+    this._npcInUse.add(npc.variant);
+    return npc;
+  },
+
+  // Release a townsperson's skin back into the pool once they've left the scene.
+  _freeNpc(npc) {
+    if (npc) this._npcInUse.delete(npc.variant);
+  },
+
+  // Pull a stroller off the street to send into the shop: their body, skin and
+  // seed carry straight over, so the shopper you see at the counter is the very
+  // person who was just wandering the road. Returns null when nobody's out.
+  _takePasserbyForShop() {
+    const cand = this.passersby.filter((p) => !p.chatting && p.life > -1e8);
+    if (!cand.length) return null;
+    const p = pick(rng(Math.random() * 1e9), cand);
+    this.passersby = this.passersby.filter((x) => x !== p);
+    return p; // { creature, npc, seed } — the customer inherits its skin/npc
+  },
+
   _spawnCustomer() {
     const game = this.game;
-    const seed = pick(rng(Math.random() * 1e9), this._custSeedPool) + Math.floor(Math.random() * 4) * 100;
-    const creature = makeCustomerBody(seed);
-    // arrive from one end of the street and stroll toward the door
-    // everyone arrives from the village (south) end — the cave caps the north
-    creature.position.copy(this.streetEndS);
-    creature.position.x += (Math.random() - 0.5) * 0.5; // drift across the lane
-    creature.heading = Math.PI;
-    this.group.add(creature);
-
-    // weighted archetype. Restored houses add residents who shop here: each
-    // bumps their archetype's odds, so a livelier town draws wealthier, rarer
-    // clientele into rotation on top of the passing baseline crowd.
-    const bag = [];
-    for (const a of ARCHETYPES) for (let i = 0; i < a.w; i++) bag.push(a);
-    for (const idx of this.game.townResidents || []) {
-      const a = ARCHETYPES[idx];
-      if (a) for (let i = 0; i < 3; i++) bag.push(a);
+    // Shoppers are recruited from the street crowd — an existing stroller peels
+    // off and heads for the door. Only when the road happens to be empty do we
+    // send a fresh arrival in from the village end, so a shopper always comes
+    // from the street, never conjured inside the shop.
+    let creature, npc, seed;
+    const fromStreet = this._takePasserbyForShop();
+    if (fromStreet) {
+      creature = fromStreet.creature;
+      npc = fromStreet.npc;
+      seed = fromStreet.seed ?? pick(rng(Math.random() * 1e9), this._custSeedPool);
+    } else {
+      seed = pick(rng(Math.random() * 1e9), this._custSeedPool) + Math.floor(Math.random() * 4) * 100;
+      npc = this._allocNpc(seed);
+      if (!npc) return false; // every skin's on screen — hold this arrival a beat
+      creature = makeCustomerBody(npc, seed);
+      // in from the village (south) end — the cave caps the north
+      creature.position.copy(this.streetEndS);
+      creature.position.x += (Math.random() - 0.5) * 0.5; // drift across the lane
+      creature.heading = Math.PI;
+      this.group.add(creature);
     }
-    const arch = bag[Math.floor(Math.random() * bag.length)];
+
+    // A shopper always shops in character: their archetype is a fixed trait of
+    // who they are (set by their personality — see npc-data.js), so the same
+    // townsperson haggles the same way every visit instead of rolling a fresh
+    // temperament each time. The wealth mix of the crowd therefore follows the
+    // roster of townsfolk out on the street, not a per-arrival dice roll.
+    const arch = archetypeForNpc(npc);
 
     // Some shoppers arrive as sellers: they carry an item to offload onto the
     // player (the reverse haggle). They'll accept anything at or above a hidden
@@ -200,6 +303,7 @@ export const customerMethods = {
     const cust = {
       id: game.net.newId(),
       seed,
+      npc, // their fixed identity (name, personality, dialogue)
       creature,
       arch,
       mode,
@@ -228,10 +332,12 @@ export const customerMethods = {
     game.net.send({
       t: "custAdd",
       id: cust.id, seed,
+      npcId: npc.id,
       x: creature.position.x, z: creature.position.z,
       archIdx: ARCHETYPES.indexOf(arch),
       mode, sellItem, minSell,
     });
+    return true;
   },
 
   // Someone else is already at (or heading for) this slot — browsing or
@@ -339,12 +445,15 @@ export const customerMethods = {
 
   // ---------------------------------------------------- guest-side mirrors
   mirrorCustomerAdd(m) {
-    const creature = makeCustomerBody(m.seed);
+    const npc = npcById(m.npcId) || npcByVariant(variantForSeed(m.seed)) || CROWD_NPCS[0];
+    this._npcInUse.add(npc.variant);
+    const creature = makeCustomerBody(npc, m.seed);
     creature.position.set(m.x, 0, m.z);
     this.group.add(creature);
     this.customers.push({
       id: m.id,
       seed: m.seed,
+      npc,
       creature,
       slot: null, // set when the host says they want something (custWant)
       arch: ARCHETYPES[m.archIdx] ?? ARCHETYPES[1],
@@ -408,6 +517,13 @@ export const customerMethods = {
   _updateCustomer(cust, dt, elapsed) {
     const c = cust.creature;
     const game = this.game;
+    if (cust.chatting) {
+      // paused mid-errand for a chat with the player — face them and idle
+      const pp = game.player.position;
+      c.heading = Math.atan2(pp.x - c.position.x, pp.z - c.position.z);
+      c.update(dt, elapsed);
+      return;
+    }
     cust.t += dt;
 
     // Path-following walk: route around obstacles via the nav grid, stepping
@@ -433,15 +549,23 @@ export const customerMethods = {
       }
       const toFinal = Math.hypot(target.x - c.position.x, target.z - c.position.z);
       if (toFinal <= 0.12) return true;
+      cust._goalDist = toFinal; // watched below to catch a shopper making no headway
       _d.set(wp.x - c.position.x, 0, wp.z - c.position.z);
       const step = _d.length();
       if (step > 1e-4) {
         _d.normalize();
-        c.position.addScaledVector(_d, Math.min(speed * dt, step));
+        c.position.addScaledVector(_d, Math.min(speed * (cust._speedMul || 1) * dt, step));
         c.heading = Math.atan2(_d.x, _d.z);
+        cust._triedMove = true; // for the stuck watchdog below
       }
       return false;
     };
+    cust._triedMove = false;
+    // slow to a curious amble when the player's right beside them (they turn to
+    // face the player at the end of the tick — see below)
+    const _pp = game.player.position;
+    const _nearP = Math.hypot(_pp.x - c.position.x, _pp.z - c.position.z) < NPC_NOTICE_R;
+    cust._speedMul = _nearP ? NPC_NOTICE_MUL : NPC_WALK_MUL;
 
     const faceSlot = (slot) =>
       (c.heading = Math.atan2(slot.pos.x - c.position.x, slot.pos.z - c.position.z));
@@ -613,6 +737,43 @@ export const customerMethods = {
         break;
       }
     }
+    // Stuck watchdog: if a shopper who's trying to walk isn't getting any closer
+    // to their goal — wedged on a table, a wall, or another shopper — first
+    // recompute the route, then sidestep to slip free, and finally just head for
+    // the door. Nobody ever freezes on the floor. Counter-queue waits (standing
+    // still on purpose) never trip it, since they're not trying to move.
+    if (cust._triedMove && cust._prevGoalDist != null && cust._goalDist > cust._prevGoalDist - 0.008) {
+      cust._stuckT = (cust._stuckT || 0) + dt;
+    } else {
+      cust._stuckT = 0;
+      cust._stuckSide = 0;
+    }
+    cust._prevGoalDist = cust._triedMove ? cust._goalDist : null;
+    if (cust._stuckT > 0.6) cust._navKey = null; // force a fresh path next frame
+    if (cust._stuckT > 1.2) {
+      // shuffle sideways off the obstacle so the collision slide can round it
+      if (!cust._stuckSide) cust._stuckSide = Math.random() < 0.5 ? 1 : -1;
+      const a = c.heading + cust._stuckSide * Math.PI / 2;
+      c.position.x += Math.sin(a) * 2.2 * dt;
+      c.position.z += Math.cos(a) * 2.2 * dt;
+    }
+    if (cust._stuckT > 5 && cust.state !== "want" && cust.state !== "offer" && cust.state !== "haggling") {
+      // give up on whatever they were doing and leave — better a clean exit
+      // than a statue on the shop floor
+      cust.state = "leave";
+      cust._atDoor = false;
+      cust._outside = false;
+      cust._stuckT = 0;
+      cust._stuckSide = 0;
+      cust._navKey = null;
+    }
+
+    // when the player's right beside a walking shopper, turn to face them — a
+    // little acknowledging glance as they amble past
+    if (_nearP && cust._triedMove) {
+      c.heading = Math.atan2(_pp.x - c.position.x, _pp.z - c.position.z);
+    }
+
     // slide around tables & furniture instead of walking through them
     game.collide(c.position, c.radius * 0.8, this.colliders);
     c.update(dt, elapsed);
@@ -628,6 +789,7 @@ export const customerMethods = {
 
   _removeCustomer(cust) {
     this._clearEmote(cust);
+    this._freeNpc(cust.npc);
     cust.creature.dispose();
     this.customers = this.customers.filter((x) => x !== cust);
     this.game.net.send({ t: "custDel", id: cust.id });
@@ -647,10 +809,16 @@ export const customerMethods = {
   },
 };
 
-// A Kenney blocky customer, deterministically varied by seed so host + guest
-// (and repeat visits) render the same person.
-function makeCustomerBody(seed) {
-  if (HARD_SEED != null) seed = HARD_SEED;
+// A Kenney blocky body for a named townsperson. The skin comes from the NPC's
+// fixed `variant`; `seed` still seeds a little height variety so repeat visits
+// (and host/guest) render the same build. Their name shows when you talk to
+// them, not on a floating plate.
+function makeCustomerBody(npc, seed) {
+  const variant = HARD_SEED != null ? variantForSeed(HARD_SEED) : npc.variant;
   const r = rng(seed * 104729 + 11);
-  return new BlockyCreature(variantForSeed(seed), { height: 1.05 + r() * 0.35 });
+  return new BlockyCreature(variant, {
+    height: 1.05 + r() * 0.35,
+    turnRate: NPC_TURN_RATE,
+    animScale: NPC_ANIM_SCALE,
+  });
 }

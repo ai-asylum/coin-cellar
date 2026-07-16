@@ -1,8 +1,12 @@
-# FTUE Script — "The End of the Road"
+# FTUE Script — "The End of the Road" (SUPERSEDED)
+
+> **Superseded 2026-07-14** by `08-ftue-script-inheritance.md` ("What He
+> Left"), now implemented in `src/game/game-narrative.js`. Kept for its
+> graveyard and history.
 
 > The first ten minutes: a cave, a closed door, a mad idea, and a trapdoor.
 
-This is the implemented first-run script (`src/game/game-narrative.js`). It exists
+This was the implemented first-run script. It exists
 as a doc because dialogue is a design surface: every line here survived a budget,
 and every cut is recorded so it can be spent again later.
 

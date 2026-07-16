@@ -1,5 +1,5 @@
-// Delve flow: the cave's cellar descent, the walk-through between road and
-// cave, the shared cellar lobby and its trapdoor mouths, cellar shortcuts, the
+// Delve flow: the cave's trapdoor mouths (the shared lobby lives in the cave
+// now), the walk-through between road and cave, cellar shortcuts, the
 // pre-delve pack menu, the hole-dive cutscene, entering / leaving dungeons,
 // descending floors and the boss-gate cluster. Attached to
 // Game.prototype via Object.assign, so `this` is the live Game instance. NB:
@@ -23,23 +23,17 @@ const LEVEL_INVULN = 1.8; // damage-immunity grace when arriving on a new floor
 const _v = new THREE.Vector3();
 
 export const dungeonFlowMethods = {
-  _delve() {
-    // the guided first day holds the descent shut until the FTUE has walked
+  // Commit to diving into cave mouth `id`: pack first if there's anything in
+  // the storeroom worth carrying, otherwise straight down the hole.
+  _delve(id = 0) {
+    // the guided first day holds the mouths shut until the FTUE has walked
     // you through selling — the send-off's "delve" step is the first real trip
     if (this.tutorial && this.tutorial !== "delve") {
       this.hud.toast(`${icon("box")} Finish setting up shop first`);
       return;
     }
-    // before dropping down: gear up and pick supplies from the storeroom
-    if (this._packable().length > 0 || this._stashGearCount() > 0) return this._packMenu();
-    this._startDelve();
-  },
-
-  // The descent at the cave's deepest point drops into the shared cellar
-  // lobby, whose trapdoor mouths are the real dungeon entrances — the player
-  // picks a mouth there, no shortcut straight into dungeon 1.
-  _startDelve() {
-    this._beginHoleDive(this.cave.descentPos, () => this._enterCellar());
+    this._packHole = id;
+    this._enterHole(id);
   },
 
   // Walk-through travel between the village road and the cave at its east end
@@ -62,11 +56,14 @@ export const dungeonFlowMethods = {
     this.player.animator.prevPos.copy(this.player.position);
     this.hud.showHearts(false);
     this.hud.showBag(true);
+    this.hud.showStore(false); // storeroom lives in the shop, not the cave
     this.hud.setGoldCorner(true);
     this.audio.stairs();
     this._snapCamera();
-    // coming back with the Mayor's dare: the trapdoor the hero shut behind
-    // them swings open ahead — the FTUE's last reveal
+    // the cave is the shared lobby now: strangers' avatars show up here
+    this.lobby.join("cave");
+    // coming back for more loot: the trapdoor the hero shut behind them
+    // swings open ahead — the FTUE's last reveal, and nobody said a word
     if (!this.cave.trapdoorOpen && (!this.tutorial || this.tutorial === "delve")) {
       this.cave.setTrapdoorOpen(true);
       this.audio.chest();
@@ -75,11 +72,14 @@ export const dungeonFlowMethods = {
 
   _exitCave() {
     this.playerArea = "shop";
+    this.cave.setFtueVeil(false); // out in the daylight — clear the FTUE fog so the mouths read again
+    this.lobby.leave();
     // step out beside the rocky mouth at the top of the road
     this.player.position.copy(this.shop.caveMouthPos).add(_v.set(0, 0, 1.9));
     this.player.heading = 0; // face south, down the road toward the shop
     this.player.animator.prevPos.copy(this.player.position);
-    this.hud.showBag(false);
+    this.hud.showBag(true); // the bag is reachable everywhere, town included
+    this.hud.showStore(this.playerArea === "shop" && !this.tutorial);
     this.hud.setGoldCorner(false);
     this.audio.stairs();
     this._snapCamera();
@@ -87,31 +87,11 @@ export const dungeonFlowMethods = {
     if (this.tutorial === "exit") this._onFtueCaveExit();
   },
 
-  _enterCellar() {
-    this.playerArea = "cellar";
-    this.hud.showHearts(false);
-    this.hud.showBag(true);
-    this.hud.showGold(true);
-    this.hud.setGoldCorner(false); // the cellar's a safe hub — keep gold up top
-    if (this.hud.sheetOpen) this.hud.hideSheet();
-    // land at the foot of the home stairs facing east into the room — reads as
-    // having just walked down the flight behind you
-    this.player.position.copy(this.cellar.entrancePos);
-    this.player.heading = Math.PI / 2;
-    this.player.animator.prevPos.copy(this.player.position);
-    this.audio.stairs();
-    this._snapCamera();
-    this.lobby.join("cellar");
-    this.hud.banner(`${icon("hole")} The Cellar`, "", 2.6);
-    // the FTUE's send-off step completes on the first real descent
-    this._tutAdvance("delve");
-  },
-
-  // Confirm sheet at a cellar mouth's lip. The first is always open; a deeper
+  // Confirm sheet at a cave mouth's lip. The first is always open; a deeper
   // one only offers the dive once its shortcut's been earned (see _shortcutOpen).
   _holePrompt(id) {
     if (this.hud.sheetOpen) return;
-    const hole = this.cellar.holes[id];
+    const hole = this.cave.holes[id];
     if (!hole) return;
     if (!this._shortcutOpen(id)) {
       // still barred — spell out how the shortcut opens
@@ -134,7 +114,7 @@ export const dungeonFlowMethods = {
     el.querySelector("#hole-yes").onclick = () => {
       this.paused = false;
       this.hud.hideSheet();
-      this._enterHole(id);
+      this._delve(id);
     };
     el.querySelector("#hole-no").onclick = () => {
       this.paused = false;
@@ -168,7 +148,7 @@ export const dungeonFlowMethods = {
     this._save();
     this.net.send({ t: "shortcut", id, until });
     if (fresh) {
-      const name = this.cellar.holes[id]?.name ?? "a deeper vault";
+      const name = this.cave.holes[id]?.name ?? "a deeper vault";
       this.hud.toast(`${icon("hole")} Cellar shortcut to ${name} opened for 3h`);
     }
   },
@@ -178,6 +158,8 @@ export const dungeonFlowMethods = {
   // shares it. In PeerJS co-op the pair shares one dungeon: host generates,
   // guest requests.
   _enterHole(id) {
+    // the FTUE's send-off step completes on the first real descent
+    this._tutAdvance("delve");
     const floor = id * FLOORS_PER_DUNGEON + 1;
     if (this.net.isGuest) {
       if (!this.dungeon.active) {
@@ -217,8 +199,9 @@ export const dungeonFlowMethods = {
 
   // The pre-delve staging sheet: kit out from the storeroom (paper-doll up top)
   // and tap supplies to load into the bag, then head down. Closing the sheet
-  // cancels the delve. The supply selection is held on `this._packSel` so it
-  // survives round-trips into the per-slot equip picker.
+  // cancels the delve. The supply selection (and which cave mouth the delve is
+  // headed into, `this._packHole`) is held on `this` so it survives
+  // round-trips into the per-slot equip picker.
   _packMenu() {
     if (this.hud.sheetOpen) this.hud.hideSheet();
     const packable = this._packable();
@@ -276,14 +259,14 @@ export const dungeonFlowMethods = {
     el.querySelector("#pack-skip").onclick = () => {
       this._packSel = null;
       this.hud.hideSheet();
-      this._startDelve();
+      this._enterHole(this._packHole ?? 0);
     };
     el.querySelector("#pack-go").onclick = () => {
       const idxs = [...sel];
       this._packSel = null;
       this.hud.hideSheet();
       this._pack(idxs);
-      this._startDelve();
+      this._enterHole(this._packHole ?? 0);
     };
   },
 
@@ -324,7 +307,7 @@ export const dungeonFlowMethods = {
   // A short "jump into the hole" cutscene before the next area loads: the
   // player springs up over the mouth, then plunges down the dark shaft,
   // spinning and shrinking away into the black. Purely cosmetic and local —
-  // used both for the cave's cellar descent and each cellar mouth. `center` is
+  // used for each of the cave's dungeon mouths. `center` is
   // the mouth to dive into; `after` runs the real transition once it wraps up.
   _beginHoleDive(center, after) {
     const c = this.player;
@@ -381,11 +364,11 @@ export const dungeonFlowMethods = {
   },
 
   _enterDungeon() {
-    // dropping in from a cellar mouth: play the plunge animation first, then
+    // dropping in from a cave mouth: play the plunge animation first, then
     // land in the dungeon once it finishes (the dive re-calls us with the flag
     // set). Descending stairs mid-run starts in the dungeon, so it skips this.
-    if (this.playerArea === "cellar" && this.cellarHole >= 0 && !this._diveDone) {
-      const hole = this.cellar.holes[this.cellarHole];
+    if (this.playerArea === "cave" && this.cellarHole >= 0 && !this._diveDone) {
+      const hole = this.cave.holes[this.cellarHole];
       this._beginHoleDive(hole ? hole.pos : this.player.position, () => {
         this._diveDone = true;
         this._enterDungeon();
@@ -403,6 +386,7 @@ export const dungeonFlowMethods = {
     this.playerArea = "dungeon";
     this.hud.showHearts(true);
     this.hud.showBag(true);
+    this.hud.showStore(false);
     this.hud.showGold(true);
     this.hud.setGoldCorner(true);
     _v.copy(this.dungeon.entrancePos).add(DUNGEON_ORIGIN);
@@ -418,7 +402,7 @@ export const dungeonFlowMethods = {
     this._snapCamera();
     const bossFloor = isBossFloor(this.dungeon.floor);
     const finalFloor = this.dungeon.floor >= MAX_DEPTH;
-    const place = this.cellar.holes[this.cellarHole]?.name ?? "Cellar";
+    const place = this.cave.holes[this.cellarHole]?.name ?? "Cellar";
     this.hud.banner(
       bossFloor
         ? `${icon("skull")} ${place} — ${finalFloor ? "Final Floor" : "Boss Floor"}`
@@ -434,24 +418,26 @@ export const dungeonFlowMethods = {
     });
   },
 
-  // "Go up" from the cellar or a dungeon: climb back out into the cave beside
-  // its descent — the bag deposits itself into the storeroom on the way, and
+  // "Go up" from a dungeon: climb back out into the cave beside the mouth you
+  // dove into — the bag deposits itself into the storeroom on the way, and
   // the walk down the road to the shop is the homecoming.
   _returnHome() {
     this.playerArea = "cave";
     this._floorDesync = false;
     this._pendingLead = null;
-    this.lobby.leave();
+    this.lobby.join("cave"); // back in the shared lobby
     this._depositBag();
     // a trip back up patches you up — no day/night rest to do it any more
     this.hp = this.maxHp;
     this.hud.setHearts(this.hp, this.maxHp);
     this.hud.showHearts(false);
     this.hud.showBag(true);
+    this.hud.showStore(false); // still in the cave — home is a road-walk away
     this.hud.showGold(true);
     this.hud.setGoldCorner(true);
     if (this.hud.sheetOpen) this.hud.hideSheet();
-    this.player.position.copy(this.cave.descentPos).add(_v.set(0, 0, 1.9));
+    const mouth = this.cave.holes[this.cellarHole]?.pos ?? this.cave.descentPos;
+    this.player.position.copy(mouth).add(_v.set(0, 0, 1.9));
     this.player.heading = 0; // facing the daylight, homeward
     this.player.animator.prevPos.copy(this.player.position);
     this.audio.stairs();

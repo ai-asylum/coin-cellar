@@ -1,10 +1,14 @@
-// The cave at the end of the road — the dungeon's front door. A narrow burrow
-// off the east end of the village street: walk in through the daylight mouth,
-// and at its deepest point a sunk stair flight (the old owner's "cellar")
-// drops into the shared cellar lobby where the real dungeons begin. Built once
-// and permanent. Rat Warren dressing (warm browns) and a couple of harmless
-// ambient rats; the FTUE additionally spawns the opener's slime here (see
-// spawnSlime / game-narrative's _updateCaveIntro).
+// The cave at the end of the road — the dungeon's front door AND its lobby. A
+// burrow off the east end of the village street: walk in through the daylight
+// mouth, up the tunnel, and the old owner's dug-out chamber at its deepest
+// point holds the four trapdoor mouths, each a shortcut to the head of a
+// stacked dungeon (floors 1, 4, 7, 10). The first mouth is always open — it
+// wears the wooden trapdoor the FTUE hero shut behind them on the climb out —
+// and the deeper three unseal for a few hours once you descend past the boss
+// that guards the dungeon above them. Built once and permanent. Rat Warren
+// dressing (warm browns) and a couple of harmless ambient rats; the FTUE
+// additionally spawns the opener's slime here (see spawnSlime /
+// game-narrative's _updateCaveIntro).
 import * as THREE from "three";
 import { makeToonMaterial, feedOccluder } from "../core/toon.js";
 import { makeLightShaft } from "../core/godrays.js";
@@ -12,25 +16,79 @@ import { rng } from "../core/engine.js";
 import { Creature } from "../chargen/creature.js";
 import { ratSpec, slimeSpec } from "../chargen/species.js";
 import { HOLE_THEMES } from "./dungeon-data.js";
+import { FLOORS_PER_DUNGEON } from "./dungeon.js";
 import { CELL, makeDescent, modelCollider, makeFloorGeometry, buildAssetFloor, buildAssetWalls, scatterAssetProps } from "./dungeon-geometry.js";
 import { scatterDungeonDecor } from "./decor.js";
-import { dungeonAssetsReady, dungeonPalette } from "./dungeon-assets.js";
+import { dungeonAssetsReady, dungeonPalette, cloneModel } from "./dungeon-assets.js";
+import { getLayout } from "./layout-store.js";
 
 export const CAVE_ORIGIN = new THREE.Vector3(-200, 0, 200);
 
-// A long 4×7-cell tunnel with a one-cell mouth carved out of the SOUTH rim —
-// the cave hangs off the top of the village road, so walking up-screen on the
-// road continues up-screen inside: in through the light at the bottom, deeper
-// toward the cellar descent in the deepest (northmost) row. The FTUE hero
-// wakes right beside the pit, as if they'd just climbed out. A few corner
-// cells stay solid so it reads dug-out.
-const GW = 6, GH = 9;
-const ROOM = { x: 1, y: 1, w: 4, h: 7, cx: 2, cy: 4 };
-const EXIT_CELL = { x: 2, y: 8 }; // the daylight gap in the south rim
-const SPAWN_CELL = { x: 2, y: 2 }; // the FTUE wake-up spot, facing the light
-const DESCENT_CELL = { x: 2, y: 1 }; // the sunk stairs down to the cellar lobby
-const SOLID_NOOKS = [[4, 3], [1, 4]]; // mid-tunnel bulges left un-dug
+// A soft round smudge of near-black, cached, for the FTUE fog bank (a wall of
+// overlapping puffs reads as thick rolling smoke). Alpha falls off to the edge
+// so the puffs blend into one another instead of stamping hard discs.
+let _fogTex = null;
+function fogPuffTexture() {
+  if (_fogTex) return _fogTex;
+  const c = document.createElement("canvas");
+  c.width = c.height = 64;
+  const g = c.getContext("2d");
+  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0, "rgba(3,3,6,0.95)");
+  grad.addColorStop(0.55, "rgba(3,3,6,0.6)");
+  grad.addColorStop(1, "rgba(3,3,6,0)");
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 64, 64);
+  _fogTex = new THREE.CanvasTexture(c);
+  return _fogTex;
+}
+
+// The footprint: the old cellar lobby's 9×5 hall, dug out at the deep (north)
+// end, with a narrow tunnel running down to a one-cell mouth carved out of the
+// SOUTH rim. The cave hangs off the top of the village road, so walking
+// up-screen on the road continues up-screen inside: in through the light at
+// the bottom, up the tunnel, into the chamber where the mouths wait. The FTUE
+// hero wakes right beside the first mouth, as if they'd just climbed out. A
+// few corner cells stay solid so it reads dug-out.
+const GW = 11, GH = 11;
+const CHAMBER = { x: 1, y: 1, w: 9, h: 5, cx: 5, cy: 3 };
+const TUNNEL = { x: 4, y: 6, w: 3, h: 4, cx: 5, cy: 7 };
+const EXIT_CELL = { x: 5, y: 10 }; // the daylight gap in the south rim
+const SPAWN_CELL = { x: 2, y: 3 }; // the FTUE wake-up spot, beside the first mouth
+// FTUE only: the hero wakes centred in the passage, just clear of the fog and
+// facing the daylight, so the whole chamber — the four mouths included — sits
+// behind him. VEIL_EDGE_Z anchors the fog bank's south face (well behind him,
+// hiding the mouths); VEIL_WALL_Z is the invisible fence at the fog's visible
+// lip that keeps him from wandering back into the dark. (local z coords)
+const FTUE_SPAWN = new THREE.Vector3(0, 0, 2.4);
+const VEIL_EDGE_Z = 0.8;
+const VEIL_WALL_Z = 1.4;
+const SOLID_NOOKS = [[1, 5], [9, 1]]; // chamber bulges left un-dug (the tunnel runs straight)
 const cellPos = (x, y) => new THREE.Vector3((x - GW / 2 + 0.5) * CELL, 0, (y - GH / 2 + 0.5) * CELL);
+
+// Editor helper: the reverse of cellPos — snap a group-local (x, z) back to the
+// nearest whole grid cell, clamped in-bounds. The cave's mouths and daylight
+// exit are cell-locked (their floor cut-outs and colliders are cell-based), so
+// dragging one snaps it here before it's persisted to layout.json.
+export function localToCaveCell(x, z) {
+  const gx = Math.max(0, Math.min(GW - 1, Math.round(x / CELL + GW / 2 - 0.5)));
+  const gy = Math.max(0, Math.min(GH - 1, Math.round(z / CELL + GH / 2 - 0.5)));
+  return { gx, gy };
+}
+
+// All four mouths lined up in a row across the top of the chamber, distributed
+// space-evenly — one clear floor cell around every mouth (reading order =
+// dungeon index). They sit one cell in from the north wall (gy 2, not 1) so
+// neither the mouth nor the trapdoor lid — which hinges and swings back toward
+// the wall — clips through the wall geometry. Each mouth is a real cut-out
+// floor cell with a sunk stair flight (same descent assembly as the dungeons'
+// down-stairs), so they sit on whole grid cells.
+export const HOLE_DEFS = [
+  { name: "Rat Warren", gx: 2, gy: 2, color: 0x9a6dff },
+  { name: "Flooded Deep", gx: 4, gy: 2, color: 0x5dd0ff },
+  { name: "Bone Hollow", gx: 6, gy: 2, color: 0xff9a5d },
+  { name: "Gloom Drain", gx: 8, gy: 2, color: 0x6fd6c8 },
+];
 
 export class Cave {
   constructor(game) {
@@ -42,14 +100,44 @@ export class Cave {
     this.colliders = [];
     this.rats = [];
     this.slime = null; // the FTUE opener's mark — spawned on demand
+    this.veil = null; // the FTUE fog bank + invisible fence — raised on demand
+    this.rockObjs = []; // the two flanking boulders (editor grab handles)
+    this.exitObj = null; // the daylight mouth's glare quad (editor grab handle)
 
+    // editor-authored layout overrides (see layout.json's `cave` block and the
+    // editor's Cave tab): the daylight mouth cell, the four dungeon-mouth cells,
+    // and the two flanking rocks. Absent fields fall back to the built-in
+    // defaults, so a fresh layout still builds the hand-placed cave.
+    const co = getLayout().cave || {};
+    this.exitCell = co.exit ? { x: co.exit.gx, y: co.exit.gy } : { x: EXIT_CELL.x, y: EXIT_CELL.y };
+    this.holeCells = HOLE_DEFS.map((h, i) => {
+      const o = co.holes?.[i];
+      return { gx: o ? o.gx : h.gx, gy: o ? o.gy : h.gy };
+    });
+    const rd = cellPos(EXIT_CELL.x, EXIT_CELL.y); // rock defaults frame the default mouth
+    this.rockDefs = (co.rocks && co.rocks.length) ? co.rocks.map((r) => ({ ...r })) : [
+      { x: rd.x - 2.9, z: rd.z - CELL * 0.5, yaw: -0.8 },
+      { x: rd.x + 2.9, z: rd.z - CELL * 0.5, yaw: 0.8 },
+    ];
+
+    // the mouths, in world coords for the context-action checks. Each is a
+    // shortcut to the head of its stacked dungeon (floors 1, 4, 7, 10); the
+    // first is always open (behind the FTUE's trapdoor), the rest are earned
+    // by clearing bosses.
+    this.holes = HOLE_DEFS.map((h, i) => ({
+      id: i, name: h.name, color: h.color,
+      floor: i * FLOORS_PER_DUNGEON + 1,
+      pos: cellPos(this.holeCells[i].gx, this.holeCells[i].gy).add(CAVE_ORIGIN),
+    }));
     // world-coord anchors for the game glue: the FTUE wake-up spot, the
-    // daylight mouth (walk-through to the road), the cellar descent, and where
-    // the opener's slime waits between spawn and mouth.
-    this.entrancePos = cellPos(SPAWN_CELL.x, SPAWN_CELL.y).add(CAVE_ORIGIN);
-    this.exitPos = cellPos(EXIT_CELL.x, EXIT_CELL.y).add(CAVE_ORIGIN);
-    this.descentPos = cellPos(DESCENT_CELL.x, DESCENT_CELL.y).add(CAVE_ORIGIN);
-    this.slimePos = this.entrancePos.clone().add(new THREE.Vector3(0, 0, 4.6));
+    // daylight mouth (walk-through to the road), the first dungeon mouth (the
+    // FTUE's "descent"), and where the opener's slime waits between spawn and
+    // the light.
+    this.entrancePos = FTUE_SPAWN.clone().add(CAVE_ORIGIN);
+    this.exitPos = cellPos(this.exitCell.x, this.exitCell.y).add(CAVE_ORIGIN);
+    this.descentPos = this.holes[0].pos;
+    // the slime waits out in the light down the passage, ahead of the hero
+    this.slimePos = this.entrancePos.clone().add(new THREE.Vector3(0, 0, 3.8));
 
     this._build();
     this._spawnRats();
@@ -59,25 +147,26 @@ export class Cave {
     const r = rng(1337);
     const O = CAVE_ORIGIN;
 
-    // the open grid: the tunnel minus its un-dug nooks, plus the mouth cut into
-    // the rim so the wall builders leave the daylight gap open
+    // the open grid: chamber + tunnel minus the un-dug nooks, plus the mouth
+    // cut into the rim so the wall builders leave the daylight gap open
     const open = Array.from({ length: GH }, () => new Array(GW).fill(false));
-    for (let y = ROOM.y; y < ROOM.y + ROOM.h; y++)
-      for (let x = ROOM.x; x < ROOM.x + ROOM.w; x++) open[y][x] = true;
+    for (const room of [CHAMBER, TUNNEL])
+      for (let y = room.y; y < room.y + room.h; y++)
+        for (let x = room.x; x < room.x + room.w; x++) open[y][x] = true;
     for (const [x, y] of SOLID_NOOKS) open[y][x] = false;
-    open[EXIT_CELL.y][EXIT_CELL.x] = true;
+    open[this.exitCell.y][this.exitCell.x] = true;
     // the south rim (the daylight side) would stand between the camera and the
-    // room, so its wall MESHES are skipped entirely — the fence stays (the
+    // tunnel, so its wall MESHES are skipped entirely — the fence stays (the
     // colliders below still read the real `open` grid), but nothing ever
     // blocks the view in. The wall builders get their own taller grid where
-    // the room's width runs open through the rim and a few phantom rows
+    // the tunnel's width runs open through the rim and a few phantom rows
     // beyond it: the side walls continue south framing the daylight, and the
     // grid-edge closing strip lands far below the camera frame.
     const wallGH = GH + 3;
     const wallOpen = Array.from({ length: wallGH }, (_, y) =>
       y < GH ? [...open[y]] : new Array(GW).fill(false));
     for (let y = GH - 1; y < wallGH; y++)
-      for (let x = ROOM.x; x < ROOM.x + ROOM.w; x++) wallOpen[y][x] = true;
+      for (let x = TUNNEL.x; x < TUNNEL.x + TUNNEL.w; x++) wallOpen[y][x] = true;
 
     // --- floor + walls: the dungeon-kit recipe with the Rat Warren's burrowed
     // browns, so the cave already speaks the dungeon's visual language
@@ -86,9 +175,9 @@ export class Cave {
     const floorTint = new THREE.Color(palette[1]).lerp(_WHITE, 0.5);
     const wallTint = new THREE.Color(palette[1]).lerp(_WHITE, 0.32);
     if (dungeonAssetsReady()) {
-      // the descent is a real hole: its cell is cut out of the floor and gets
-      // the pit-shaft + sunk-flight assembly below
-      const floorHoles = new Set([`${DESCENT_CELL.x},${DESCENT_CELL.y}`]);
+      // the four mouths are real holes: their cells are cut out of the floor
+      // and each gets the pit-shaft + sunk-flight assembly below
+      const floorHoles = new Set(this.holeCells.map((h) => `${h.gx},${h.gy}`));
       this.group.add(buildAssetFloor(open, GW, GH, cellPos, floorTint, floorHoles));
       // own occluder material (the dungeon re-tints the shared one every floor)
       this._wallMat = makeToonMaterial({ map: dungeonPalette(), rim: 0, occlude: true });
@@ -128,55 +217,68 @@ export class Cave {
         const p = cellPos(x, y);
         this.colliders.push({ x: p.x + O.x, z: p.z + O.z, hw: CELL / 2, hd: CELL / 2 });
       }
-    const exitLocal = cellPos(EXIT_CELL.x, EXIT_CELL.y);
+    const exitLocal = cellPos(this.exitCell.x, this.exitCell.y);
     this.colliders.push({ x: exitLocal.x + O.x, z: exitLocal.z + CELL + O.z, hw: CELL / 2, hd: CELL / 2 });
 
-    // --- the cellar descent: the same pit + sunk stair flight the dungeons'
-    // descent cells use, under a violet shaft — the way down to the lobby
-    const descentLocal = cellPos(DESCENT_CELL.x, DESCENT_CELL.y);
-    if (dungeonAssetsReady()) {
-      const descent = makeDescent(0.02);
-      descent.position.copy(descentLocal);
-      this.colliders.push(modelCollider(descent, CAVE_ORIGIN));
-      this.group.add(descent);
-    } else {
-      const mouth = new THREE.Mesh(
-        new THREE.CircleGeometry(0.85, 28).rotateX(-Math.PI / 2),
-        new THREE.MeshBasicMaterial({ color: 0x05060a })
-      );
-      mouth.position.copy(descentLocal).setY(0.02);
-      this.group.add(mouth);
-    }
-    const downShaft = makeLightShaft({ color: 0x9a6dff, length: 4.2, topWidth: 0.45, bottomWidth: 1.6, opacity: 0.24, tilt: 0.16, spin: 0.7, motes: 8 });
-    downShaft.position.set(descentLocal.x, 3.2, descentLocal.z);
-    this.group.add(downShaft);
-    this.shafts.push(downShaft);
-
-    // --- the trapdoor over the descent: the hero shut it behind them on the
-    // way out, so the FTUE wakes up next to a closed lid. It swings open when
-    // the player comes back to delve (see _enterCave), and returning players
-    // boot with it already open (see _beginShop).
+    // --- the dungeon mouths: a dark maw with a sunk stair flight under a
+    // rising light shaft, one per chamber slot. Each is barred by a lid that
+    // hinges on its back edge and swings up and back toward the wall — wooden
+    // planks + pull ring on the first (the trapdoor the FTUE hero shut behind
+    // them, see setTrapdoorOpen), iron bars + heavy ring on the earned three.
+    const grateMat = makeToonMaterial({ color: 0x53433a, rim: 0 });
+    const grateTrim = makeToonMaterial({ color: 0x2f2621, rim: 0, polygonOffset: true });
     const lidMat = makeToonMaterial({ color: 0x6e4526, rim: 0 });
     const lidTrim = makeToonMaterial({ color: 0x4a2c17, rim: 0, polygonOffset: true });
-    const lidR = CELL / 2;
-    const lidPivot = new THREE.Group();
-    lidPivot.position.set(descentLocal.x, 0.06, descentLocal.z - lidR); // hinge on the deep edge
-    const lid = new THREE.Mesh(new THREE.BoxGeometry(lidR * 2, 0.12, lidR * 2), lidMat);
-    lid.position.set(0, 0, lidR);
-    lidPivot.add(lid);
-    for (const px of [-0.62, 0, 0.62]) {
-      const plank = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.15, lidR * 2 - 0.16), lidTrim);
-      plank.position.set(px, 0.06, lidR);
-      lidPivot.add(plank);
+    for (const hole of this.holes) {
+      const local = new THREE.Vector3().copy(hole.pos).sub(O);
+      if (dungeonAssetsReady()) {
+        // the same pit + sunk stair flight the dungeons' descent cells use —
+        // flush (no lift) so the closed lid swings clear of the steps
+        const descent = makeDescent(0.02);
+        descent.position.copy(local);
+        descent.userData.caveEdit = { type: "hole", index: hole.id };
+        this.colliders.push(modelCollider(descent, CAVE_ORIGIN));
+        this.group.add(descent);
+      } else {
+        // no kit → no cut-out cell; keep the old flat dark mouth
+        const mouth = new THREE.Mesh(
+          new THREE.CircleGeometry(0.85, 28).rotateX(-Math.PI / 2),
+          new THREE.MeshBasicMaterial({ color: 0x05060a })
+        );
+        mouth.position.copy(local).setY(0.02);
+        this.group.add(mouth);
+      }
+      const shaft = makeLightShaft({ color: hole.color, length: 4.2, topWidth: 0.45, bottomWidth: 1.6, opacity: 0.22, tilt: 0.16, spin: r() * Math.PI, motes: 8 });
+      shaft.position.set(local.x, 3.2, local.z);
+      this.group.add(shaft);
+      this.shafts.push(shaft);
+
+      // the lid, sized to the full cell so it seals the cut-out flush
+      const first = hole.id === 0;
+      const mat = first ? lidMat : grateMat;
+      const trim = first ? lidTrim : grateTrim;
+      const lidR = CELL / 2;
+      const lidPivot = new THREE.Group();
+      lidPivot.position.set(local.x, 0.06, local.z - lidR); // hinge on the deep edge
+      const lid = new THREE.Mesh(new THREE.BoxGeometry(lidR * 2, 0.12, lidR * 2), mat);
+      lid.position.set(0, 0, lidR);
+      lidPivot.add(lid);
+      for (const px of first ? [-0.62, 0, 0.62] : [-0.55, 0, 0.55]) {
+        const bar = new THREE.Mesh(new THREE.BoxGeometry(first ? 0.14 : 0.12, 0.15, lidR * 2 - 0.16), trim);
+        bar.position.set(px, 0.06, lidR);
+        lidPivot.add(bar);
+      }
+      const pull = new THREE.Mesh(new THREE.TorusGeometry(first ? 0.13 : 0.14, first ? 0.03 : 0.035, 6, 14), trim);
+      pull.rotation.x = Math.PI / 2;
+      pull.position.set(0, 0.12, lidR * 1.7);
+      lidPivot.add(pull);
+      lidPivot.userData.caveEdit = { type: "hole", index: hole.id };
+      this.group.add(lidPivot);
+      hole.lid = lidPivot;
+      hole.open = false; // eased in update (first: FTUE trapdoor; rest: earned)
+      hole._lidAngle = 0; // 0 = shut over the mouth, 1 = flung up and back
     }
-    const pull = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.03, 6, 14), lidTrim);
-    pull.rotation.x = Math.PI / 2;
-    pull.position.set(0, 0.12, lidR * 1.7);
-    lidPivot.add(pull);
-    this.group.add(lidPivot);
-    this._lid = lidPivot;
-    this.trapdoorOpen = false; // shut until claimed (or instantly for old saves)
-    this._lidAngle = 0; // eased: 0 = flat over the hole, 1 = flung up and back
+    this.trapdoorOpen = false; // the first mouth: shut until claimed (or instantly for old saves)
 
     // --- the daylight mouth: a warm shaft pouring in, a glare quad filling the
     // gap (facing the camera) and a pool of light spilling onto the floor
@@ -192,6 +294,8 @@ export class Cave {
       })
     );
     this.glare.position.set(exitLocal.x, 1.2, exitLocal.z + CELL / 2 - 0.1);
+    this.glare.userData.caveEdit = { type: "exit", index: 0 };
+    this.exitObj = this.glare;
     this.group.add(this.glare);
     const pool = new THREE.Mesh(
       new THREE.CircleGeometry(1.5, 26).rotateX(-Math.PI / 2),
@@ -203,19 +307,39 @@ export class Cave {
     pool.position.set(exitLocal.x, 0.02, exitLocal.z - CELL * 0.4);
     this.group.add(pool);
 
+    // two big rocks flanking the daylight mouth, framing the way in/out —
+    // free-placed props (editor grab handles), positions authored in layout.json
+    if (dungeonAssetsReady()) {
+      this.rockDefs.forEach((def, i) => {
+        const rock = cloneModel("rubble");
+        if (!rock) return;
+        rock.scale.multiplyScalar(2.1 * (def.s ?? 1)); // 0.18 → ~0.38 base, a chunky boulder pile
+        rock.position.set(def.x, 0, def.z);
+        rock.rotation.y = def.yaw ?? 0;
+        rock.userData.caveEdit = { type: "rock", index: i };
+        this.colliders.push(modelCollider(rock, CAVE_ORIGIN));
+        this.group.add(rock);
+        this.rockObjs.push(rock);
+      });
+    }
+
     // --- set dressing: the warren's billboard mix plus the kit's props, kept
-    // clear of the walk between the mouth and the descent
-    const skip = [SPAWN_CELL, EXIT_CELL, DESCENT_CELL,
-      ...[3, 4, 5, 6, 7].map((y) => ({ x: EXIT_CELL.x, y }))];
-    scatterDungeonDecor(this.group, r, [ROOM], cellPos, { skip, theme: HOLE_THEMES[0].decor });
-    for (const pr of scatterAssetProps(this.group, r, [ROOM], cellPos, { skip, origin: CAVE_ORIGIN }))
+    // clear of the mouths (and the row before them), the wake-up spot and the
+    // walk down the tunnel to the light
+    const skip = [SPAWN_CELL, { x: this.exitCell.x, y: this.exitCell.y },
+      ...this.holeCells.map((h) => ({ x: h.gx, y: h.gy })),
+      ...this.holeCells.map((h) => ({ x: h.gx, y: h.gy + 1 })),
+      ...[4, 5].map((y) => ({ x: SPAWN_CELL.x, y })), // the FTUE slime-kill runway
+      ...[5, 6, 7, 8, 9].map((y) => ({ x: this.exitCell.x, y }))];
+    scatterDungeonDecor(this.group, r, [CHAMBER, TUNNEL], cellPos, { skip, theme: HOLE_THEMES[0].decor });
+    for (const pr of scatterAssetProps(this.group, r, [CHAMBER, TUNNEL], cellPos, { skip, origin: CAVE_ORIGIN }))
       this.colliders.push(pr.collider);
   }
 
   _spawnRats() {
     // a couple of harmless rats pottering about — pure ambience, they only
     // scurry off when the player barrels near (one dash fells them: dashHit)
-    for (const [gx, gy, seed] of [[3, 5, 11], [4, 4, 23]]) {
+    for (const [gx, gy, seed] of [[6, 4, 11], [4, 4, 23]]) {
       const c = new Creature(ratSpec({ key: `cave_rat_${seed}`, seed, scale: 0.55 }));
       c.position.copy(cellPos(gx, gy)).add(CAVE_ORIGIN);
       c.heading = Math.random() * Math.PI * 2;
@@ -224,15 +348,17 @@ export class Cave {
     }
   }
 
-  // Swing the descent's trapdoor. `instant` snaps the pose — returning
+  // Swing the first mouth's trapdoor. `instant` snaps the pose — returning
   // players boot with it already open; the FTUE opens it with a creak and a
   // puff of dust the moment the player walks back in to delve.
   setTrapdoorOpen(open, instant = false) {
     if (this.trapdoorOpen === open) return;
     this.trapdoorOpen = open;
     if (instant) {
-      this._lidAngle = open ? 1 : 0;
-      this._lid.rotation.x = -this._lidAngle * 1.9;
+      const first = this.holes[0];
+      first.open = open;
+      first._lidAngle = open ? 1 : 0;
+      first.lid.rotation.x = -first._lidAngle * 1.9;
     } else if (open) {
       this.game.particles.burst(
         this.descentPos.clone().setY(0.3),
@@ -250,6 +376,86 @@ export class Cave {
     this.slime.heading = Math.PI; // face north, toward the waking player
     this.game.engine.scene.add(this.slime);
     return this.slime;
+  }
+
+  // A lone rat out in the light with the hero and the slime — potters along the
+  // sliver of floor south of the fog (so it never wanders into the dark or the
+  // fence), right on the path out, ready for the FTUE's throwaway dash-kill.
+  spawnFtueRat() {
+    if (this._ftueRat) return this._ftueRat;
+    const zone = { x: 4, y: 6, w: 3, h: 2 }; // the lit tunnel between hero and slime
+    const c = new Creature(ratSpec({ key: "cave_ftue_rat", seed: 77, scale: 0.55 }));
+    c.position.copy(cellPos(6, 7)).add(CAVE_ORIGIN); // out in the light, on the way down
+    c.heading = Math.random() * Math.PI * 2;
+    this.game.engine.scene.add(c);
+    const rat = { creature: c, tx: c.position.x, tz: c.position.z, pause: 0.6, zone };
+    this.rats.push(rat);
+    this._ftueRat = rat;
+    return rat;
+  }
+
+  // Raise (or drop) the FTUE fog: a thick black bank drifting across the whole
+  // chamber behind the hero, sealing the four mouths out of sight, plus an
+  // invisible fence at the fog's lip so once control unlocks he can't stroll
+  // back into the dark. Only the first-run opener asks for it; it's cleared the
+  // moment the hero steps out into the daylight.
+  setFtueVeil(on) {
+    if (on) { if (!this.veil) this._buildVeil(); return; }
+    if (!this.veil) return;
+    this.group.remove(this.veil.group);
+    this.veil.group.traverse((o) => { o.material?.dispose?.(); o.geometry?.dispose?.(); });
+    const i = this.colliders.indexOf(this.veil.wall);
+    if (i >= 0) this.colliders.splice(i, 1);
+    this.veil = null;
+  }
+
+  _buildVeil() {
+    const group = new THREE.Group();
+    const tex = fogPuffTexture();
+    const r = rng(4242);
+    const puffs = [];
+    // one dark puff, drawn over everything behind (depthTest off) so no mouth,
+    // shaft or wall pokes through — stacked, they read as one rolling black mass
+    const addPuff = (x, y, z, sc, op) => {
+      const mat = new THREE.SpriteMaterial({
+        map: tex, color: 0x04040a, transparent: true,
+        opacity: op, depthWrite: false, depthTest: false, fog: false,
+      });
+      const s = new THREE.Sprite(mat);
+      s.position.set(x, y, z);
+      s.scale.set(sc, sc, 1);
+      s.renderOrder = 20; // over the mouth shafts and walls in the same band
+      s.raycast = () => {};
+      s.userData = { bx: x, by: y, bz: z };
+      group.add(s);
+      puffs.push(s);
+    };
+    // the boundary the player actually sees: an even grid of same-size puffs
+    // standing along the fog lip, so it reads as one coherent, clean-edged wall
+    // rather than a ragged scatter (the wave in update() keeps it alive)
+    const HALF = 12, COLS = 13, ROWS = 4;
+    for (let c = 0; c <= COLS; c++) {
+      const x = -HALF + (2 * HALF) * (c / COLS);
+      for (let row = 0; row < ROWS; row++)
+        addPuff(x, 0.5 + row * 1.5, VEIL_EDGE_Z, 4.0, 0.82);
+    }
+    // fill packed in behind it (north, out of sight) — this is the part that
+    // guarantees the mouths and walls never poke through, so it can stay loose
+    for (let i = 0; i < 55; i++)
+      addPuff((r() - 0.5) * 26, 0.2 + r() * 5.2, VEIL_EDGE_Z - 1.2 - r() * 8, 4 + r() * 1.6, 0.7);
+    // a matching bank framing the daylight — thick black on the walls flanking
+    // and behind the way out, the bright gap itself left clear so it still reads
+    // as the exit
+    const exitZ = this.exitPos.z - CAVE_ORIGIN.z; // local
+    for (let i = 0; i < 46; i++) {
+      const side = r() < 0.5 ? -1 : 1;
+      addPuff(side * (3.4 + r() * 9), 0.2 + r() * 5.0, exitZ - 2 + r() * 6, 4 + r() * 1.5, 0.62);
+    }
+    this.group.add(group);
+    // the invisible fence: a wide, thin box across the chamber at the fog's lip
+    const wall = { x: CAVE_ORIGIN.x, z: VEIL_WALL_Z + CAVE_ORIGIN.z, hw: 12, hd: 0.5 };
+    this.colliders.push(wall);
+    this.veil = { group, puffs, wall };
   }
 
   // The player's dash swept through here: fell any rat it caught — they're
@@ -274,11 +480,14 @@ export class Cave {
     return hitAny;
   }
 
-  // Fresh wander target inside the room, a comfortable step from where the rat
-  // stands now (world coords).
+  // Fresh wander target inside the rat's home zone (the chamber by default; the
+  // FTUE's lit-strip rat keeps to the sliver of floor south of the fog so it
+  // doesn't shove against the invisible fence), a comfortable step from where
+  // the rat stands now (world coords).
   _ratTarget(rat) {
-    const gx = ROOM.x + 0.5 + Math.random() * (ROOM.w - 1);
-    const gy = ROOM.y + 0.5 + Math.random() * (ROOM.h - 1);
+    const zone = rat.zone || CHAMBER;
+    const gx = zone.x + 0.5 + Math.random() * Math.max(0, zone.w - 1);
+    const gy = zone.y + 0.5 + Math.random() * Math.max(0, zone.h - 1);
     const p = cellPos(gx, gy).add(CAVE_ORIGIN);
     rat.tx = p.x;
     rat.tz = p.z;
@@ -286,16 +495,37 @@ export class Cave {
 
   update(dt, elapsed) {
     if (this.game.playerArea !== "cave") return;
-    feedOccluder(this._wallMat, this.game.player, this.game.engine.camera);
+    // walls dither away between the camera and the hero, plus the creatures in
+    // here (the FTUE slime and any live rats), so none get tucked behind a wall
+    const occluders = this.rats.filter((r) => !r.creature.dead).map((r) => r.creature);
+    if (this.slime && !this.slime.dead) occluders.push(this.slime);
+    feedOccluder(this._wallMat, this.game.player, this.game.engine.camera, 0.6, occluders);
     for (const s of this.shafts) s.userData.update(dt, elapsed);
 
-    // ease the trapdoor toward its open/shut pose (swings up and back)
-    const lidTgt = this.trapdoorOpen ? 1 : 0;
-    this._lidAngle += (lidTgt - this._lidAngle) * Math.min(1, dt * 4);
-    this._lid.rotation.x = -this._lidAngle * 1.9;
+    // ease every lid toward its pose (swings up and back): the first follows
+    // the FTUE trapdoor flag, the deeper three are open while their shortcut
+    // is unsealed (the game tracks the wall-clock expiry)
+    for (const hole of this.holes) {
+      hole.open = hole.id === 0 ? this.trapdoorOpen : this.game._shortcutOpen(hole.id);
+      const tgt = hole.open ? 1 : 0;
+      hole._lidAngle += (tgt - hole._lidAngle) * Math.min(1, dt * 5);
+      hole.lid.rotation.x = -hole._lidAngle * 1.9;
+    }
     // with the south wall gone the glare shows face-on — keep it soft enough
     // that the floor still reads through the daylight
     this.glare.material.opacity = 0.5 + Math.sin(elapsed * 1.7) * 0.1;
+
+    // the FTUE fog bank breathes as one: a single wave travelling along its
+    // length (phase tied to x) so the whole wall rolls coherently in place
+    if (this.veil) {
+      for (const s of this.veil.puffs) {
+        const u = s.userData;
+        const w = elapsed * 0.7 + u.bx * 0.4;
+        s.position.x = u.bx + Math.sin(w) * 0.45;
+        s.position.y = u.by + Math.cos(w * 0.9) * 0.3;
+        s.position.z = u.bz + Math.sin(w * 0.6) * 0.22;
+      }
+    }
 
     // the slime idles (and, once the cinematic fells it, chars + dissolves)
     if (this.slime) {
@@ -348,5 +578,17 @@ export class Cave {
       }
       c.update(dt, elapsed);
     }
+  }
+
+  // Tear the whole cave back down — the game never does this (it's built once
+  // and permanent), but the level editor's cave preview rebuilds on demand.
+  dispose() {
+    if (this.slime) { this.slime.dispose(); this.slime = null; }
+    for (const rat of this.rats) rat.creature.dispose();
+    this.rats.length = 0;
+    this._ftueRat = null;
+    this.setFtueVeil(false);
+    this.game.engine.scene.remove(this.group);
+    this.group.traverse((o) => { o.material?.dispose?.(); o.geometry?.dispose?.(); });
   }
 }

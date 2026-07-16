@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/png" href="/logo.png" />
-    <title>Coin Cellar — overworld editor</title>
+    <title>Coin Cellar — editor</title>
     <style>
       :root {
         --panel-bg: rgba(24, 16, 40, 0.92);
@@ -45,6 +45,19 @@
       .panel button.primary:hover { background: #7d5a34; }
       .panel .muted { color: var(--ink-dim); font-size: 12px; margin: 4px 0; }
       .panel .badge { display: inline-block; background: #5a2a2a; border-radius: 6px; padding: 2px 8px; font-size: 11px; margin-left: 6px; }
+
+      #tabs {
+        position: absolute; left: 50%; top: 10px; transform: translateX(-50%);
+        display: flex; gap: 4px;
+        background: var(--panel-bg); border: 1px solid var(--panel-edge);
+        border-radius: 10px; padding: 4px;
+      }
+      #tabs button {
+        background: transparent; color: var(--ink-dim); border: 1px solid transparent;
+        border-radius: 7px; padding: 5px 16px; font: inherit; cursor: pointer;
+      }
+      #tabs button:hover { background: #2a1e44; }
+      #tabs button.active { background: #4a3a72; color: var(--ink); border-color: var(--panel-edge); }
 
       #status {
         position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%);
@@ -88,24 +101,15 @@
   </head>
   <body>
     <div id="app"></div>
+    <nav id="tabs">
+      <button id="tab-overworld" class="active">Overworld</button>
+      <button id="tab-cave">Cave</button>
+      <button id="tab-dungeon">Dungeon</button>
+    </nav>
     <aside id="panel" class="panel"></aside>
     <div id="palette" hidden></div>
     <div id="status"></div>
-    <div id="hint">
-      <strong>Overworld editor</strong>
-      <span><kbd>WASD</kbd> + <kbd>Space</kbd>/<kbd>C</kbd> fly · <kbd>Shift</kbd> sprint</span>
-      <span><kbd>RMB</kbd> drag look · <kbd>Wheel</kbd> fly speed</span>
-      <span><kbd>Click</kbd> select · click again: house part</span>
-      <span><kbd>G</kbd> grab · click to drop</span>
-      <span><kbd>R</kbd>/<kbd>Shift+R</kbd> rotate 15°</span>
-      <span><kbd>[</kbd>/<kbd>]</kbd> or <kbd>Alt</kbd>+<kbd>Wheel</kbd> scale</span>
-      <span><kbd>Q</kbd>/<kbd>E</kbd> lower/raise part</span>
-      <span><kbd>Ctrl</kbd>+<kbd>D</kbd> duplicate · <kbd>Del</kbd> delete</span>
-      <span><kbd>B</kbd> before/after · <kbd>H</kbd> roof</span>
-      <span><kbd>Enter</kbd> decor palette</span>
-      <span><kbd>Ctrl</kbd>+<kbd>S</kbd> save · <kbd>Ctrl</kbd>+<kbd>Z</kbd> undo</span>
-      <span><kbd>Esc</kbd>/<kbd>RMB</kbd> cancel</span>
-    </div>
+    <div id="hint"></div>
     <script type="module" src="/src/editor/editor.js"></script>
   </body>
 </html>

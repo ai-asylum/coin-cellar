@@ -6,11 +6,20 @@ import { icon, itemIcon } from "../core/icons.js";
 import { ITEMS } from "./items.js";
 import { SLOTS, SLOT_META, equipInfo } from "./gear.js";
 import { MAX_DEPTH, DUNGEON_ORIGIN } from "./dungeon.js";
+import { dayClockStops } from "./shop.js";
 import { esc } from "./game-util.js";
 import { NAME_KEY } from "./game-persistence.js";
 
 // per-call scratch vector (duplicated from game.js — these are transient)
 const _v = new THREE.Vector3();
+
+// the real wall-clock hour as a 0–24 float, and a HH:MM label for a slider value
+const _realHour = () => { const d = new Date(); return d.getHours() + d.getMinutes() / 60; };
+const _fmtHour = (h) => {
+  const hh = Math.floor(h) % 24;
+  const mm = Math.floor((h - Math.floor(h)) * 60);
+  return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+};
 
 export const uiMethods = {
   // Storeroom items as a tappable grid (used by the place / replace menus).
@@ -41,9 +50,9 @@ export const uiMethods = {
   },
 
   _toggleBag() {
-    // The backpack only opens while delving — in the shop you stock straight
-    // onto the tables via the context action, so there's no standalone bag view.
-    if (this.playerArea !== "dungeon") return;
+    // The backpack opens anywhere (shop, cave lobby, delving) — it's always the
+    // window into what you carry and what you've got equipped. In the shop you
+    // also stock straight onto the tables via the context action.
     if (this.hud.sheetOpen) return this.hud.hideSheet();
     this._openBag();
   },
@@ -75,7 +84,12 @@ export const uiMethods = {
       // Nothing to swap in and nothing to take off → there's no picker worth
       // opening, so lock the cell rather than showing an empty list.
       const locked = !this._slotHasOptions(slot, source);
+      // A worn non-weapon piece gets a corner "×" for one-tap unequip, so you
+      // don't have to open the picker just to strip a slot (the weapon slot is
+      // never left bare, so it never shows one).
+      const removable = it && slot !== "weapon";
       return `<button class="gear-cell${it ? " filled ti-" + it.tier : ""}${locked ? " locked" : ""}" data-slot="${slot}"${locked ? " disabled" : ""}>
+        ${removable ? `<span class="gear-cell-x" data-unslot="${slot}" role="button" aria-label="Unequip ${SLOT_META[slot].name}">×</span>` : ""}
         ${ic}
         <small>${SLOT_META[slot].name}</small>
         <span class="gear-cell-name">${it ? it.name : SLOT_META[slot].empty}</span>
@@ -98,12 +112,21 @@ export const uiMethods = {
     el.querySelectorAll(".gear-cell").forEach((b) => {
       b.onclick = () => this._openEquipPicker(b.dataset.slot, source);
     });
+    // The corner "×" strips the slot in one tap — swallow the click so it
+    // doesn't also bubble up and open the picker behind it.
+    el.querySelectorAll(".gear-cell-x").forEach((x) => {
+      x.onclick = (e) => {
+        e.stopPropagation();
+        this._unequip(x.dataset.unslot, source);
+        this._reopenGearHost(source);
+      };
+    });
   },
 
   // Reopen whichever host sheet the paper-doll is embedded in — the pack menu
   // above ground, the backpack while delving.
   _reopenGearHost(source) {
-    if (source === "inv") this._openBagDungeon();
+    if (source === "inv") this._openBagSheet();
     else this._packMenu();
   },
 
@@ -203,26 +226,50 @@ export const uiMethods = {
   },
 
   _openBag() {
-    // The bag is a dungeon survival kit: use consumables or drop loot to free space.
-    if (this.playerArea !== "dungeon") return;
-    this._openBagDungeon();
+    // The bag opens anywhere — it's the always-available view of what you carry
+    // and what you've got equipped. Dropping loot is still delve-only (see the
+    // guard below and in _dropItem).
+    this._openBagSheet();
   },
 
-  _openBagDungeon() {
+  _openBagSheet() {
     // Reopening while the bag is already up (after a use/drop) is a refresh, not
     // a fresh open — skip the pop-out entrance so the panels don't re-scale.
     const refresh = this.hud.sheetOpen;
+    const ftue = !!this.tutorial;
+    // Drop is delve-only (loot tossed anywhere else would just be lost — see
+    // _dropItem), and it's also withheld during the FTUE so a new player can't
+    // throw away the haul the tutorial is about to teach them to sell.
+    const canDrop = this.playerArea === "dungeon" && !ftue;
+    // In the shop the bag is a loading dock: every row's action becomes "Store",
+    // dropping the item into the storeroom to be stocked onto the tables.
+    const inShop = this.playerArea === "shop" && !ftue;
     const rows = this.inventory
       .map((id, i) => {
         const it = ITEMS[id];
-        const useBtn = it.heal
-          ? `<button class="bag-act use" data-i="${i}">Use <small>+${it.heal}${icon("heart")}</small></button>`
-          : `<span class="bag-act ghost">not usable</span>`;
+        // quest props (the shop key, the note): no price, no Use/Drop — only
+        // the story action the FTUE wires up right now, if any
+        if (it.quest) {
+          const act = this._questBagAction(id);
+          return `<div class="bag-row ti-${it.tier}">
+            <span class="bag-face">${itemIcon(it.icon)}</span>
+            <span class="bag-name">${it.name}<small>${it.blurb}</small></span>
+            ${act ? `<button class="bag-act use" data-q="${id}">${act.label}</button>` : ""}
+          </div>`;
+        }
+        // during the FTUE the plain rows carry no actions at all — the only
+        // button in the whole bag is the story action that advances the story
+        const useBtn = ftue ? ""
+          : inShop
+            ? `<button class="bag-act store" data-store="${i}">${icon("box")} Store</button>`
+            : it.heal
+              ? `<button class="bag-act use" data-i="${i}">Use <small>+${it.heal}${icon("heart")}</small></button>`
+              : `<span class="bag-act ghost">not usable</span>`;
         return `<div class="bag-row ti-${it.tier}">
           <span class="bag-face">${itemIcon(it.icon)}</span>
           <span class="bag-name">${it.name}<small>${it.base}g</small></span>
           ${useBtn}
-          <button class="bag-act drop" data-i="${i}">Drop</button>
+          ${canDrop ? `<button class="bag-act drop" data-i="${i}">Drop</button>` : ""}
         </div>`;
       })
       .join("");
@@ -232,7 +279,7 @@ export const uiMethods = {
         ${this._gearDollHTML("inv")}
       </div>
       <div class="bag-panel sheet-card">
-        ${this._bagHead("sip a potion or drop loot to free space")}
+        ${this._bagHead(canDrop ? "sip a potion or drop loot to free space" : inShop ? "store items to stock your shelves" : "everything you carry")}
         <div class="bag-list">${rows || "<small class='empty'>empty — go delve!</small>"}</div>
       </div>
     `, `bag-sheet bag-split${refresh ? " bag-refresh" : ""}`, { onBackdrop: () => this.hud.hideSheet() });
@@ -244,6 +291,50 @@ export const uiMethods = {
     el.querySelectorAll(".bag-act.drop").forEach((btn) => {
       btn.onclick = () => this._dropItem(Number(btn.dataset.i));
     });
+    el.querySelectorAll(".bag-act.store").forEach((btn) => {
+      btn.onclick = () => this._storeItem(Number(btn.dataset.store));
+    });
+    el.querySelectorAll(".bag-act[data-q]").forEach((btn) => {
+      btn.onclick = () => this._questBagAction(btn.dataset.q)?.fn();
+    });
+  },
+
+  // -------------------------------------------------------------- storeroom
+  // The shop's back room: everything the tables are stocked from. Twin of the
+  // backpack (popping out of its own HUD button), but the flow runs the other
+  // way — tap "Take" to pull a piece back into the bag (to gear up or carry a
+  // supply down). Shop-only; the button that opens it is hidden underground.
+  _toggleStore() {
+    if (this.hud.sheetOpen) return this.hud.hideSheet();
+    this._openStoreSheet();
+  },
+
+  _openStoreSheet() {
+    const refresh = this.hud.sheetOpen;
+    const n = this.stash.length;
+    const full = this.inventory.length >= this.invCap;
+    const rows = this.stash
+      .map((id, i) => {
+        const it = ITEMS[id];
+        return `<div class="bag-row ti-${it.tier}">
+          <span class="bag-face">${itemIcon(it.icon)}</span>
+          <span class="bag-name">${it.name}<small>${it.base}g</small></span>
+          <button class="bag-act take" data-take="${i}"${full ? " disabled" : ""}>Take</button>
+        </div>`;
+      })
+      .join("");
+    const el = this.hud.showSheet(`
+      <div class="bag-head">
+        <span class="bag-emoji">${icon("box")}</span>
+        <div class="bag-title"><b>Storeroom</b><small>${n ? `${n} item${n === 1 ? "" : "s"} out back` : "empty"}</small></div>
+        <button class="icon-btn" id="store-close">${icon("close")}</button>
+      </div>
+      <div class="bag-list">${rows || "<small class='empty'>storeroom empty — go delve!</small>"}</div>
+    `, `store-sheet bag-sheet sheet-card${refresh ? " bag-refresh" : ""}`, { onBackdrop: () => this.hud.hideSheet() });
+    el.querySelector("#store-close").onclick = () => this.hud.hideSheet();
+    el.querySelectorAll(".bag-act.take").forEach((btn) => {
+      btn.onclick = () => this._takeFromStore(Number(btn.dataset.take));
+    });
   },
 
   // Shared builder for the two per-table storeroom menus. "Place" (empty table)
@@ -254,7 +345,7 @@ export const uiMethods = {
   _tableMenu(slot, { title, shownItem, onPick, onTakeBack }) {
     const slotIdx = this.shop.slots.indexOf(slot);
     const shownRow = shownItem
-      ? `<div class="inv-grid swap-grid">
+      ? `<div class="inv-grid swap-grid swap-shown">
           <button class="inv-item shown ti-${shownItem.tier}" id="take-back">${itemIcon(shownItem.icon)}<small>${shownItem.name}</small><span>take back</span></button>
         </div>`
       : "";
@@ -263,7 +354,7 @@ export const uiMethods = {
         <div><b>${title}</b></div>
         <button class="icon-btn" id="bag-close">${icon("close")}</button></div>
       ${shownRow}
-      <div class="inv-grid swap-grid">${this._stashRows() || "<small class='empty'>storeroom empty — nothing to swap in</small>"}</div>
+      <div class="inv-grid swap-grid swap-stash">${this._stashRows() || "<small class='empty'>storeroom empty — nothing to swap in</small>"}</div>
     `, "sheet-card");
     el.querySelector("#bag-close").onclick = () => this.hud.hideSheet();
     if (onTakeBack) {
@@ -483,6 +574,14 @@ export const uiMethods = {
         <button data-a="kill">${icon("skull")} Kill enemies</button>
         <button data-a="reset" class="danger">${icon("recycle")} Wipe save</button>
       </div>
+      <div class="admin-head"><b>${icon("sun")} Time of day</b><span id="admin-clock-val">${this.debugHour == null ? "live" : _fmtHour(this.debugHour)}</span></div>
+      <div class="admin-gradient" style="background:linear-gradient(90deg, ${dayClockStops()})">
+        <div class="admin-gradient-mark" id="admin-clock-mark" style="left:${((this.debugHour == null ? _realHour() : this.debugHour) / 24) * 100}%"></div>
+      </div>
+      <div class="admin-slider">
+        <input type="range" id="admin-clock" min="0" max="24" step="0.25" value="${this.debugHour == null ? _realHour() : this.debugHour}">
+        <button data-a="clocklive">Live</button>
+      </div>
       <div class="admin-head"><b>${icon("crown")} FTUE jump</b><span>load a tutorial step</span></div>
       <div class="admin-grid">
         <button data-a="tut:cave">${icon("swords")} 1 · Cave</button>
@@ -500,6 +599,14 @@ export const uiMethods = {
     el.addEventListener("click", (e) => {
       const btn = e.target.closest("button[data-a]");
       if (btn) this._adminAction(btn.dataset.a);
+    });
+    // scrub the time-of-day slider to pin the lighting to a fixed hour
+    el.querySelector("#admin-clock").addEventListener("input", (e) => {
+      this.debugHour = +e.target.value;
+      const lbl = this.adminEl?.querySelector("#admin-clock-val");
+      if (lbl) lbl.textContent = _fmtHour(this.debugHour);
+      const mark = this.adminEl?.querySelector("#admin-clock-mark");
+      if (mark) mark.style.left = `${(this.debugHour / 24) * 100}%`;
     });
   },
 
@@ -599,6 +706,19 @@ export const uiMethods = {
       case "kill":
         for (const e of [...this.dungeon.enemies]) this.dungeon.damageEnemy(e, 999);
         break;
+      case "clocklive": {
+        // hand the day/night cycle back to the real wall clock
+        this.debugHour = null;
+        const now = _realHour();
+        const slider = this.adminEl?.querySelector("#admin-clock");
+        const lbl = this.adminEl?.querySelector("#admin-clock-val");
+        const mark = this.adminEl?.querySelector("#admin-clock-mark");
+        if (slider) slider.value = now;
+        if (lbl) lbl.textContent = "live";
+        if (mark) mark.style.left = `${(now / 24) * 100}%`;
+        this.hud.toast(`${icon("sun")} Clock back to live time`);
+        break;
+      }
       case "reset":
         this._reset();
         break;
@@ -623,7 +743,12 @@ export const uiMethods = {
     this.hud.hideSpeak(); // drop any open bubble (its tap-callback chains old scenes)
     this._cine = null;
     this._doorScene = false;
-    this._bagStowed = false;
+    this._ftueFreeze = false;
+    this._noteSpawned = false;
+    this._notePicked = false;
+    this._noteRead = false;
+    this._removeNoteProp();
+    this.hud.clearBagAttention();
     this.shop.doorLocked = false;
     this.gold = 100;
     this.hud.setGold(this.gold, false);
@@ -633,25 +758,28 @@ export const uiMethods = {
     for (const s of this.shop.slots) if (s.item) this.shop.unstockSlot(s);
     this._syncStock();
 
-    const wares = ["crystal", "caveshroom", "rathide", "meat", "jelly"]; // the cave haul
+    const wares = ["caveshroom", "meat", "jelly"]; // the cave haul
     const toShop = () => {
       if (this.playerArea !== "shop") {
-        // climbing out of a delve first cleans up its state (lobby, bag, HP)
+        // climbing out of a delve first cleans up its state (bag, HP)
         if (this.playerArea !== "cave") this._returnHome();
         this.playerArea = "shop";
-        this.hud.showBag(false);
+        this.lobby.leave();
+        this.hud.showBag(true);
+        this.hud.showStore(true);
         this.hud.setGoldCorner(false);
       }
       this.player.position.copy(this.shop.doorPos);
       this.player.animator.prevPos.copy(this.player.position);
       this._snapCamera();
     };
-    // "inside the shop, haul stowed, keys in hand" — the state most steps build on
+    // "inside the shop, key spent on the gates, note read, haul stowed" — the
+    // state most steps build on
     const insideSetup = (tut) => {
       toShop();
       this.tutorial = tut;
       this._doorScene = true;
-      this._bagStowed = true;
+      this._noteSpawned = this._notePicked = this._noteRead = true;
       this.stash = [...wares];
       this._syncInv();
     };
@@ -669,7 +797,7 @@ export const uiMethods = {
         toShop();
         this.tutorial = "shop";
         this.shop.doorLocked = true;
-        this.inventory = [...wares];
+        this.inventory = ["shopkey", ...wares]; // the door scene spends the key
         this._syncInv();
         // stand where the cave spits you out, facing down the road at the shop
         this.player.position.copy(this.shop.caveMouthPos).add(_v.set(0, 0, 1.9));
@@ -681,19 +809,17 @@ export const uiMethods = {
 
       case "stock":
         insideSetup("stock");
-        this._ensureMayor(this._mayorWatchSpot()).state = "watch";
         this._tutHint();
         break;
 
       case "sell":
         insideSetup("stock");
-        this._ensureMayor(this._mayorWatchSpot()).state = "watch";
         this._stockFromStash(0); // advances stock -> sell + brings the shopper in
         break;
 
       case "delve":
-        // the send-off: sale done, Mayor gone, arrow pointing down the road at
-        // the cave (the step completes on the first descent into the cellar)
+        // the send-off: sale done, arrow pointing down the road at the cave
+        // (the step completes on the first dive down a mouth)
         insideSetup("delve");
         this._tutHint();
         break;

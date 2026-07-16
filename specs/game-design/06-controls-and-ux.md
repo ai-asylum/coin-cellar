@@ -67,7 +67,9 @@ The HUD is a DOM overlay (`#hud`) on top of the WebGL canvas (`#app`), styled in
 
 - **Gold counter** and **hearts** (current/max HP).
 - **Day clock / phase indicator** (sun/moon, day number, time remaining).
-- **Bag** panel — tap items to shelve or use consumables.
+- **Bag** panel — the always-available (any area: town, cave lobby, delving) view
+  of what you carry and what you've got equipped; tap items to use consumables.
+  Dropping loot is delve-only (tossing it in town or the cave would just lose it).
 - **Haggle sheet** — Recettear-style deal UI with flanking character portraits and
   mood faces.
 - **Banners & floaties** — floor announcements, floating gold numbers on sales,

@@ -126,6 +126,37 @@ export const economyMethods = {
     }
   },
 
+  // The bag's "Store" action: drop one carried item into the storeroom, from
+  // where it can be stocked onto the tables. Shop-only; refreshes the open
+  // backpack so the row vanishes in place.
+  _storeItem(idx) {
+    if (this.playerArea !== "shop") return;
+    const id = this.inventory[idx];
+    if (id == null) return;
+    this.inventory.splice(idx, 1);
+    this.stash.push(id);
+    this.audio.pickup();
+    if (this.net.isGuest) this.net.send({ t: "storeReq", idx });
+    else { this._syncInv(); this._save(); }
+    if (this.hud.sheetOpen) this._openBagSheet();
+  },
+
+  // The storeroom's "Take" action: pull one item back out of the storeroom and
+  // into the bag (to gear up or carry a supply down), refusing when the bag is
+  // full. Refreshes the open storeroom sheet in place.
+  _takeFromStore(idx) {
+    if (this.playerArea !== "shop") return;
+    const id = this.stash[idx];
+    if (id == null) return;
+    if (this.inventory.length >= this.invCap) return this.hud.bagFull();
+    this.stash.splice(idx, 1);
+    this.inventory.push(id);
+    this.audio.pickup();
+    if (this.net.isGuest) this.net.send({ t: "takeReq", idx });
+    else { this._syncInv(); this._save(); }
+    if (this.hud.sheetOpen) this._openStoreSheet();
+  },
+
   _haggle(cust) {
     // stepping up to the counter commits the shopkeeper to working the whole
     // line: once this deal closes, the next shopper's sheet opens on its own

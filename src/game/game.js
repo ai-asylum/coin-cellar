@@ -8,7 +8,6 @@ import { clamp, lerp } from "../core/engine.js";
 import { BlockyCreature } from "../chargen/blocky.js";
 import { Shop } from "./shop.js";
 import { Dungeon, DUNGEON_ORIGIN } from "./dungeon.js";
-import { Cellar } from "./cellar.js";
 import { Cave } from "./cave.js";
 import { ITEMS, itemSprite } from "./items.js";
 import { starterEquipment, aggregateStats, weaponMesh } from "./gear.js";
@@ -38,7 +37,14 @@ setLayout(layoutData);
 // New shopkeepers wake up in the FTUE cave with a day's spelunking haul
 // already in the bag — the goods that the closed shop (and the Mayor's offer)
 // give a reason to sell. The opening cinematic adds the slime's jelly on top.
-const START_INV = ["crystal", "caveshroom", "rathide", "meat"];
+const START_INV = ["caveshroom", "meat"];
+
+// The hero turns with the same capped rad/s pivot as the townsfolk (see
+// BlockyCreature.turnRate) so the body visibly swings its shoulders toward a
+// new heading — including the little turn toward an aligned foe on a dash —
+// rather than snapping. Brisker than the townsfolk's stroll so combat stays
+// responsive. Shared by _respawn in game-combat.js (kept in sync there).
+export const PLAYER_TURN_RATE = 7;
 const BASE_MAXHP = 6; // hearts before any chestplate / ring bonuses
 
 export class Game {
@@ -82,10 +88,20 @@ export class Game {
     // dash — the sole attack now: a lunge that damages what it sweeps through
     this._dodgeCd = 0;
     this._dashT = -1;
+    // keeps the hero drawn solid for the whole dash i-frame window (which
+    // outlasts the lunge motion) so the flicker never bites at the dash's tail
+    this._dashSolidT = 0;
     this._dashDur = 0.24;
     this._dashSpeed = 13;
     this._dashDX = 0;
     this._dashDZ = 0;
+    // when a dash auto-aims onto a foe, the hero *looks* fully at it (a stronger
+    // turn than the gently-bent lunge line) and holds that gaze for a short beat
+    // after the lunge so the controls don't instantly snap facing back — this is
+    // the visible "turn toward the enemy" feedback.
+    this._dashFaceDX = 0;
+    this._dashFaceDZ = 0;
+    this._dashFaceT = 0;
     this._dashHitIds = null; // foes / chests struck by the current dash (dedupe)
     this._dashDmg = 0;
     this._dashCrit = false;
@@ -102,11 +118,13 @@ export class Game {
     this._floorDesync = false;
     this._pendingLead = null; // { n, seed, hole } — where to catch up to
     this.godMode = false;
+    this.debugHour = null; // admin time-of-day override (0–24); null = real clock
     this._adminOpen = false;
     this.paused = false;
     this._fsPaused = false; // set while a touch player is out of fullscreen
     this._escOpen = false;
     this.tutorial = null; // first-run onboarding step (see _tutStart); null once done
+    this._ftueFreeze = false; // FTUE bag beats root the player (key turn / note read)
     this._hadSave = false; // set by _load — suppresses the tutorial for returning players
     // whether the player has ever felled a boss. Kept for save migration (a
     // pre-bossBeaten save with earned shortcuts implies a fallen boss).
@@ -167,19 +185,18 @@ export class Game {
     this.tablesRepaired[0] = true;
     this.tablesRepaired.forEach((done, i) => { if (done) this.shop.repairTable(i, true); });
     this.dungeon = new Dungeon(this);
-    this.cellar = new Cellar(this);
-    // the cave at the end of the road — the dungeon's permanent front door
-    // (its cellar descent is the way down; see _updateCaveTravel for the
-    // walk-through between the road and the cave mouth)
+    // the cave at the end of the road — the dungeon's permanent front door and
+    // shared lobby (its trapdoor mouths are the way down; see _updateCaveTravel
+    // for the walk-through between the road and the cave mouth)
     this.cave = new Cave(this);
-    // the shared-world lobby (Supabase Realtime): joined while in the cellar or
+    // the shared-world lobby (Supabase Realtime): joined while in the cave or
     // down a hole, so strangers' avatars show up alongside the co-op partner
     this.lobby = new Lobby(this);
     this.cellarHole = -1; // which cellar mouth the current dungeon hangs under
     this._lobbyAvatars = new Map(); // lobby player id -> {creature, wasAtk}
 
     // --- player
-    this.player = new BlockyCreature("a", { height: 1.3 });
+    this.player = new BlockyCreature("a", { height: 1.3, turnRate: PLAYER_TURN_RATE });
     this.player.position.set(0, 0, 2.5);
     this._heldWeaponId = this.equipment.weapon;
     this.player.holdItem(weaponMesh(this.equipment.weapon));
@@ -218,7 +235,6 @@ export class Game {
 
     this._wireHud();
     this._initFullscreenGate();
-    this._initLandscapeLock();
     this.input.onKey = (code) => this._handleKey(code);
     this._beginShop(true);
     engine.onTick((dt, t) => this.update(dt, t));
@@ -240,11 +256,13 @@ export class Game {
     this._updatePlayer(dt, elapsed);
     this._updateRemote(dt, elapsed);
     this._updateLobbyPlayers(dt, elapsed);
+    // if a townsfolk chat's dialogue closed for any reason, make sure the
+    // person it froze is released back onto the move
+    if (this._npcChat && !this.hud.speakOpen) this._endNpcChat();
     this.shop.update(dt, elapsed);
     this._updateMayor(dt, elapsed);
     this._updateClerk(dt, elapsed);
     this.dungeon.update(dt, elapsed);
-    this.cellar.update(dt, elapsed);
     this.cave?.update(dt, elapsed);
     this.particles.update(dt);
     this.slash.update(dt);
@@ -262,21 +280,24 @@ export class Game {
     // and locks onto the arena's centre once inside the boss room (fixed cam)
     const p = this.player.position;
     const inDungeon = this.playerArea === "dungeon";
-    const inCellar = this.playerArea === "cellar";
     const inCave = this.playerArea === "cave";
     const inBoss = inDungeon && this.dungeon.active && this.dungeon.inBossRoom(p);
-    // in the shop/town the camera locks onto whichever room the player stands in
-    // (like the classic fixed shop framing); out on the street it follows them.
-    const zone = !inDungeon && !inCellar && !inCave && !inBoss ? this.shop.zoneCenter(p) : null;
+    // Indoors the camera follows within the current room's bounds; out on the
+    // street it follows the player but stops at the walkable town limits.
+    const outdoors = !inDungeon && !inCave && !inBoss;
+    const zone = outdoors ? this.shop.zoneCenter(p) : null;
+    const street = outdoors && !zone ? this.shop.streetCenter(p) : null;
     const camTarget = inBoss ? this.dungeon.bossCenter
-      : inDungeon || inCellar || inCave ? p
+      : inDungeon || inCave ? p
       : zone ? _townCenter.set(zone.cx, 0, zone.cz)
+      : street ? _townCenter.set(street.cx, 0, street.cz)
       : p;
-    const camOffset = inBoss ? _camBoss : inDungeon || inCave ? _camDungeon : inCellar ? _camCellar
-      : zone ? _camShop : _camStreet;
+    const shopOffset = zone ? fitShopCamera(this.engine.camera.aspect, this.shop) : null;
+    const camOffset = inBoss ? _camBoss : inDungeon || inCave ? _camDungeon
+      : shopOffset || this.shop.camStreetOffset;
     this.engine.camTarget.lerp(camTarget, 1 - Math.pow(0.001, dt));
     this.engine.camOffset.lerp(camOffset, 1 - Math.pow(0.1, dt));
-    this.audio.setMood(this.gameOver ? null : inDungeon || inCellar || inCave ? "dungeon" : "shop");
+    this.audio.setMood(this.gameOver ? null : inDungeon || inCave ? "dungeon" : "shop");
 
     // boss health bar: pinned up while the boss lives and you're in the cellar
     const boss = this.dungeon.boss;
@@ -329,23 +350,40 @@ export class Game {
       if (this._respawnT < 0) this._respawn();
       return;
     }
+    // stepping up to a townsperson for a chat: the hero closes the gap and
+    // squares off with them while the dialogue bubble is opening (see
+    // _talkToNpc). Movement is otherwise frozen mid-sentence, so drive it here.
+    if (this._talkApproach) {
+      this._updateTalkApproach(dt);
+      this.hud.hideInteractHint();
+      this.highlight.visible = false;
+      c.update(dt, elapsed);
+      return;
+    }
     this._invulnT -= dt;
     this._dodgeCd -= dt;
-    c.mesh.visible = this._invulnT < 0 || Math.sin(elapsed * 30) > -0.3;
+    this._dashSolidT -= dt;
+    // i-frame flicker — but never blink through a dash: the lunge AND the brief
+    // i-frame grace that trails it should both read as solid
+    c.mesh.visible = this._dashSolidT > 0 || this._invulnT < 0 || Math.sin(elapsed * 30) > -0.3;
 
     // movement
     const mv = this.input.move;
     // A sheet or a live dialogue bubble both freeze the player: no walking,
-    // no swinging, no context-interacts until it's dismissed.
-    const sheetBlocked = this.hud.sheetOpen || this.hud.speakOpen || this.hud.chatOpen;
+    // no swinging, no context-interacts until it's dismissed. The FTUE's
+    // bag beats (turn the key, read the note) root the player the same way —
+    // the bag itself stays openable, that's the whole point.
+    const sheetBlocked = this.hud.sheetOpen || this.hud.speakOpen || this.hud.chatOpen || this._ftueFreeze;
 
     // A live dialogue bubble eats the action press to advance itself: a click
-    // anywhere on screen, Space/Enter, or the on-screen action button. The
-    // edge is consumed so it can't leak into an attack or interact this frame
-    // (movement/actions are already frozen by sheetBlocked above).
+    // anywhere on screen, Space/Enter/J, or the on-screen action button. The
+    // edges are consumed so they can't leak into an attack or interact this
+    // frame (movement/actions are already frozen by sheetBlocked above).
     if (this.hud.speakOpen) {
-      if (this.input.actionEdge) this.hud.advanceSpeak();
+      if (this.input.actionEdge || this._speakAdvanceQueued) this.hud.advanceSpeak();
+      this._speakAdvanceQueued = false;
       this.input.actionEdge = false;
+      this.input.dodgeEdge = false;
       this.input.interactEdge = false;
     }
 
@@ -377,15 +415,19 @@ export class Game {
       c.position.z += mv.y * speed * dt;
     }
 
-    // facing follows the direction of travel — the committed dash direction
-    // while lunging, otherwise the movement input
-    if (this._dashT >= 0) {
+    // facing: when a dash locked onto a foe, look straight at it for the lunge
+    // plus a short lingering beat (turnRate makes the shoulders visibly swing),
+    // so the auto-aim reads. Otherwise facing follows the direction of travel —
+    // the committed dash direction while lunging, else the movement input.
+    if (this._dashFaceT > 0) this._dashFaceT -= dt;
+    if (this._dashFaceT > 0) {
+      c.heading = Math.atan2(this._dashFaceDX, this._dashFaceDZ);
+    } else if (this._dashT >= 0) {
       c.heading = Math.atan2(this._dashDX, this._dashDZ);
     } else if (!sheetBlocked && (mv.x || mv.y)) {
       c.heading = Math.atan2(mv.x, mv.y);
     }
     const colliders = this.playerArea === "shop" ? this.shop.playerColliders
-      : this.playerArea === "cellar" ? this.cellar.colliders
       : this.playerArea === "cave" ? this.cave.colliders : this.dungeon.colliders;
     this.collide(c.position, c.radius * 0.8, colliders);
     if (this.playerArea === "shop") {
@@ -465,6 +507,11 @@ export class Game {
     // away — no walking up. Handled here so it can swallow this frame's press
     // and keep the proximity action below from firing on top of it.
     let clickHandled = false;
+    // touch has no mouse, so a stationary tap on the play area stands in for the
+    // desktop left click that drives shop pick-to-interact (e.g. tap a shelf to
+    // stock it). Fold it into the same pending-click slot the mouse feeds.
+    if (!this._pendingClick && this.input.tapEdge && this.input.tap)
+      this._pendingClick = { x: this.input.tap.x, y: this.input.tap.y };
     if (this._pendingClick) {
       if (this.playerArea === "shop" && !sheetBlocked && !this.gameOver && this._dashT < 0) {
         const tgt = this._shopPick(this._pendingClick.x, this._pendingClick.y);
@@ -543,7 +590,10 @@ export class Game {
     // interact mid-sentence. Advancing runs off the action press (Space/J/Enter,
     // a click anywhere, or the on-screen button) in _updatePlayer instead — this
     // just makes sure those keys don't also trigger a shortcut here.
-    if (this.hud.speakOpen) return;
+    if (this.hud.speakOpen) {
+      if (code === "KeyJ") this._speakAdvanceQueued = true;
+      return;
+    }
     // An open modal takes keyboard priority: J/K move the highlight, Enter
     // picks it, Esc backs out — and the haggle sheet remaps those to nudge the
     // price / seal the deal / walk away. The esc-menu keeps Esc = resume; the
@@ -561,6 +611,7 @@ export class Game {
         return this._toggleEscMenu();
       case "KeyB":
       case "KeyI": return this._toggleBag();
+      case "KeyV": return this._toggleStore();
       case "KeyC": return this._friendSheet();
       case "KeyT": return this._openChat();
       case "KeyM": return document.getElementById("mute-btn").click();
@@ -572,12 +623,21 @@ export class Game {
   _contextAction() {
     const p = this.player.position;
     // the cave: the daylight mouth is a walk-through (see _updateCaveTravel);
-    // the one interact is the cellar descent at its deepest point — silent
-    // while its trapdoor is still shut (the FTUE's shop half)
+    // the interacts are the four dungeon mouths in the deep chamber — all
+    // silent during the FTUE's shop half, and the first stays silent while its
+    // trapdoor is still shut
     if (this.playerArea === "cave") {
       const tutBlocks = this.tutorial && this.tutorial !== "delve";
-      if (!tutBlocks && this.cave.trapdoorOpen && p.distanceTo(this.cave.descentPos) < 1.7)
-        return { label: "hole", hint: "Delve", fn: () => this._delve(), focus: _focus.copy(this.cave.descentPos).setY(0.06).clone(), color: 0xb98cff };
+      if (!tutBlocks) {
+        for (const hole of this.cave.holes) {
+          _v.copy(hole.pos);
+          if (_v.distanceTo(p) >= 1.8) continue;
+          if (hole.id === 0 && !this.cave.trapdoorOpen) continue;
+          if (!this._shortcutOpen(hole.id))
+            return { label: "warning", hint: "Locked", fn: () => this._holePrompt(hole.id), focus: _v.clone().setY(0.06), color: 0x9aa0aa };
+          return { label: "hole", hint: hole.name, fn: () => this._holePrompt(hole.id), focus: _v.clone().setY(0.06), color: hole.color };
+        }
+      }
       return { label: null };
     }
     if (this.playerArea === "shop") {
@@ -660,19 +720,14 @@ export class Game {
             return { label: "box", hint: "Stock", fn: () => this._placeMenu(slot), focus: _focus.copy(slot.pos).clone(), color: 0x66ff9e };
         }
       }
-      return { label: null };
-    }
-    // cellar lobby: the stairs up to the shop and the four dungeon mouths
-    if (this.playerArea === "cellar") {
-      _v.copy(this.cellar.exitPos);
-      if (_v.distanceTo(p) < 1.7)
-        return { label: "home", hint: "Go up", fn: () => this._returnHome(), focus: _v.clone().setY(0.06), color: 0x8fd0ff };
-      for (const hole of this.cellar.holes) {
-        _v.copy(hole.pos);
-        if (_v.distanceTo(p) < 1.8) {
-          if (!this._shortcutOpen(hole.id))
-            return { label: "warning", hint: "Locked", fn: () => this._holePrompt(hole.id), focus: _v.clone().setY(0.06), color: 0x9aa0aa };
-          return { label: "hole", hint: hole.name, fn: () => this._holePrompt(hole.id), focus: _v.clone().setY(0.06), color: hole.color };
+      // townsfolk: step up to any shopper or passer-by (not one mid-deal at the
+      // counter) to strike up a chat. Held back during the FTUE so a new player
+      // isn't pulled off the guided loop.
+      if (!this.tutorial) {
+        const talk = this._nearestTalkNpc();
+        if (talk) {
+          const focus = _focus.copy(talk.creature.position).setY(0.06).clone();
+          return { label: "speak", hint: "Talk", fn: () => this._talkToNpc(talk), focus, color: 0x9ad0ff };
         }
       }
       return { label: null };
@@ -738,6 +793,47 @@ export class Game {
     return best;
   }
 
+  // The nearest townsperson (shopper or street passer-by) the player can chat
+  // with — within arm's reach and not busy at the counter. Returns the customer
+  // or passer-by object (both carry `.npc` and `.creature`), or null.
+  _nearestTalkNpc() {
+    const p = this.player.position;
+    const head = this.shop.counterCustomer();
+    let best = null, bd = 1.7;
+    const consider = (obj) => {
+      if (!obj || obj === head || !obj.npc || !obj.creature) return;
+      const d = _v.copy(obj.creature.position).setY(0).distanceTo(p);
+      if (d < bd) { bd = d; best = obj; }
+    };
+    for (const c of this.shop.customers) {
+      // skip anyone committed to a deal — they're haggling, not chatting
+      if (c.state === "want" || c.state === "offer" || c.state === "haggling" || c.state === "autobuy") continue;
+      consider(c);
+    }
+    for (const pb of this.shop.passersby) consider(pb);
+    return best;
+  }
+
+  // Walk the hero up to a townsperson at the start of a chat (see _talkToNpc):
+  // seek their position, stop a conversational arm's length short, and face
+  // them the whole way. Runs while the dialogue bubble is already open, so it
+  // has to move the player itself (normal movement is frozen mid-sentence).
+  _updateTalkApproach(dt) {
+    const a = this._talkApproach;
+    const c = this.player;
+    const npc = a.target?.creature;
+    if (!npc) { this._talkApproach = null; return; }
+    a.t += dt;
+    _v.set(npc.position.x - c.position.x, 0, npc.position.z - c.position.z);
+    const d = _v.length();
+    if (d > 1e-3) c.heading = Math.atan2(_v.x, _v.z); // square up to them
+    if (d <= a.stopDist || a.t > 2.5) { this._talkApproach = null; return; }
+    _v.normalize();
+    const speed = 3.7 * (this.stats.speedMul || 1);
+    c.position.addScaledVector(_v, Math.min(speed * dt, d - a.stopDist));
+    this.collide(c.position, c.radius * 0.8, this.shop.playerColliders);
+  }
+
   // Raycast a shop click (screen point) against the interactable fixtures and
   // return what it hit: a display `slot` or a `customer` you can deal with.
   // Null when the click misses everything actionable.
@@ -751,11 +847,18 @@ export class Game {
     // candidate roots paired with what they represent; we intersect them all
     // and map the nearest hit back through its ancestry to the owning fixture.
     const pairs = [];
+    const head = shop.counterCustomer();
+    // anyone not busy at the counter can be clicked to strike up a chat (held
+    // back during the FTUE, like the proximity Talk action)
+    const talkable = (o) => !this.tutorial && o && o !== head && o.npc && o.creature &&
+      o.state !== "want" && o.state !== "offer" && o.state !== "haggling" && o.state !== "autobuy";
     for (const cust of shop.customers) {
       const dealable = (cust.state === "want" && cust.slot?.item) ||
         (cust.state === "offer" && cust.sellItem);
       if (dealable && cust.creature) pairs.push([cust.creature, { type: "customer", cust }]);
+      else if (talkable(cust)) pairs.push([cust.creature, { type: "npc", obj: cust }]);
     }
+    for (const pb of shop.passersby) if (talkable(pb)) pairs.push([pb.creature, { type: "npc", obj: pb }]);
     for (const table of shop.tables) pairs.push([table.group, { type: "table", table }]);
     for (const slot of shop.slots) if (slot.mesh) pairs.push([slot.mesh, { type: "slot", slot }]);
 
@@ -796,6 +899,10 @@ export class Game {
       if (cust.state === "want") return { hint: "Haggle", focus, color: 0xffd34d };
       return { hint: "Buy", focus, color: 0x8fe0ff };
     }
+    if (target.type === "npc") {
+      const focus = _focus.copy(target.obj.creature.position).setY(0.06).clone();
+      return { hint: "Talk", focus, color: 0x9ad0ff };
+    }
     if (target.type === "slot") {
       const slot = target.slot;
       const table = slot.table;
@@ -824,6 +931,10 @@ export class Game {
       const cust = target.cust;
       if (cust.state === "want" && cust.slot?.item) this._haggle(cust);
       else if (cust.state === "offer" && cust.sellItem) this._buyFrom(cust);
+      return;
+    }
+    if (target.type === "npc") {
+      this._talkToNpc(target.obj);
       return;
     }
     if (target.type === "slot") {
@@ -870,26 +981,41 @@ export class Game {
     };
   }
 
-  // jump the camera straight to the current area's framing (no glide)
+  // set the current area's resting framing, then open on a close-up of the
+  // hero and let the engine's camera lerp glide out to it (see _introCamera)
   _snapCamera() {
     // area transitions are teleports, so the light palette snaps with the
     // camera — otherwise the street spends seconds brightening out of the
     // cave's gloom on every walk-through (see Shop._updateLighting)
     this.shop._litInit = false;
     const area = this.playerArea;
-    if (area === "dungeon" || area === "cellar" || area === "cave") {
+    if (area === "dungeon" || area === "cave") {
       this.engine.camTarget.copy(this.player.position);
-      this.engine.camOffset.copy(area === "cellar" ? _camCellar : _camDungeon);
-      return;
-    }
-    const zone = this.shop.zoneCenter(this.player.position);
-    if (zone) {
-      this.engine.camTarget.set(zone.cx, 0, zone.cz);
-      this.engine.camOffset.copy(_camShop);
+      this.engine.camOffset.copy(_camDungeon);
     } else {
-      this.engine.camTarget.copy(this.player.position);
-      this.engine.camOffset.copy(_camStreet);
+      const zone = this.shop.zoneCenter(this.player.position);
+      if (zone) {
+        this.engine.camTarget.set(zone.cx, 0, zone.cz);
+        this.engine.camOffset.copy(fitShopCamera(this.engine.camera.aspect, this.shop));
+      } else {
+        const street = this.shop.streetCenter(this.player.position);
+        this.engine.camTarget.set(street.cx, 0, street.cz);
+        this.engine.camOffset.copy(this.shop.camStreetOffset);
+      }
     }
+    this._introCamera();
+  }
+
+  // Start each entry from a soft close-up: the camera sits a short hop in front
+  // of the hero at face height (eye level, no dive), so the engine's per-frame
+  // lerp zooms out to the resting framing instead of swooping in from wherever
+  // the previous area's camera happened to sit.
+  _introCamera() {
+    const p = this.player.position;
+    const faceY = p.y + (this.player.height ?? 1.3) * 0.9;
+    // pull straight back along the camera's viewing axis (it looks from +z),
+    // keeping a pure dolly-out with no lateral swing
+    this.engine.camera.position.set(p.x, faceY, p.z + 2.4);
   }
 
   // ================================================================ reset
@@ -907,7 +1033,9 @@ export class Game {
       document.getElementById("mute-btn").innerHTML = icon(muted ? "soundOff" : "soundOn");
     };
     document.getElementById("bag-btn").onclick = () => this._toggleBag();
-    this.hud.showBag(this.playerArea === "dungeon");
+    document.getElementById("store-btn").onclick = () => this._toggleStore();
+    this.hud.showBag(true); // the bag is reachable everywhere
+    this.hud.showStore(this.playerArea === "shop" && !this.tutorial); // storeroom is shop-only
     this.hud.showGold(true);
     this.hud.setGoldCorner(this.playerArea === "dungeon");
     document.getElementById("coop-btn").onclick = () => this._friendSheet();
@@ -1178,6 +1306,7 @@ export class Game {
   // ================================================================ misc
   collide(pos, radius, colliders) {
     for (const c of colliders) {
+      if (c.disabled) continue;
       const dx = pos.x - c.x;
       const dz = pos.z - c.z;
       const px = c.hw + radius - Math.abs(dx);
@@ -1217,13 +1346,16 @@ const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _focus = new THREE.Vector3();
 const _ndc = new THREE.Vector2();
-const _camShop = new THREE.Vector3(0, 10.2, 8.6);
+// The indoor shop framing (shop.camShopOffset) pulled back for narrow portrait
+// viewports so the shop's width still fits on screen. The base offset and the
+// fit aspect both live on the shop now (editable via layout.json's `camera`).
+const _camShopFit = new THREE.Vector3();
+function fitShopCamera(aspect, shop) {
+  const scale = Math.max(1, shop.camShopFitAspect / Math.max(0.01, aspect));
+  return _camShopFit.copy(shop.camShopOffset).multiplyScalar(scale);
+}
 const _camDungeon = new THREE.Vector3(0, 8.4, 8.2);
-// the cellar lobby is the tutorial cellar — frame it exactly like a dungeon floor
-const _camCellar = new THREE.Vector3(0, 8.4, 8.2);
 // pulled back + higher so the whole boss arena stays framed while the cam is fixed
 const _camBoss = new THREE.Vector3(0, 13.5, 10);
-// out on the street the camera follows the player, pulled back a touch higher
-const _camStreet = new THREE.Vector3(0, 12.6, 9.4);
-// scratch target for whichever town room the player is standing in
+// scratch target for the bounded indoor camera focus
 const _townCenter = new THREE.Vector3();

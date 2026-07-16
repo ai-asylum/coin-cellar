@@ -49,9 +49,13 @@ export const buildMethods = {
     };
 
     // side walls: solid — the buyable extensions hang off the building's back
-    // (the post-rotation WEST side, away from the street), not the flanks
+    // (the post-rotation WEST side, away from the street), not the flanks.
+    // After the town's quarter-turn, +X becomes the wall nearest the camera;
+    // retain it so update() can hide it while the player is indoors.
+    this.nearCameraWalls = [];
     for (const sx of [-W / 2, W / 2]) {
-      mkWall(0.4, wallH, D, sx, wallH / 2, 0, wallMat2);
+      const wall = mkWall(0.4, wallH, D, sx, wallH / 2, 0, wallMat2);
+      if (sx > 0) this.nearCameraWalls.push(wall);
       this.colliders.push({ x: sx, z: 0, hw: 0.35, hd: D / 2 });
     }
     // front wall (pre-rotation): low so the view stays open, split around the
@@ -259,14 +263,18 @@ export const buildMethods = {
       t.position.set(tx, 0, tz);
       t.rotation.y = yaw;
       g.add(t);
-      // colliders stay axis-aligned: take the AABB of the yawed footprint
+      // colliders stay axis-aligned: take the AABB of the yawed footprint.
+      // Kept on the table so _applyTableState can disable it while the shelf is
+      // locked — a bare floor outline shouldn't block the player.
       const cb = rotAABB(0.6, 1.15, yaw);
-      this.colliders.push({ x: tx, z: tz, hw: cb.hw, hd: cb.hd });
+      const collider = { x: tx, z: tz, hw: cb.hw, hd: cb.hd };
+      this.colliders.push(collider);
       const table = {
         group: t,
         meshes: [top, legs],
         origMats: [woodMat, wood2],
         outline,
+        collider,
         cost: def.cost ?? 200,
         fancy: false,
         repaired: ti === 0, // only the first shelf comes ready to stock
@@ -318,7 +326,8 @@ export const buildMethods = {
     fancy.rotation.y = fYaw;
     g.add(fancy);
     const fcb = rotAABB(1.75, 0.66, fYaw);
-    this.colliders.push({ x: fancyCx, z: fancyZ, hw: fcb.hw, hd: fcb.hd });
+    const fancyCollider = { x: fancyCx, z: fancyZ, hw: fcb.hw, hd: fcb.hd };
+    this.colliders.push(fancyCollider);
     // the prized vitrine is the priciest fixture to restore (1000g) and, like
     // the plain shelves, starts broken until the player pays to bring it back.
     const fancyTable = {
@@ -326,6 +335,7 @@ export const buildMethods = {
       meshes: [fLegs, fTrim, fTop],
       origMats: [wood2, goldMat, velvetMat],
       outline: fancyOutline,
+      collider: fancyCollider,
       cost: fDef.cost ?? 1000,
       fancy: true,
       repaired: false,
@@ -419,19 +429,29 @@ export const buildMethods = {
     // pays the Mayor's fund to rebuild into houses (see _buildLots / restoreLot).
     this._buildLots();
 
-    // street lamps flanking the doorway
-    for (const sx of [-6.5, 6.5]) {
+    // street lamps line the pavement — each carries a real warm point light
+    // that kindles at dusk and a glowing head that dims by day (both driven by
+    // the wall-clock day/night cycle in Shop._updateLighting).
+    const mkStreetLamp = (x, z) => {
       const lamp = new THREE.Group();
       const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 3.2), wood2);
       pole.position.y = 1.6;
       const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.5, 0.4), makeToonMaterial({ color: 0x2c2438, rim: 0 }));
       head.position.y = 3.3;
-      const glow = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffe6a8 }));
+      const glowMat = new THREE.MeshBasicMaterial({ color: 0xffe6a8 });
+      const glow = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 6), glowMat);
       glow.position.y = 3.25;
-      lamp.add(pole, head, glow);
-      lamp.position.set(sx, 0, backZ - 1.4);
+      const light = new THREE.PointLight(0xffca7a, 0, 13, 1.5);
+      light.position.y = 3.1;
+      lamp.add(pole, head, glow, light);
+      lamp.position.set(x, 0, z);
       g.add(lamp);
-    }
+      this.streetLampLights.push(light);
+      this.streetLampGlows.push(glowMat);
+    };
+    // a pair flanking the doorway, plus a couple more down the pavement so the
+    // whole street stays lit after dark
+    for (const sx of [-6.5, 6.5, -16, 16]) mkStreetLamp(sx, backZ - 1.4);
 
     // lanes the pedestrians use, and the ends they enter / leave from
     this.streetHalfX = 7.5; // spawn / exit x on either side
@@ -478,12 +498,34 @@ export const buildMethods = {
     // side. Must run before the nav bake so the grid sees rotated colliders.
     this._rotateTown();
 
+    // fold any saved camera-limit / framing overrides (from the overworld
+    // editor's Camera panel) over the code defaults, in post-rotation space
+    this._applyCameraLayout();
+
     // bake a coarse navigation grid of the shop floor so customers can route
     // around the tables & furniture instead of shoving straight through them.
     this._buildNav();
     // doors start shut: block the opening (added after nav bake so the grid
     // still treats the doorway as walkable for when they're opened)
     this.colliders.push(this._doorCollider);
+  },
+
+  // Fold layout.json's optional `camera` block over the code-defined camera
+  // limits & framing. Everything here is in post-rotation WORLD space (the same
+  // space the runtime camera logic and the editor's guides use), so it's applied
+  // right after _rotateTown. Absent block → keep the constructor defaults.
+  _applyCameraLayout() {
+    const cam = getLayout().camera;
+    if (!cam) return;
+    if (typeof cam.zonePad === "number") this.cameraZonePad = cam.zonePad;
+    if (typeof cam.edgePad === "number") this.cameraEdgePad = cam.edgePad;
+    if (Array.isArray(cam.zones)) {
+      cam.zones.forEach((z, i) => { if (this.zones[i]) Object.assign(this.zones[i], z); });
+    }
+    if (cam.bounds) Object.assign(this.bounds, cam.bounds);
+    if (Array.isArray(cam.shopOffset)) this.camShopOffset.fromArray(cam.shopOffset);
+    if (Array.isArray(cam.streetOffset)) this.camStreetOffset.fromArray(cam.streetOffset);
+    if (typeof cam.shopFitAspect === "number") this.camShopFitAspect = cam.shopFitAspect;
   },
 
   // Rotate the town 90° — (x, z) → (−z, x) — so the street runs along the
@@ -555,40 +597,12 @@ export const buildMethods = {
   // walk from the pit to the till is a few steps. `caveMouthPos` is the
   // walk-in spot the travel trigger watches.
   _buildCaveMouth(mkGround) {
-    const g = this.group;
-    const rock = makeToonMaterial({ color: 0x5c5248, rim: 0 });
-    const rock2 = makeToonMaterial({ color: 0x6a5f52, rim: 0 });
     const cx = -12.6, cz = -8.5; // on the road, just up-street of the shopfront
-    const mkRock = (w, h, d, x, y, z, mat = rock, ry = 0) => {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-      m.position.set(x, y, z);
-      m.rotation.y = ry;
-      g.add(m);
-      return m;
-    };
-    // two rough pillars + a lintel frame the opening; boulders pile around it
-    mkRock(2.2, 3.4, 1.6, cx, 1.7, cz - 2.0, rock, -0.18);
-    mkRock(2.2, 3.4, 1.6, cx, 1.7, cz + 2.0, rock2, 0.14);
-    mkRock(2.6, 1.6, 5.4, cx - 0.4, 3.6, cz, rock, -0.06);
-    mkRock(1.5, 1.9, 1.4, cx + 1.2, 0.95, cz - 2.6, rock2, -0.5);
-    mkRock(1.3, 1.5, 1.3, cx + 1.1, 0.75, cz + 2.7, rock, 0.4);
-    mkRock(1.0, 0.8, 1.0, cx + 1.9, 0.4, cz + 1.4, rock2, -0.3);
-    // the dark maw itself, facing down the street toward the approach
-    const maw = new THREE.Mesh(
-      new THREE.PlaneGeometry(2.6, 2.6),
-      new THREE.MeshBasicMaterial({ color: 0x05060a })
-    );
-    maw.rotation.y = Math.PI / 2;
-    maw.position.set(cx + 1.15, 1.3, cz);
-    g.add(maw);
-    // a shadowed threshold spilling out of the opening — the top-down read of
-    // "this is a hole in the hill" survives whatever way the camera faces
-    const thresh = new THREE.Mesh(
-      new THREE.CircleGeometry(1.15, 22).rotateX(-Math.PI / 2),
-      new THREE.MeshBasicMaterial({ color: 0x0a0806 })
-    );
-    thresh.position.set(cx + 1.6, 0.02, cz);
-    g.add(thresh);
+    // the rocky mound + dark maw is a self-contained assembly (also shown in
+    // the admin catalogue) — build it at the origin and drop it into place
+    const mouth = makeCaveMouth();
+    mouth.position.set(cx, 0, cz);
+    this.group.add(mouth);
     // dirt apron where the road peters out into the hillside
     const apron = mkGround(4.5, 6.5, cx + 2.6, cz, 0x6b5a45);
     apron.position.y = 0.015;
@@ -630,6 +644,7 @@ export const buildMethods = {
       floor.material = black();
       const outerWall = mkWall(0.4, wallH, roomD, side * W / 2, wallH / 2, roomCz, wallMat);
       const backWall = mkWall(W / 2, wallH, 0.4, cx, wallH / 2, roomZ1, wallMat);
+      if (side > 0) this.nearCameraWalls.push(outerWall);
       const litColor = side < 0 ? 0x8a7a5f : 0x86748f; // floor colour once bought
       const dark = [outerWall, backWall, divider];
       outerWall.material = black();
@@ -749,6 +764,73 @@ export const buildMethods = {
   },
 };
 
+// The cave mouth's rocky mound + dark maw, built at the local origin with its
+// opening facing +Z (before the town's quarter-turn). A standalone assembly so
+// both the street (_buildCaveMouth) and the admin catalogue draw the same rig.
+export function makeCaveMouth() {
+  const group = new THREE.Group();
+  const rock = makeToonMaterial({ color: 0x5c5248, rim: 0 });
+  const rock2 = makeToonMaterial({ color: 0x6a5f52, rim: 0 });
+  const mkRock = (w, h, d, x, y, z, mat = rock, ry = 0) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    m.position.set(x, y, z);
+    m.rotation.y = ry;
+    group.add(m);
+    return m;
+  };
+  const rock3 = makeToonMaterial({ color: 0x4e463d, rim: 0 });
+  const moss = makeToonMaterial({ color: 0x55703e, rim: 0 });
+  // the hill itself: a broad back mass stepping up and inward, so the mound
+  // reads as a rocky rise rather than two lone pillars
+  mkRock(2.8, 2.2, 6.8, -1.0, 1.1, 0, rock3, 0.05);
+  mkRock(2.4, 3.6, 5.6, -0.7, 1.8, 0.3, rock, -0.04);
+  mkRock(2.0, 4.6, 3.6, -0.9, 2.3, -0.5, rock2, 0.1);
+  // two rough pillars + a lintel frame the opening on the street side
+  mkRock(2.0, 3.4, 1.7, 0.2, 1.7, -1.9, rock, -0.18);
+  mkRock(2.0, 3.4, 1.7, 0.2, 1.7, 1.9, rock2, 0.14);
+  mkRock(2.4, 1.5, 5.2, -0.2, 3.55, 0, rock, -0.06);
+  mkRock(1.6, 1.0, 3.0, 0.1, 4.35, 0.2, rock2, 0.12); // capstone atop the lintel
+  // boulders piled around the base, big to small toward the road
+  mkRock(1.6, 2.0, 1.5, 1.1, 1.0, -2.7, rock2, -0.5);
+  mkRock(1.4, 1.5, 1.4, 1.0, 0.75, 2.8, rock, 0.4);
+  mkRock(1.0, 0.9, 1.0, 1.9, 0.45, 1.6, rock3, -0.3);
+  mkRock(0.8, 0.6, 0.8, 2.1, 0.3, -1.7, rock2, 0.55);
+  mkRock(0.55, 0.45, 0.55, 2.4, 0.22, 0.9, rock, -0.7);
+  // cracked slabs half-sunk beside the threshold
+  mkRock(1.1, 0.18, 0.9, 2.2, 0.09, -0.6, rock3, 0.25);
+  mkRock(0.9, 0.14, 0.7, 2.6, 0.07, 0.2, rock2, -0.35);
+  // moss clinging to the mound's shoulders and a few tufts at the base
+  const mkMoss = (r, h, x, y, z) => {
+    const m = new THREE.Mesh(new THREE.ConeGeometry(r, h, 6), moss);
+    m.position.set(x, y, z);
+    group.add(m);
+    return m;
+  };
+  mkMoss(0.55, 0.5, -0.4, 4.5, -1.4);
+  mkMoss(0.45, 0.42, -0.8, 4.4, 1.5);
+  mkMoss(0.4, 0.5, 1.4, 2.1, -2.6);
+  mkMoss(0.35, 0.45, 1.6, 1.6, 2.7);
+  mkMoss(0.3, 0.4, 2.3, 0.2, -1.2);
+  mkMoss(0.28, 0.38, 2.5, 0.19, 1.5);
+  // the dark maw itself, facing down the street toward the approach
+  const maw = new THREE.Mesh(
+    new THREE.PlaneGeometry(2.6, 2.6),
+    new THREE.MeshBasicMaterial({ color: 0x05060a })
+  );
+  maw.rotation.y = Math.PI / 2;
+  maw.position.set(0.8, 1.3, 0); // recessed behind the pillar faces so the opening reads as depth
+  group.add(maw);
+  // a shadowed threshold spilling out of the opening — the top-down read of
+  // "this is a hole in the hill" survives whatever way the camera faces
+  const thresh = new THREE.Mesh(
+    new THREE.CircleGeometry(1.15, 22).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({ color: 0x0a0806 })
+  );
+  thresh.position.set(1.6, 0.02, 0);
+  group.add(thresh);
+  return group;
+}
+
 // ---- layout helpers ---------------------------------------------------------
 // Rotate a local (dx, dz) offset by yaw around Y (three.js convention:
 // (x, z) → (x·cosθ + z·sinθ, −x·sinθ + z·cosθ)).
@@ -776,7 +858,7 @@ function rotAABB(hw, hd, yaw) {
 // overworld editor can map a click back to the layout entry.
 //   { shape: "box"|"cone"|"ground", size, pos: [x,y,z], yaw?, color, mat? }
 //   box: size [w,h,d] · cone: size [radius,height,segments] · ground: size [w,d]
-function buildLotParts(parts) {
+export function buildLotParts(parts) {
   const group = new THREE.Group();
   parts.forEach((p, k) => {
     let geo;

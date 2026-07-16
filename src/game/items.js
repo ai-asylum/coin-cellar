@@ -58,6 +58,15 @@ export const ITEMS = {
   rathide:  { name: "Rat Hide",         icon: "rathide",   base: 6,   tier: 1 },
   egg:      { name: "Griffon Egg",      icon: "egg",       base: 40,  tier: 2 },
   key:      { name: "Brass Key",        icon: "key",       base: 52,  tier: 2 },
+  // FTUE-only quest props. `quest` items show no price, offer only the story
+  // action the FTUE wires up (see _questBagAction), and never survive into a
+  // resumed save (see _load). The key rides in the bag from the wake-up to
+  // the shopfront and is consumed opening the gates; the note is picked off
+  // the first table and consumed by reading it.
+  shopkey:  { name: "Shop Key",         icon: "key",       base: 0,   tier: 2, quest: true,
+    blurb: "uncle left it to me" },
+  unclenote:{ name: "Uncle's Note",     icon: "scroll",    base: 0,   tier: 2, quest: true,
+    blurb: "his handwriting" },
   bomb:     { name: "Blast Bomb",       icon: "bomb",      base: 44,  tier: 2 },
   shield:   { name: "Kite Shield",      icon: "shield",    base: 120, tier: 3,
     equip: { slot: "shield", block: 0.35, blurb: "35% chance to fully block a hit." } },

@@ -36,6 +36,13 @@ export class BlockyCreature extends THREE.Group {
     super();
     this.variant = variant;
     this.heading = 0;
+    // Optional gentle turning: a rad/s cap so the body rotates toward its
+    // heading at a steady, unhurried pace (townsfolk) instead of the default
+    // snappy smoothing (the player). Null keeps the snappy default.
+    this.turnRate = opts.turnRate ?? null;
+    // Playback multiplier for this actor's animation clips (< 1 = a more
+    // relaxed, ambling gait). Doesn't touch movement — see the game AI for that.
+    this._animScale = opts.animScale ?? 1;
     const targetH = opts.height ?? 1.7;
 
     const src = CHARACTERS[variant] || CHARACTERS.a;
@@ -241,11 +248,17 @@ export class BlockyCreature extends THREE.Group {
     this._animSpeed += (rawSpeed - this._animSpeed) * (1 - Math.exp(-dt / 0.08));
     const speed = this._animSpeed;
 
-    // smooth turn toward heading
+    // smooth turn toward heading — a steady rad/s cap for a gentle, unhurried
+    // pivot (townsfolk), otherwise the snappy exponential smoothing (player)
     let dh = this.heading + MODEL_YAW - this.rotation.y;
     while (dh > Math.PI) dh -= Math.PI * 2;
     while (dh < -Math.PI) dh += Math.PI * 2;
-    this.rotation.y += dh * (1 - Math.pow(0.0001, dt));
+    if (this.turnRate != null) {
+      const maxStep = this.turnRate * dt;
+      this.rotation.y += Math.max(-maxStep, Math.min(maxStep, dh));
+    } else {
+      this.rotation.y += dh * (1 - Math.pow(0.0001, dt));
+    }
 
     if (!this.animator.dead) {
       if (this.animator.attackT >= 0) {
@@ -293,7 +306,7 @@ export class BlockyCreature extends THREE.Group {
     const s = this._scale;
     this.model.scale.set(s * (1 - sq * 0.05), s * (1 + sq * 0.08), s * (1 - sq * 0.05));
 
-    this.mixer.update(dt);
+    this.mixer.update(dt * this._animScale);
     if (this.shadow) this.shadow.position.y = 0.015 - this.position.y;
 
     if (this._chatSprite && performance.now() > this._chatUntil) this._clearChatBubble();

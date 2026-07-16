@@ -43,6 +43,45 @@ function layoutApiPlugin() {
   };
 }
 
+// Dev-only persistence for the editor's dungeon tab (/editor.html): GET serves
+// the saved tuning overrides, POST overwrites src/game/dungeon-tuning.json.
+// dungeon-data.js imports that file and folds it over the code-defined tables at
+// load, so a save is picked up by both the game and the editor on next reload.
+function dungeonTuningApiPlugin() {
+  const file = resolve(__dirname, "src/game/dungeon-tuning.json");
+  return {
+    name: "coin-cellar-dungeon-tuning-api",
+    configureServer(server) {
+      server.middlewares.use("/api/dungeon-tuning", async (req, res, next) => {
+        if (req.method === "GET") {
+          res.setHeader("Content-Type", "application/json");
+          res.end(await readFile(file, "utf-8"));
+          return;
+        }
+        if (req.method === "POST") {
+          try {
+            let body = "";
+            for await (const chunk of req) body += chunk;
+            const parsed = JSON.parse(body);
+            if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+              throw new Error("dungeon tuning must be a JSON object");
+            }
+            await writeFile(file, JSON.stringify(parsed, null, 2) + "\n");
+            res.statusCode = 204;
+            res.end();
+          } catch (err) {
+            res.statusCode = 400;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: err.message }));
+          }
+          return;
+        }
+        next();
+      });
+    },
+  };
+}
+
 export default defineConfig({
   base: "./",
   server: {
@@ -50,7 +89,7 @@ export default defineConfig({
     open: false,
     hmr: false,
   },
-  plugins: [layoutApiPlugin()],
+  plugins: [layoutApiPlugin(), dungeonTuningApiPlugin()],
   build: {
     target: "es2020",
     rollupOptions: {

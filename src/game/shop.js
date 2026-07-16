@@ -13,6 +13,23 @@ import { buildMethods } from "./shop-build.js";
 import { pathMethods } from "./shop-pathfinding.js";
 import { customerMethods } from "./shop-customers.js";
 
+// Keep the indoor camera focus away from walls while still allowing it to
+// travel with the player through rooms that do not fit on a phone screen.
+const CAMERA_ZONE_PAD = 1.25;
+// Out on the open street the camera follows the player but stops at the
+// walkable town limits (town edges, cave-entrance flanks, the back plaza) so it
+// never pans out over the void beyond where the player can actually go.
+const CAMERA_EDGE_PAD = 1.25;
+// Default camera framing (height/back/distance offset from the focus point).
+// Indoors starts a little farther back than the street; portrait viewports
+// pull the shop cam back further (see fitShopCamera in game.js). All of these
+// — pads, offsets, the zone/bounds limits — are overridable per-save from
+// layout.json's optional `camera` block via _applyCameraLayout (shop-build.js),
+// which is what the overworld editor's Camera panel writes.
+const CAMERA_SHOP_OFFSET = [0, 12.8, 10.2];
+const CAMERA_STREET_OFFSET = [0, 12.6, 9.4];
+const CAMERA_SHOP_FIT_ASPECT = 0.65;
+
 export class Shop {
   constructor(game) {
     this.game = game;
@@ -21,8 +38,11 @@ export class Shop {
     this.slots = []; // display slots: {pos, tableMesh, item, mesh}
     this.customers = [];
     this.passersby = []; // ambient pedestrians strolling the street outside
+    this._npcInUse = new Set(); // skins (variants) currently on screen — kept unique
     this.shafts = []; // god-ray light shafts (animated each frame)
     this.lampLights = []; // interior lamp point-lights, lit after dusk
+    this.streetLampLights = []; // lamppost point-lights out on the street
+    this.streetLampGlows = []; // lamppost glow-sphere materials (dim by day)
     this._shaftCol = new THREE.Color(0xffe0a2); // eased tint shared by the shafts
     this._litInit = false; // snap the daylight to the current hour on first tick
     this.colliders = []; // {x, z, hw, hd} AABBs (walls & furniture)
@@ -33,6 +53,16 @@ export class Shop {
     this._spawnT = 3; // countdown to the next arrival
     this._passerT = 2; // countdown to the next passer-by
     this._queueSeq = 0; // monotonic ticket number for the counter queue order
+    this._cameraZoneTarget = { cx: 0, cz: 0 };
+    this._streetTarget = { cx: 0, cz: 0 };
+    // camera limits & framing — code defaults, folded over by layout.json's
+    // optional `camera` block at build time (_applyCameraLayout). The editor
+    // reads these live values back to seed & preview its Camera panel.
+    this.cameraZonePad = CAMERA_ZONE_PAD;
+    this.cameraEdgePad = CAMERA_EDGE_PAD;
+    this.camShopOffset = new THREE.Vector3().fromArray(CAMERA_SHOP_OFFSET);
+    this.camStreetOffset = new THREE.Vector3().fromArray(CAMERA_STREET_OFFSET);
+    this.camShopFitAspect = CAMERA_SHOP_FIT_ASPECT;
     this._build();
   }
 
@@ -68,13 +98,39 @@ export class Shop {
     }
   }
 
-  // Which camera zone the player is standing in (locks the view onto its
-  // centre), or null when out on the street/plaza (the camera follows instead).
+  // Which camera zone the player is standing in. Indoors, follow the player
+  // left/right (clamped to the room's borders) while keeping the vertical
+  // focus pinned to the room centre — the camera pans sideways but never up or
+  // down. This matters on portrait phones, where a fixed whole-room frame
+  // leaves the player stranded at the edge. The open street uses streetCenter.
   zoneCenter(pos) {
     for (const z of this.zones) {
-      if (pos.x >= z.minX && pos.x <= z.maxX && pos.z >= z.minZ && pos.z <= z.maxZ) return z;
+      if (pos.x < z.minX || pos.x > z.maxX || pos.z < z.minZ || pos.z > z.maxZ) continue;
+      const minX = z.minX + this.cameraZonePad;
+      const maxX = z.maxX - this.cameraZonePad;
+      // Left/right: track the player but clamp to the room's borders.
+      // Up/down: pinned to the room centre so the camera never pans vertically.
+      this._cameraZoneTarget.cx = minX <= maxX ? Math.max(minX, Math.min(maxX, pos.x)) : z.cx;
+      this._cameraZoneTarget.cz = z.cz;
+      return this._cameraZoneTarget;
     }
     return null;
+  }
+
+  // Camera focus out on the open street/plaza: follow the player, but clamp to
+  // the walkable town bounds (minus a pad) so the camera stops at the world
+  // limits — the cave-entrance flanks, the town edges, the back of the plaza —
+  // instead of drifting off over ground the player can never reach.
+  streetCenter(pos) {
+    const b = this.bounds;
+    if (!b) { this._streetTarget.cx = pos.x; this._streetTarget.cz = pos.z; return this._streetTarget; }
+    const minX = b.minX + this.cameraEdgePad;
+    const maxX = b.maxX - this.cameraEdgePad;
+    const minZ = b.minZ + this.cameraEdgePad;
+    const maxZ = b.maxZ - this.cameraEdgePad;
+    this._streetTarget.cx = minX <= maxX ? Math.max(minX, Math.min(maxX, pos.x)) : (b.minX + b.maxX) / 2;
+    this._streetTarget.cz = minZ <= maxZ ? Math.max(minZ, Math.min(maxZ, pos.z)) : (b.minZ + b.maxZ) / 2;
+    return this._streetTarget;
   }
 
   // Vestigial now that the shop trades all day — the shopfront simply swings
@@ -106,6 +162,9 @@ export class Shop {
       table.outline.material.color.setHex(table.outline.userData.baseColor);
       table.outline.material.opacity = 0.42;
     }
+    // a locked shelf is just a floor outline — drop its hitbox so the player can
+    // walk over the footprint until they've paid to build the fixture
+    if (table.collider) table.collider.disabled = broken;
     for (const s of table.slots) s.disabled = broken;
   }
 
@@ -229,13 +288,17 @@ export class Shop {
       }
     }
 
-    // the roof lifts away while the player is anywhere inside the building
-    // (shop + its back rooms), so the interior stays readable
+    const br = this.buildingRect;
+    const inBuilding = !!pp && this.game.playerArea === "shop" &&
+      pp.x > br.minX - 0.3 && pp.x < br.maxX + 0.3 &&
+      pp.z > br.minZ - 0.3 && pp.z < br.maxZ + 0.3;
+
+    // The roof and the wall nearest the camera disappear while the player is
+    // anywhere inside (shop + back rooms), keeping the whole interior readable.
+    if (this.nearCameraWalls) {
+      for (const wall of this.nearCameraWalls) wall.visible = !inBuilding;
+    }
     if (this.roof) {
-      const br = this.buildingRect;
-      const inBuilding = !!pp && this.game.playerArea === "shop" &&
-        pp.x > br.minX - 0.3 && pp.x < br.maxX + 0.3 &&
-        pp.z > br.minZ - 0.3 && pp.z < br.maxZ + 0.3;
       const roofTgt = inBuilding ? 0 : 1;
       this._roofA += (roofTgt - this._roofA) * Math.min(1, dt * 9);
       this.roof.visible = this._roofA > 0.02;
@@ -265,18 +328,33 @@ export class Shop {
     }
   }
 
-  // Light the shop in a fixed bright-midday palette (no more day/night cycle),
-  // and hold a fixed moody palette down in the dungeon so descending never
-  // looks like broad daylight.
+  // Light the shop by the real wall-clock time of day: the outdoor palette
+  // sweeps morning → midday → dusk → night off the player's system clock, and
+  // the shop + street lamps kindle once it gets dark. The dungeon (and the
+  // FTUE cave, which shares its look) holds a fixed moody underground palette so
+  // descending never looks like broad daylight.
   _updateLighting(dt) {
     const game = this.game;
     const eng = game.engine;
 
-    // resolve the target palette for the current place (the FTUE cave shares
-    // the dungeon's moody underground look)
-    const p = game.playerArea === "dungeon" || game.playerArea === "cave" ? DUNGEON_PAL : SHOP_PAL;
-    _tSky.copy(p.sky); _tGround.copy(p.ground); _tSun.copy(p.sun); _tBg.copy(p.bg); _tShaft.copy(p.shaft);
-    const hemiI = p.hemiI, sunI = p.sunI;
+    // resolve the target palette + how far into night we are (0 = day, 1 = night)
+    let hemiI, sunI, night;
+    if (game.playerArea === "dungeon" || game.playerArea === "cave") {
+      const p = DUNGEON_PAL;
+      _tSky.copy(p.sky); _tGround.copy(p.ground); _tSun.copy(p.sun); _tBg.copy(p.bg); _tShaft.copy(p.shaft);
+      hemiI = p.hemiI; sunI = p.sunI; night = 0; // underground: street lamps stay dark
+    } else {
+      // the admin panel can pin the clock to a fixed hour for debugging; when
+      // it's null we run off the player's real wall-clock time
+      let hour = game.debugHour;
+      if (hour == null) {
+        const now = new Date();
+        hour = now.getHours() + now.getMinutes() / 60 + now.getSeconds() / 3600;
+      }
+      const s = sampleDayClock(hour);
+      _tSky.copy(s.sky); _tGround.copy(s.ground); _tSun.copy(s.sun); _tBg.copy(s.bg); _tShaft.copy(s.shaft);
+      hemiI = s.hemiI; sunI = s.sunI; night = s.night;
+    }
 
     // ease toward it (snap on the very first tick to avoid a startup sweep)
     const k = this._litInit ? 1 - Math.pow(0.0016, dt) : 1;
@@ -293,8 +371,15 @@ export class Shop {
     this._shaftCol.lerp(_tShaft, k);
     for (const s of this.shafts) s.userData.setColor(this._shaftCol);
 
-    // interior lamps stay dark — the fixed midday sun does all the work
-    for (const l of this.lampLights) l.intensity += (0 - l.intensity) * k;
+    // interior + street lamps kindle as night falls so the shop stays warm and
+    // the street stays readable after dark
+    const interiorTgt = night * 2.4;
+    for (const l of this.lampLights) l.intensity += (interiorTgt - l.intensity) * k;
+    const streetTgt = night * 3.2;
+    for (const l of this.streetLampLights) l.intensity += (streetTgt - l.intensity) * k;
+    // the lamp heads glow bright at night, dim to near-dark in daylight
+    _tGlow.copy(_GLOW_OFF).lerp(_GLOW_ON, night);
+    for (const gm of this.streetLampGlows) gm.color.lerp(_tGlow, k);
   }
 
   // ------------------------------------------------------------ haggling
@@ -473,13 +558,63 @@ function makeGlow(color = 0xffd67a) {
 
 // ---- light palettes ---------------------------------------------------------
 // `sky`/`ground` tint the hemisphere (ambient) fill, `sun` the warm key light
-// and the god-ray shafts, `bg` the backdrop + fog. The shop holds a fixed
-// bright-midday look; the dungeon a moodier one.
+// and the god-ray shafts, `bg` the backdrop + fog. The dungeon holds a fixed
+// moody underground look; the street runs the 24-hour clock below.
 const _col = (hex) => new THREE.Color(hex);
-const SHOP_PAL    = { sky: _col(0xc3c2e6), ground: _col(0x1c1630), hemiI: 0.95, sun: _col(0xffe7b4), sunI: 2.1, bg: _col(0x2b2848), shaft: _col(0xffe6ad) };
 // pitch-black backdrop underground so anything outside the dungeon itself
 // (the void past the walls, the pit under the descent stairs) reads as solid dark
 const DUNGEON_PAL = { sky: _col(0xb7a1ff), ground: _col(0x160e28), hemiI: 0.6, sun: _col(0xffdca0), sunI: 1.9,  bg: _col(0x000000), shaft: _col(0xffd08a) };
+
+// The street's palette keyed on the real wall-clock hour (0–24). Adjacent keys
+// are lerped by the current hour; `night` (0 = full day → 1 = full dark) drives
+// the shop + lamppost lights. Keys span the full circle so 24:00 mirrors 00:00.
+// The bright midday plateau is deliberately held from ~10:00 to ~16:30 so the
+// afternoon stays sunlit instead of sliding early into a dim golden hour.
+// `swatch` is a representative sky tone used only by the debug gradient bar.
+const DAY_CLOCK = [
+  { h: 0,    sky: _col(0x6a79cc), ground: _col(0x0d0a1e), hemiI: 0.5,  sun: _col(0x9fb2ff), sunI: 0.55, bg: _col(0x0c0a1e), shaft: _col(0xaebdff), night: 1,    swatch: 0x0c0a1e }, // deep night
+  { h: 5,    sky: _col(0x6a79cc), ground: _col(0x0d0a1e), hemiI: 0.5,  sun: _col(0x9fb2ff), sunI: 0.55, bg: _col(0x0e0b22), shaft: _col(0xaebdff), night: 1,    swatch: 0x141438 }, // pre-dawn
+  { h: 6.5,  sky: _col(0x9db6ff), ground: _col(0x24203a), hemiI: 0.82, sun: _col(0xffd2b0), sunI: 1.4,  bg: _col(0x2a2a58), shaft: _col(0xffe0c8), night: 0.4,  swatch: 0xffb98a }, // dawn
+  { h: 8,    sky: _col(0x9db6ff), ground: _col(0x24203a), hemiI: 0.92, sun: _col(0xfff0d2), sunI: 1.85, bg: _col(0x24325c), shaft: _col(0xfff2d0), night: 0,    swatch: 0xbcd0ff }, // fresh morning
+  { h: 10,   sky: _col(0xc3c2e6), ground: _col(0x1c1630), hemiI: 0.98, sun: _col(0xffe7b4), sunI: 2.15, bg: _col(0x2b2848), shaft: _col(0xffe6ad), night: 0,    swatch: 0xcfe0ff }, // bright — plateau start
+  { h: 16.5, sky: _col(0xc7c0e0), ground: _col(0x1e1734), hemiI: 0.96, sun: _col(0xffe0a6), sunI: 2.1,  bg: _col(0x2e2846), shaft: _col(0xffdf9e), night: 0,    swatch: 0xcadcff }, // still bright — plateau end
+  { h: 18,   sky: _col(0xd3bcd6), ground: _col(0x221836), hemiI: 0.82, sun: _col(0xffd7a0), sunI: 1.9,  bg: _col(0x322044), shaft: _col(0xffd79e), night: 0,    swatch: 0xffe0b4 }, // golden afternoon
+  { h: 19.5, sky: _col(0xc7a7c2), ground: _col(0x241636), hemiI: 0.66, sun: _col(0xffb473), sunI: 1.5,  bg: _col(0x33203f), shaft: _col(0xffb877), night: 0.2,  swatch: 0xffb987 }, // amber dusk
+  { h: 20.75,sky: _col(0x8a6fae), ground: _col(0x1a1030), hemiI: 0.55, sun: _col(0xc98ce0), sunI: 0.95, bg: _col(0x241640), shaft: _col(0xd0a0ff), night: 0.6,  swatch: 0x5a4a8a }, // nightfall
+  { h: 22,   sky: _col(0x6a79cc), ground: _col(0x0d0a1e), hemiI: 0.5,  sun: _col(0x9fb2ff), sunI: 0.55, bg: _col(0x120a26), shaft: _col(0xaebdff), night: 1,    swatch: 0x141438 }, // night
+  { h: 24,   sky: _col(0x6a79cc), ground: _col(0x0d0a1e), hemiI: 0.5,  sun: _col(0x9fb2ff), sunI: 0.55, bg: _col(0x0c0a1e), shaft: _col(0xaebdff), night: 1,    swatch: 0x0c0a1e }, // wraps to 00:00
+];
+
+// A CSS `linear-gradient(...)` stop list spanning 24h, built from each key's
+// representative `swatch` tone. Used by the admin panel's day/night bar.
+export function dayClockStops() {
+  return DAY_CLOCK.map((k) => `#${k.swatch.toString(16).padStart(6, "0")} ${((k.h / 24) * 100).toFixed(1)}%`).join(", ");
+}
+
+// Sample the day clock at `hour` (0–24), writing the interpolated colors into
+// the shared scratch targets and returning the scalar channels.
+function sampleDayClock(hour) {
+  let a = DAY_CLOCK[0], b = DAY_CLOCK[DAY_CLOCK.length - 1];
+  for (let i = 0; i < DAY_CLOCK.length - 1; i++) {
+    if (hour >= DAY_CLOCK[i].h && hour <= DAY_CLOCK[i + 1].h) { a = DAY_CLOCK[i]; b = DAY_CLOCK[i + 1]; break; }
+  }
+  const t = a.h === b.h ? 0 : (hour - a.h) / (b.h - a.h);
+  return {
+    sky: _tSky.copy(a.sky).lerp(b.sky, t),
+    ground: _tGround.copy(a.ground).lerp(b.ground, t),
+    sun: _tSun.copy(a.sun).lerp(b.sun, t),
+    bg: _tBg.copy(a.bg).lerp(b.bg, t),
+    shaft: _tShaft.copy(a.shaft).lerp(b.shaft, t),
+    hemiI: a.hemiI + (b.hemiI - a.hemiI) * t,
+    sunI: a.sunI + (b.sunI - a.sunI) * t,
+    night: a.night + (b.night - a.night) * t,
+  };
+}
+
+// lamp-head glow colors: near-dark by day, warm and bright once lit
+const _GLOW_OFF = _col(0x2a2418);
+const _GLOW_ON = _col(0xffe6a8);
+const _tGlow = new THREE.Color();
 const _tSky = new THREE.Color();
 const _tGround = new THREE.Color();
 const _tSun = new THREE.Color();

@@ -105,7 +105,7 @@ export const netMethods = {
   },
 
   // Avatars for the lobby crowd (Supabase Realtime): everyone sharing our
-  // current zone — the cellar, or the same hole's dungeon. Purely visual;
+  // current zone — the cave, or the same hole's dungeon. Purely visual;
   // they use the same snapshot-interpolation trick as the co-op remote.
   _updateLobbyPlayers(dt, elapsed) {
     const av = this._lobbyAvatars;
@@ -421,6 +421,30 @@ export const netMethods = {
         this.inventory = [];
         this._syncInv();
         this._save();
+        break;
+      }
+      case "storeReq": {
+        // guest tapped "Store" in the shop: one item, shared bag → storeroom
+        if (this.net.isGuest) return;
+        const id = this.inventory[m.idx];
+        if (id != null) {
+          this.inventory.splice(m.idx, 1);
+          this.stash.push(id);
+          this._syncInv();
+          this._save();
+        }
+        break;
+      }
+      case "takeReq": {
+        // guest tapped "Take" in the storeroom: one item, storeroom → shared bag
+        if (this.net.isGuest) return;
+        const id = this.stash[m.idx];
+        if (id != null && this.inventory.length < this.invCap) {
+          this.stash.splice(m.idx, 1);
+          this.inventory.push(id);
+          this._syncInv();
+          this._save();
+        }
         break;
       }
       case "useReq": {

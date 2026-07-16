@@ -9,7 +9,7 @@ import { Creature } from "../chargen/creature.js";
 import { scatterDungeonDecor, disposeDecor } from "./decor.js";
 import { Projectiles } from "./projectile.js";
 import { rng, pick } from "../core/engine.js";
-import { DUNGEON_ORIGIN, isBossFloor, dungeonIndexFor, bossDefFor, ENEMY_KINDS, HOLE_THEMES, DEFAULT_THEME, FLOORS_PER_DUNGEON, floorMixFor } from "./dungeon-data.js";
+import { DUNGEON_ORIGIN, isBossFloor, dungeonIndexFor, bossDefFor, ENEMY_KINDS, HOLE_THEMES, DEFAULT_THEME, FLOORS_PER_DUNGEON, floorMixFor, genFor } from "./dungeon-data.js";
 import { CELL, makeChest, makeGate, makeFloorGeometry, makeStairs, makeDescent, buildAssetFloor, buildAssetWalls, scatterAssetProps, modelCollider } from "./dungeon-geometry.js";
 import { dungeonAssetsReady, dungeonWallMaterial } from "./dungeon-assets.js";
 import { aiMethods } from "./dungeon-ai.js";
@@ -67,10 +67,13 @@ export class Dungeon {
     const isBoss = !tutorial && isBossFloor(floorN);
     this.isBoss = isBoss;
 
+    // generator knobs for this floor (base GEN + any per-floor overrides)
+    const gen = genFor(floorN);
+
     // --- grid: non-overlapping rooms linked by wide L-shaped corridors.
     // The grid runs tall on purpose: the game is played portrait on mobile, so
     // floors sprawl along the screen's long (y) axis rather than across it.
-    const GW = 18, GH = isBoss ? 40 : 32;
+    const GW = gen.gw, GH = isBoss ? gen.ghBoss : gen.gh;
     // boss arena rectangle + its 2-wide doorway (only meaningful on the boss floor)
     const BW = 9, BH = 6, BX = Math.floor((GW - BW) / 2), BY = 1;
     const gateX = BX + Math.floor(BW / 2) - 1, gateY = BY + BH;
@@ -86,12 +89,12 @@ export class Dungeon {
       rooms.push({ x, y, w, h, cx: x + Math.floor(w / 2), cy: y + Math.floor(h / 2) });
       for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) open[yy][xx] = true;
     } else {
-    const nRooms = 8 + Math.min(4, Math.floor(floorN / 2)) + Math.floor(r() * 3);
+    const nRooms = gen.roomsBase + Math.min(gen.roomsCap, Math.floor(floorN / 2)) + Math.floor(r() * gen.roomsRand);
     // rejection-sample room rects that keep a 1-cell gap from their neighbours
     for (let tries = 0; rooms.length < nRooms && tries < nRooms * 14; tries++) {
       // rooms lean taller than wide to match the portrait grid
-      const w = 3 + Math.floor(r() * 3);
-      const h = 3 + Math.floor(r() * 4);
+      const w = gen.roomMin + Math.floor(r() * gen.roomWRand);
+      const h = gen.roomMin + Math.floor(r() * gen.roomHRand);
       const x = 1 + Math.floor(r() * (GW - w - 2));
       const y = yMin + Math.floor(r() * (GH - h - yMin - 1));
       const overlaps = rooms.some((o) =>
@@ -145,7 +148,7 @@ export class Dungeon {
       connected.add(to);
     }
     // a couple of extra links create loops so floors aren't strictly tree-shaped
-    for (let k = 0, extra = 1 + Math.floor(r() * 2); k < extra && rooms.length > 2; k++) {
+    for (let k = 0, extra = gen.loopBase + Math.floor(r() * gen.loopRand); k < extra && rooms.length > 2; k++) {
       const a = rooms[Math.floor(r() * rooms.length)];
       const b = rooms[Math.floor(r() * rooms.length)];
       if (a !== b) carve(a, b);
@@ -373,7 +376,7 @@ export class Dungeon {
     if (!this.game.net.isGuest && !tutorial) {
       const tier = Math.min(floorN, 5) - 1;
       const mix = floorMixFor(floorN);
-      const n = 4 + floorN + Math.floor(r() * 3);
+      const n = gen.enemyBase + floorN + Math.floor(r() * gen.enemyRand);
       for (let i = 0; i < n; i++) {
         const room = rooms[1 + Math.floor(r() * (rooms.length - 1))];
         const kind = mix[Math.floor(r() * mix.length)];
@@ -392,7 +395,7 @@ export class Dungeon {
     // arena stays a controlled fight. Host-only (guests mirror via eSnap).
     this._spawnTier = Math.min(floorN, 5) - 1;
     this._spawnMix = floorMixFor(floorN);
-    this.spawnCap = isBoss || tutorial ? 0 : 6 + floorN * 2;
+    this.spawnCap = isBoss || tutorial ? 0 : gen.spawnCapBase + floorN * gen.spawnCapPer;
     this._spawnT = 4 + r() * 4; // first top-up a few seconds in
 
     // --- chests. The tutorial floor gets exactly one, dead centre between the
@@ -405,7 +408,7 @@ export class Dungeon {
       this.group.add(chest);
       this.chests.push({ mesh: chest, opened: false, id: 0 });
     } else {
-    const nChests = 1 + Math.floor(r() * 2);
+    const nChests = gen.chestBase + Math.floor(r() * gen.chestRand);
     for (let i = 0; i < nChests; i++) {
       const room = rooms[Math.floor(r() * rooms.length)];
       const p = cellPos(room.x + Math.floor(r() * room.w), room.y + Math.floor(r() * room.h));
@@ -424,7 +427,7 @@ export class Dungeon {
     // earlier floors give it a chance so it can turn up on the way down. The
     // choice is derived from the seed alone, so co-op peers agree on it.
     this.keyChestId = -1;
-    const keyHere = !tutorial && (isBoss || rng(seed + 900 + floorN * 17)() < 0.4);
+    const keyHere = !tutorial && (isBoss || rng(seed + 900 + floorN * 17)() < gen.keyChance);
     if (keyHere) {
       if (isBoss && this.chests.length === 0) {
         // extremely unlucky roll left the arena floor chest-less — force one
@@ -651,9 +654,13 @@ export class Dungeon {
   update(dt, elapsed) {
     if (!this.active) return;
 
-    // keep the wall-occlusion shader fed with the camera + player torso so
-    // walls between them dither away instead of hiding the hero
-    feedOccluder(this._wallMat, this.game.player, this.game.engine.camera);
+    // keep the wall-occlusion shader fed with the camera, player torso and any
+    // live enemies so walls between the camera and the hero (or the foes
+    // closing on them) dither away instead of hiding them
+    feedOccluder(
+      this._wallMat, this.game.player, this.game.engine.camera, 0.6,
+      this.enemies.filter((e) => e.deadT < 0).map((e) => e.creature)
+    );
 
     for (const s of this.shafts) s.userData.update(dt, elapsed);
 
@@ -822,7 +829,7 @@ Object.assign(Dungeon.prototype, aiMethods, combatMethods);
 const _v = new THREE.Vector3();
 
 // Re-export the public data API so existing import sites (game.js, admin.js,
-// cellar.js) keep working unchanged after the split.
+// cave.js) keep working unchanged after the split.
 export {
   DUNGEON_ORIGIN, MAX_DEPTH, FLOORS_PER_DUNGEON, N_DUNGEONS, isBossFloor,
   dungeonIndexFor, bossDefFor, BOSS_ATK_GLOW, ENEMY_KINDS, DUNGEON_MIX,

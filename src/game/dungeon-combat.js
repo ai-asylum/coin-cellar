@@ -9,7 +9,7 @@ import { EQUIP_DROPS, itemSprite } from "./items.js";
 import { disposeDecor, DECOR_LOOT } from "./decor.js";
 import { rng, pick } from "../core/engine.js";
 import { DUNGEON_ORIGIN, dungeonIndexFor, DUNGEON_LOOT, FLOORS_PER_DUNGEON } from "./dungeon-data.js";
-import { makeStairs } from "./dungeon-geometry.js";
+import { makeStairs, modelCollider } from "./dungeon-geometry.js";
 
 const _v = new THREE.Vector3();
 const _p = new THREE.Vector3();

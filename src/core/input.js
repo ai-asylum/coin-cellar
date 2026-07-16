@@ -14,6 +14,7 @@ import { viewport } from "./viewport.js";
 
 export class Input {
   constructor(hudEl) {
+    this.hudEl = hudEl;
     this.move = new THREE.Vector2();
     this._keys = new Set();
     this._actionQueued = false;
@@ -23,6 +24,12 @@ export class Input {
     this.dodgeEdge = false; // true for the frame a dodge/roll was requested
     this._interactQueued = false;
     this.interactEdge = false; // true for the frame the interact key was pressed
+    // A quick, stationary touch on the play area reads as a tap (not a joystick
+    // drag): it mirrors a desktop left click for shop pick-to-interact. `tap`
+    // holds its screen point for the frame `tapEdge` is set.
+    this._tapQueued = false;
+    this.tapEdge = false;
+    this.tap = null;
     this.isTouch = matchMedia("(pointer: coarse)").matches;
 
     this.onKey = null; // set by the game to receive shortcut keydowns
@@ -133,6 +140,9 @@ export class Input {
   setActionLabel(name, show = true) {
     const on = !!name;
     if (this.isTouch) this.actionBtn.style.display = on ? "" : "none";
+    // Let CSS know the primary button is live so the bag/store buttons can slot
+    // inboard of it (and fill its corner when it's gone).
+    this.hudEl?.classList.toggle("action-on", this.isTouch && on);
     if (!on) { this._actionLabel = null; return; }
     if (this._actionLabel !== name) {
       this._actionLabel = name;
@@ -162,6 +172,11 @@ export class Input {
         this._joyId = t.identifier;
         this._joyOrigin = { x: p.x, y: p.y };
         this._joyVec = { x: 0, y: 0 };
+        // remember where/when this touch began so a quick, near-motionless
+        // release can be told apart from a joystick drag and fire as a tap
+        this._joyStartT = performance.now();
+        this._joyStartClient = { x: t.clientX, y: t.clientY };
+        this._joyMoved = false;
         this.stick.style.display = "block";
         this._joyBase.style.transform = `translate(${p.x}px, ${p.y}px)`;
         this._joyKnob.style.transform = `translate(${p.x}px, ${p.y}px)`;
@@ -178,6 +193,7 @@ export class Input {
         const dy = p.y - this._joyOrigin.y;
         const len = Math.hypot(dx, dy);
         const max = 52;
+        if (len > 12) this._joyMoved = true; // past the slop: it's a drag, not a tap
         const k = len > max ? max / len : 1;
         this._joyVec = { x: (dx * k) / max, y: (dy * k) / max };
         this._joyKnob.style.transform = `translate(${this._joyOrigin.x + dx * k}px, ${this._joyOrigin.y + dy * k}px)`;
@@ -188,6 +204,11 @@ export class Input {
   _touchEnd(e) {
     for (const t of e.changedTouches) {
       if (t.identifier === this._joyId) {
+        // a short, motionless press fires as a tap (shop pick-to-interact)
+        if (!this._joyMoved && performance.now() - this._joyStartT < 300) {
+          this._tapQueued = true;
+          this.tap = { x: this._joyStartClient.x, y: this._joyStartClient.y };
+        }
         this._joyId = null;
         this._joyVec = { x: 0, y: 0 };
         this.stick.style.display = "none";
@@ -202,6 +223,8 @@ export class Input {
     this._dodgeQueued = false;
     this.interactEdge = this._interactQueued;
     this._interactQueued = false;
+    this.tapEdge = this._tapQueued;
+    this._tapQueued = false;
 
     let x = 0, y = 0;
     if (this._keys.has("KeyA") || this._keys.has("ArrowLeft")) x -= 1;

@@ -46,11 +46,14 @@ export const persistenceMethods = {
         this.day = s.day;
         this.gold = s.gold;
         this.bossBeaten = !!s.bossBeaten;
-        // drop any item ids that no longer exist (e.g. renamed/removed items).
+        // drop any item ids that no longer exist (e.g. renamed/removed items)
+        // and quest props (the FTUE shop key — a resumed save skips the FTUE,
+        // so the key would otherwise land in the stash as sellable junk).
         // A run always resumes in the shop, so anything saved in the bag
         // (including legacy saves from before the storeroom) lands in the stash.
-        this.stash = (s.stash ?? []).filter((id) => ITEMS[id]);
-        this.stash.push(...(s.inv ?? []).filter((id) => ITEMS[id]));
+        const keeps = (id) => ITEMS[id] && !ITEMS[id].quest;
+        this.stash = (s.stash ?? []).filter(keeps);
+        this.stash.push(...(s.inv ?? []).filter(keeps));
         this.inventory = [];
         if (Array.isArray(s.shortcutUntil)) {
           // keep the array shape stable even if N_DUNGEONS ever changes

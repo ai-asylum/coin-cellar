@@ -4,8 +4,53 @@
 import * as THREE from "three";
 import { goblinSpec, bruteSpec, skitterSpec, slimeSpec, wispSpec, archerSpec, bossSpec, humanoidSpec, ratSpec, hsl } from "../chargen/species.js";
 import { rng, pick, clamp } from "../core/engine.js";
+// Tuning overrides written by /editor.html's dungeon tab (Ctrl+S). This holds
+// only the numbers/tables edited there; the `make()` closures below can't be
+// serialized and always come from this file. Committed JSON so co-op peers stay
+// in lockstep. Applied at the bottom, once every table exists.
+import DUNGEON_TUNING from "./dungeon-tuning.json";
 
 export const DUNGEON_ORIGIN = new THREE.Vector3(200, 0, 0);
+
+// Floor-generator tuning, pulled out of Dungeon.generate so the editor's
+// dungeon tab can turn the knobs live. Values must stay in lockstep across
+// co-op peers (the layout is seeded), so the game never mutates these —
+// they're data, edited here or previewed via /editor.html.
+export const GEN = {
+  gw: 18, // grid width (cells)
+  gh: 32, // grid height — floors run tall for portrait play
+  ghBoss: 40, // boss floors reserve extra rows for the sealed arena
+  roomsBase: 8, // room count: base + min(cap, floor/2) + rand(roomsRand)
+  roomsCap: 4,
+  roomsRand: 3,
+  roomMin: 3, // room w/h: min + rand(roomWRand / roomHRand)
+  roomWRand: 3,
+  roomHRand: 4, // rooms lean taller than wide (portrait grid)
+  loopBase: 1, // extra corridor links beyond the spanning tree
+  loopRand: 2,
+  enemyBase: 4, // initial spawns: base + floorN + rand(enemyRand)
+  enemyRand: 3,
+  spawnCapBase: 6, // rolling-spawn cap: base + floorN * per
+  spawnCapPer: 2,
+  chestBase: 1, // chests per floor: base + rand(chestRand)
+  chestRand: 2,
+  keyChance: 0.4, // odds a pre-boss floor hides the boss key
+};
+
+// Per-floor overrides for the GEN knobs, edited in the editor's dungeon tab.
+// Keyed by absolute floor number (1..MAX_DEPTH) and sparse: each entry holds
+// only the knobs that differ from the base GEN for that floor. Empty by default
+// — the base GEN covers every floor until a floor is tuned. genFor() resolves
+// the two. Persisted (with everything else) to dungeon-tuning.json.
+export const GEN_BY_FLOOR = {};
+
+// The effective generator params for a floor: base GEN with that floor's
+// overrides layered on top. Returns the shared base object untouched when the
+// floor has no overrides, so callers must not mutate the result.
+export function genFor(floorN) {
+  const over = GEN_BY_FLOOR[floorN];
+  return over ? { ...GEN, ...over } : GEN;
+}
 
 // Each kind now carries a `behavior` that drives a distinct combat pattern, a
 // windup time (how long its telegraph reads before the blow lands — the
@@ -361,4 +406,33 @@ export const DUNGEON_MIX = [
 export function floorMixFor(floorN) {
   const mixes = DUNGEON_MIX[dungeonIndexFor(floorN)] ?? DUNGEON_MIX[0];
   return mixes[Math.min((floorN - 1) % FLOORS_PER_DUNGEON, mixes.length - 1)];
+}
+
+// The exact set the editor serializes (Ctrl+S / "Copy tuning JSON"), keyed by
+// name so applyDungeonTuning can find each table. Keep in sync with the editor.
+export const TUNABLE_TABLES = { GEN, GEN_BY_FLOOR, HOLE_THEMES, DUNGEON_MIX, ENEMY_KINDS, BOSSES };
+
+function isMergeable(v) { return v !== null && typeof v === "object"; }
+// Deep-overlay `source` onto `target`, mutating in place so existing imports of
+// the const tables see the change. Object keys present only on the target (the
+// `make()` closures) are preserved — the overrides JSON never carries them.
+function overlay(target, source) {
+  if (Array.isArray(target) && Array.isArray(source)) {
+    target.length = source.length;
+    for (let i = 0; i < source.length; i++) {
+      if (isMergeable(target[i]) && isMergeable(source[i])) overlay(target[i], source[i]);
+      else target[i] = source[i];
+    }
+    return;
+  }
+  for (const key of Object.keys(source)) {
+    if (isMergeable(target[key]) && isMergeable(source[key])) overlay(target[key], source[key]);
+    else target[key] = source[key];
+  }
+}
+
+// Fold the saved overrides into the live tables at module load.
+for (const [name, table] of Object.entries(TUNABLE_TABLES)) {
+  const saved = DUNGEON_TUNING?.[name];
+  if (isMergeable(saved)) overlay(table, saved);
 }

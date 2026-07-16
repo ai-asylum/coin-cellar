@@ -20,6 +20,9 @@ import { Engine } from "../core/engine.js";
 import { Shop } from "../game/shop.js";
 import { setLayout } from "../game/layout-store.js";
 import { DECOR, decorSprite } from "../game/decor.js";
+import { el, row, numInput } from "./ui.js";
+import { DungeonPreview } from "./dungeon-preview.js";
+import { CavePreview } from "./cave-preview.js";
 
 // ---------- boot: layout, engine, scene ----------
 let readOnly = false;
@@ -61,6 +64,7 @@ const stubGame = {
 };
 
 // ---------- editor state ----------
+let tab = "overworld"; // 'overworld' | 'cave' | 'dungeon' — which editor mode is active
 let shop = null;
 let selection = null; // { type: 'table'|'fancy'|'lot'|'part'|'decor', index, state?, partIndex? }
 let selBox = null; // THREE.BoxHelper tracking the selected object
@@ -69,6 +73,9 @@ let grabbed = null; // { obj, planeY, restore: {pos, rotY} } while mode === 'gra
 let armed = null; // { cat, path, height, ghost } while mode === 'place'
 let paletteMode = "add"; // 'add' | 'replace' — what a palette thumb click does
 let showRoof = false;
+let showCamLimits = false; // draw the camera zone/bounds guides + framing gizmos
+let camLimitsGroup = null; // THREE.Group holding the guide wireframes (in scene, not shop.group)
+let camPreview = null; // 'shop' | 'street' while the freecam is snapped to game framing
 let lotView = "before"; // which lot state is visible: 'before' | 'after'
 let dirty = false;
 const undoStack = [];
@@ -76,6 +83,11 @@ let lastUndoKey = null;
 
 const round2 = (v) => Math.round(v * 100) / 100;
 const authFromWorld = (wx, wz) => ({ x: round2(wz), z: round2(-wx) });
+// hold Ctrl while grabbing/placing to snap to the grid (the grid is axis-
+// aligned in both world and authored space, so snapping world coords holds)
+const GRID = 0.5;
+const snapHeld = () => !!(editorInput.keys.ControlLeft || editorInput.keys.ControlRight);
+const maybeSnap = (v) => (snapHeld() ? Math.round(v / GRID) * GRID : v);
 const BAKED_YAW = -Math.PI / 2; // _rotateTown's quarter-turn on top-level groups
 
 // ---------- build / rebuild the town from the live layout ----------
@@ -135,6 +147,7 @@ function rebuild(keepSelection = true) {
   tagEditables();
   selection = selectionValid(prev) ? prev : null;
   refreshSelBox();
+  rebuildCamLimits();
   renderPanel();
 }
 
@@ -280,7 +293,8 @@ function undo() {
   layout = JSON.parse(undoStack.pop());
   lastUndoKey = null;
   dirty = true;
-  rebuild();
+  if (tab === "cave") { setLayout(layout); cavePreview.build(); }
+  else rebuild();
   setStatus("undid last change", "ok");
 }
 
@@ -332,7 +346,7 @@ function beginGrab() {
     restore: { pos: obj.position.clone(), rotY: obj.rotation.y },
   };
   mode = "grab";
-  setStatus(`grabbing ${selLabel()} — click to drop, Esc to cancel`);
+  setStatus(`grabbing ${selLabel()} — click to drop, hold Ctrl to snap to grid, Esc to cancel`);
 }
 
 function updateGrab() {
@@ -341,11 +355,11 @@ function updateGrab() {
   if (!pt) return;
   if (selection.type === "part") {
     const local = grabbed.obj.parent.worldToLocal(pt.clone());
-    grabbed.obj.position.x = local.x;
-    grabbed.obj.position.z = local.z;
+    grabbed.obj.position.x = maybeSnap(local.x);
+    grabbed.obj.position.z = maybeSnap(local.z);
   } else {
-    grabbed.obj.position.x = pt.x;
-    grabbed.obj.position.z = pt.z;
+    grabbed.obj.position.x = maybeSnap(pt.x);
+    grabbed.obj.position.z = maybeSnap(pt.z);
   }
 }
 
@@ -516,6 +530,151 @@ function toggleRoof() {
   renderPanel();
 }
 
+// ---------- camera limits & framing ----------
+// The shop camera never clamps its own position — it picks a focus point and
+// sits at focus + offset. The "limits" are the indoor zones (camera tracks the
+// player left/right within one, pinned vertically to its centre) and the street
+// bounds (focus follows freely, clamped to the walkable rectangle minus a pad).
+// These live in world space on the shop; here we draw them and edit them into
+// layout.json's `camera` block. Guide colours: amber = room extent, blue =
+// street walkable, green = where the camera focus can actually travel, and a
+// little wire cone marks where the game camera sits framing each area.
+const CAM_Y0 = 0.05, CAM_Y1 = 3.2;
+
+function wireBox(minX, maxX, minZ, maxZ, y0, y1, color, opacity = 1) {
+  const geo = new THREE.BoxGeometry(
+    Math.max(0.02, maxX - minX), Math.max(0.02, y1 - y0), Math.max(0.02, maxZ - minZ));
+  const line = new THREE.LineSegments(
+    new THREE.EdgesGeometry(geo),
+    new THREE.LineBasicMaterial({ color, transparent: opacity < 1, opacity }));
+  line.position.set((minX + maxX) / 2, (y0 + y1) / 2, (minZ + maxZ) / 2);
+  geo.dispose();
+  return line;
+}
+
+// A wire cone at the game camera's resting spot for a focus point, aimed at it.
+function camGizmo(cx, cz, offset, color) {
+  const g = new THREE.Group();
+  const pos = new THREE.Vector3(cx + offset.x, offset.y, cz + offset.z);
+  const target = new THREE.Vector3(cx, 0.6, cz);
+  const cone = new THREE.Mesh(
+    new THREE.ConeGeometry(0.4, 1.1, 4),
+    new THREE.MeshBasicMaterial({ color, wireframe: true }));
+  cone.position.copy(pos);
+  cone.lookAt(target);
+  cone.rotateX(-Math.PI / 2); // ConeGeometry points +Y; aim its tip down the view
+  g.add(cone);
+  const line = new THREE.LineSegments(
+    new THREE.BufferGeometry().setFromPoints([pos, target]),
+    new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.45 }));
+  g.add(line);
+  return g;
+}
+
+// The shop offset scaled for the current editor aspect, matching game.js's
+// fitShopCamera so the guide/preview frame the shop like the game does.
+function fitShopOffset() {
+  const scale = Math.max(1, shop.camShopFitAspect / Math.max(0.01, engine.camera.aspect));
+  return shop.camShopOffset.clone().multiplyScalar(scale);
+}
+
+function disposeCamLimits() {
+  if (!camLimitsGroup) return;
+  engine.scene.remove(camLimitsGroup);
+  camLimitsGroup.traverse((o) => { o.geometry?.dispose?.(); o.material?.dispose?.(); });
+  camLimitsGroup = null;
+}
+
+function rebuildCamLimits() {
+  disposeCamLimits();
+  if (!showCamLimits || !shop || tab !== "overworld") return;
+  const g = new THREE.Group();
+  const zp = shop.cameraZonePad, ep = shop.cameraEdgePad;
+  // indoor zones: full room extent (amber) + the sideways focus rail at z = cz
+  shop.zones.forEach((z) => {
+    g.add(wireBox(z.minX, z.maxX, z.minZ, z.maxZ, CAM_Y0, CAM_Y1, 0xff9a3a, 0.85));
+    const a = Math.min(z.minX + zp, z.maxX - zp), b = Math.max(z.minX + zp, z.maxX - zp);
+    g.add(wireBox(a, b, z.cz - 0.05, z.cz + 0.05, 0.08, 0.14, 0x66ffcc, 0.95));
+  });
+  // street bounds: full walkable (blue) + the padded focus-travel rectangle
+  const bd = shop.bounds;
+  g.add(wireBox(bd.minX, bd.maxX, bd.minZ, bd.maxZ, CAM_Y0, CAM_Y1 * 0.5, 0x3aa0ff, 0.85));
+  g.add(wireBox(bd.minX + ep, bd.maxX - ep, bd.minZ + ep, bd.maxZ - ep, 0.08, 0.14, 0x66ffcc, 0.95));
+  // where the game camera rests framing the shop and a mid-street spot
+  const shopZone = shop.zones[0];
+  g.add(camGizmo(shopZone.cx, shopZone.cz, fitShopOffset(), 0xffcf86));
+  g.add(camGizmo(0, (bd.minZ + bd.maxZ) / 2, shop.camStreetOffset, 0x9ad0ff));
+  engine.scene.add(g);
+  camLimitsGroup = g;
+}
+
+function toggleCamLimits() {
+  showCamLimits = !showCamLimits;
+  rebuildCamLimits();
+  renderPanel();
+  setStatus(showCamLimits
+    ? "camera guides on — amber rooms · blue street · green focus rails · cones = camera spots"
+    : "camera guides off");
+}
+
+// Snap the editor's freecam to the game camera pose for an area, so the framing
+// (height/back/angle) reads exactly as it will in play.
+function applyCamPreview(kind) {
+  const bd = shop.bounds;
+  const cx = kind === "shop" ? shop.zones[0].cx : 0;
+  const cz = kind === "shop" ? shop.zones[0].cz : (bd.minZ + bd.maxZ) / 2;
+  const offset = kind === "shop" ? fitShopOffset() : shop.camStreetOffset.clone();
+  const pos = new THREE.Vector3(cx + offset.x, offset.y, cz + offset.z);
+  const target = new THREE.Vector3(cx, 0.6, cz);
+  freecam.pos.copy(pos);
+  const d = target.clone().sub(pos).normalize();
+  editorInput.cam.yaw = Math.atan2(-d.x, -d.z);
+  editorInput.cam.pitch = Math.asin(Math.max(-1, Math.min(1, -d.y)));
+  camPreview = kind;
+}
+
+// Seed layout.camera from the live shop values (world space) so the first edit
+// has a full block to mutate — same shape shop-build._applyCameraLayout reads.
+function ensureCameraLayout() {
+  if (layout.camera) return layout.camera;
+  layout.camera = {
+    zonePad: round2(shop.cameraZonePad),
+    edgePad: round2(shop.cameraEdgePad),
+    zones: shop.zones.map((z) => ({
+      minX: round2(z.minX), maxX: round2(z.maxX),
+      minZ: round2(z.minZ), maxZ: round2(z.maxZ),
+      cx: round2(z.cx), cz: round2(z.cz),
+    })),
+    bounds: {
+      minX: round2(shop.bounds.minX), maxX: round2(shop.bounds.maxX),
+      minZ: round2(shop.bounds.minZ), maxZ: round2(shop.bounds.maxZ),
+    },
+    shopOffset: shop.camShopOffset.toArray().map(round2),
+    streetOffset: shop.camStreetOffset.toArray().map(round2),
+    shopFitAspect: round2(shop.camShopFitAspect),
+  };
+  return layout.camera;
+}
+
+// Camera edits touch no geometry, so skip the town rebuild: mutate the block,
+// re-apply it onto the live shop, then redraw guides / preview / panel.
+function editCam(mut) {
+  pushUndo();
+  mut(ensureCameraLayout());
+  shop._applyCameraLayout();
+  rebuildCamLimits();
+  if (camPreview) applyCamPreview(camPreview);
+  renderPanel();
+}
+
+function resetCameraLayout() {
+  if (!layout.camera) { setStatus("camera already at code defaults"); return; }
+  pushUndo();
+  delete layout.camera;
+  rebuild(); // full rebuild so the shop falls back to the code-defined limits
+  setStatus("camera limits & framing reset to defaults — Ctrl+S to save", "ok");
+}
+
 // ---------- decor palette ----------
 const paletteEl = document.getElementById("palette");
 const DECOR_HEIGHTS = {
@@ -569,20 +728,20 @@ function armPlacement(cat, path) {
   engine.scene.add(ghost);
   armed = { cat, path, height, ghost };
   mode = "place";
-  setStatus(`placing ${cat} — click to plant (stays armed), Esc/RMB to stop`);
+  setStatus(`placing ${cat} — click to plant (stays armed), Ctrl snaps to grid, Esc/RMB to stop`);
 }
 
 function updatePlacement() {
   if (!armed) return;
   const pt = groundPointAt(0);
-  if (pt) armed.ghost.position.copy(pt);
+  if (pt) armed.ghost.position.set(maybeSnap(pt.x), pt.y, maybeSnap(pt.z));
 }
 
 function placeArmed() {
   const pt = groundPointAt(0);
   if (!pt || !armed) return;
   pushUndo();
-  const a = authFromWorld(pt.x, pt.z);
+  const a = authFromWorld(maybeSnap(pt.x), maybeSnap(pt.z));
   layout.decor.push({ cat: armed.cat, path: armed.path, x: a.x, z: a.z, height: armed.height });
   const keep = { ...armed };
   rebuild(false);
@@ -600,24 +759,6 @@ function cancelPlacement() {
 // ---------- panel ----------
 const panelEl = document.getElementById("panel");
 
-function el(tag, props = {}, ...children) {
-  const n = document.createElement(tag);
-  Object.assign(n, props);
-  for (const c of children) n.append(c);
-  return n;
-}
-
-function row(labelText, input) {
-  return el("div", { className: "row" }, el("label", { textContent: labelText }), input);
-}
-
-function numInput(value, oncommit, step = 0.1) {
-  return el("input", {
-    type: "number", step: String(step), value: String(value),
-    onchange(e) { const v = parseFloat(e.target.value); if (!Number.isNaN(v)) oncommit(v); },
-  });
-}
-
 // panel edits mutate the layout record then rebuild in place
 function editRec(mutate) {
   pushUndo();
@@ -626,6 +767,7 @@ function editRec(mutate) {
 }
 
 function renderPanel() {
+  if (tab !== "overworld") return; // the dungeon tab owns the panel then
   panelEl.innerHTML = "";
   const h = el("h2", { textContent: "Coin Cellar — overworld" });
   if (readOnly) h.append(el("span", { className: "badge", textContent: "read-only" }));
@@ -720,6 +862,64 @@ function renderPanel() {
     ));
   }
 
+  // ---- camera limits & framing
+  panelEl.append(el("h3", { textContent: "Camera" }));
+  const camChk = el("input", { type: "checkbox", checked: showCamLimits, onchange: toggleCamLimits });
+  panelEl.append(el("div", { className: "row" }, camChk, el("label", { textContent: "show limits & framing", style: "flex:1" })));
+  if (showCamLimits && shop) {
+    panelEl.append(el("div", { className: "muted", textContent: "amber = room extent · blue = street walkable · green = focus travel · cones = camera spots" }));
+
+    shop.zones.forEach((z, i) => {
+      panelEl.append(el("h4", { textContent: i === 0 ? "zone · shop" : `zone · back room ${i}` }));
+      panelEl.append(
+        row("min x", numInput(round2(z.minX), (v) => editCam((c) => { c.zones[i].minX = v; }))),
+        row("max x", numInput(round2(z.maxX), (v) => editCam((c) => { c.zones[i].maxX = v; }))),
+        row("min z", numInput(round2(z.minZ), (v) => editCam((c) => { c.zones[i].minZ = v; }))),
+        row("max z", numInput(round2(z.maxZ), (v) => editCam((c) => { c.zones[i].maxZ = v; }))),
+        row("focus cx", numInput(round2(z.cx), (v) => editCam((c) => { c.zones[i].cx = v; }))),
+        row("focus cz", numInput(round2(z.cz), (v) => editCam((c) => { c.zones[i].cz = v; }))),
+      );
+    });
+
+    const bd = shop.bounds;
+    panelEl.append(el("h4", { textContent: "street bounds" }));
+    panelEl.append(
+      row("min x", numInput(round2(bd.minX), (v) => editCam((c) => { c.bounds.minX = v; }))),
+      row("max x", numInput(round2(bd.maxX), (v) => editCam((c) => { c.bounds.maxX = v; }))),
+      row("min z", numInput(round2(bd.minZ), (v) => editCam((c) => { c.bounds.minZ = v; }))),
+      row("max z", numInput(round2(bd.maxZ), (v) => editCam((c) => { c.bounds.maxZ = v; }))),
+    );
+
+    panelEl.append(el("h4", { textContent: "focus padding" }));
+    panelEl.append(
+      row("zone pad", numInput(round2(shop.cameraZonePad), (v) => editCam((c) => { c.zonePad = v; }))),
+      row("edge pad", numInput(round2(shop.cameraEdgePad), (v) => editCam((c) => { c.edgePad = v; }))),
+    );
+
+    panelEl.append(el("h4", { textContent: "framing (position)" }));
+    const so = shop.camShopOffset, st = shop.camStreetOffset;
+    panelEl.append(
+      row("shop x/y/z",
+        numInput(round2(so.x), (v) => editCam((c) => { c.shopOffset[0] = v; })),
+        numInput(round2(so.y), (v) => editCam((c) => { c.shopOffset[1] = v; })),
+        numInput(round2(so.z), (v) => editCam((c) => { c.shopOffset[2] = v; })),
+      ),
+      row("street x/y/z",
+        numInput(round2(st.x), (v) => editCam((c) => { c.streetOffset[0] = v; })),
+        numInput(round2(st.y), (v) => editCam((c) => { c.streetOffset[1] = v; })),
+        numInput(round2(st.z), (v) => editCam((c) => { c.streetOffset[2] = v; })),
+      ),
+      row("portrait fit", numInput(round2(shop.camShopFitAspect), (v) => editCam((c) => { c.shopFitAspect = v; }), 0.05)),
+    );
+    panelEl.append(el("div", { className: "muted", textContent: "'portrait fit' pulls the shop cam back on narrow screens until this aspect fits." }));
+
+    panelEl.append(el("div", {},
+      el("button", { textContent: "Preview shop cam", onclick: () => { applyCamPreview("shop"); setStatus("framing preview: shop indoor camera"); } }),
+      el("button", { textContent: "Preview street cam", onclick: () => { applyCamPreview("street"); setStatus("framing preview: street camera"); } }),
+    ));
+    panelEl.append(el("div", {}, el("button", { textContent: "Reset to defaults", onclick: resetCameraLayout })));
+  }
+
   panelEl.append(el("h3", { textContent: "Layout" }));
   panelEl.append(el("div", {
     className: "muted",
@@ -769,6 +969,98 @@ const freecam = {
   },
 };
 
+// ---------- tabs: overworld editor ⇄ cave preview ⇄ dungeon generator preview
+const dungeonPreview = new DungeonPreview(engine, panelEl, setStatus);
+const cavePreview = new CavePreview(engine, panelEl, setStatus, { pushUndo });
+const tabButtons = {
+  overworld: document.getElementById("tab-overworld"),
+  cave: document.getElementById("tab-cave"),
+  dungeon: document.getElementById("tab-dungeon"),
+};
+const camPoses = { overworld: null, cave: null, dungeon: null }; // each tab keeps its own fly pose
+const hintEl = document.getElementById("hint");
+const HINTS = {
+  overworld: `
+    <strong>Overworld editor</strong>
+    <span><kbd>WASD</kbd> + <kbd>Space</kbd>/<kbd>C</kbd> fly · <kbd>Shift</kbd> sprint</span>
+    <span><kbd>RMB</kbd> drag look · <kbd>Wheel</kbd> fly speed</span>
+    <span><kbd>Click</kbd> select · click again: house part</span>
+    <span><kbd>G</kbd> grab · click to drop · <kbd>Ctrl</kbd> snaps</span>
+    <span><kbd>R</kbd>/<kbd>Shift+R</kbd> rotate 15°</span>
+    <span><kbd>[</kbd>/<kbd>]</kbd> or <kbd>Alt</kbd>+<kbd>Wheel</kbd> scale</span>
+    <span><kbd>Q</kbd>/<kbd>E</kbd> lower/raise part</span>
+    <span><kbd>Ctrl</kbd>+<kbd>D</kbd> duplicate · <kbd>Del</kbd> delete</span>
+    <span><kbd>B</kbd> before/after · <kbd>H</kbd> roof</span>
+    <span><kbd>Enter</kbd> decor palette</span>
+    <span><kbd>Ctrl</kbd>+<kbd>S</kbd> save · <kbd>Ctrl</kbd>+<kbd>Z</kbd> undo</span>
+    <span><kbd>Esc</kbd>/<kbd>RMB</kbd> cancel</span>`,
+  cave: `
+    <strong>Cave editor</strong>
+    <span><kbd>WASD</kbd> + <kbd>Space</kbd>/<kbd>C</kbd> fly · <kbd>Shift</kbd> sprint</span>
+    <span><kbd>RMB</kbd> drag look · <kbd>Wheel</kbd> fly speed</span>
+    <span><kbd>Click</kbd> select rock / entrance / mouth</span>
+    <span><kbd>G</kbd> grab · click to drop · <kbd>Ctrl</kbd> snaps</span>
+    <span><kbd>R</kbd> rotate rock · <kbd>[</kbd>/<kbd>]</kbd> or <kbd>Alt</kbd>+<kbd>Wheel</kbd> scale</span>
+    <span><kbd>Ctrl</kbd>+<kbd>D</kbd> duplicate rock · <kbd>Del</kbd> delete</span>
+    <span><kbd>F</kbd> FTUE opener · <kbd>T</kbd> trapdoor</span>
+    <span><kbd>Ctrl</kbd>+<kbd>S</kbd> save · <kbd>Ctrl</kbd>+<kbd>Z</kbd> undo</span>
+    <span><kbd>Esc</kbd> cancel/deselect</span>`,
+  dungeon: `
+    <strong>Dungeon preview</strong>
+    <span><kbd>WASD</kbd> + <kbd>Space</kbd>/<kbd>C</kbd> fly · <kbd>Shift</kbd> sprint</span>
+    <span><kbd>RMB</kbd> drag look · <kbd>Wheel</kbd> fly speed</span>
+    <span><kbd>,</kbd>/<kbd>.</kbd> floor down/up</span>
+    <span><kbd>N</kbd> reroll seed</span>
+    <span><kbd>G</kbd> summon boss (boss floors)</span>
+    <span><kbd>L</kbd> spawn monster lineup</span>
+    <span>palette, monsters &amp; params in the panel →</span>
+    <span><kbd>Ctrl</kbd>+<kbd>S</kbd> save tuning</span>`,
+};
+function renderHint() { hintEl.innerHTML = HINTS[tab]; }
+
+async function setTab(next) {
+  if (next === tab || !shop) return;
+  camPoses[tab] = { pos: freecam.pos.clone(), yaw: editorInput.cam.yaw, pitch: editorInput.cam.pitch };
+  if (tab === "overworld") {
+    cancelGrab(false);
+    cancelPlacement();
+    paletteEl.hidden = true;
+    shop.group.visible = false;
+    if (selBox) selBox.visible = false;
+    if (camLimitsGroup) camLimitsGroup.visible = false;
+  } else if (tab === "cave") {
+    cavePreview.exit();
+  } else {
+    dungeonPreview.exit();
+  }
+  tab = next;
+  for (const [name, b] of Object.entries(tabButtons)) b.classList.toggle("active", name === tab);
+  const pose = camPoses[tab] ?? (
+    tab === "dungeon" ? dungeonPreview.defaultCamPose()
+      : tab === "cave" ? cavePreview.defaultCamPose()
+        : null);
+  if (pose) {
+    freecam.pos.copy(pose.pos);
+    editorInput.cam.yaw = pose.yaw;
+    editorInput.cam.pitch = pose.pitch;
+  }
+  renderHint();
+  if (tab === "dungeon") {
+    await dungeonPreview.enter();
+  } else if (tab === "cave") {
+    await cavePreview.enter();
+  } else {
+    shop.group.visible = true;
+    if (selBox) selBox.visible = true;
+    rebuildCamLimits();
+    renderPanel();
+    setStatus(readOnly ? "prod build: browsing bundled layout (saving disabled)" : "editing src/game/layout.json — Ctrl+S saves");
+  }
+}
+tabButtons.overworld.onclick = () => setTab("overworld");
+tabButtons.cave.onclick = () => setTab("cave");
+tabButtons.dungeon.onclick = () => setTab("dungeon");
+
 // ---------- input wiring ----------
 let lookActive = false;
 let downAt = null;
@@ -778,8 +1070,17 @@ canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
 canvas.addEventListener("mousedown", (e) => {
   if (e.button === 2) {
+    // macOS reports Ctrl+click as a right-click; while snapping mid-grab or
+    // mid-place that click means "drop here", not "cancel"
+    if (e.ctrlKey && mode === "grab") { commitGrab(); return; }
+    if (e.ctrlKey && mode === "place") { placeArmed(); return; }
     if (mode === "place") { cancelPlacement(); setStatus("placement cancelled"); return; }
     if (mode === "grab") { cancelGrab(); return; }
+    if (tab === "cave" && cavePreview.grabbing) {
+      if (e.ctrlKey) cavePreview.commitGrab(); else cavePreview.cancelGrab();
+      return;
+    }
+    camPreview = null; // dragging to look breaks the game-framing snap
     lookActive = true;
     canvas.requestPointerLock?.();
     return;
@@ -797,6 +1098,13 @@ window.addEventListener("mouseup", (e) => {
   const moved = Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y);
   downAt = null;
   if (moved > 4 || e.target !== canvas) return; // a drag or a UI click, not a pick
+  if (tab === "cave") {
+    updatePointer(e);
+    if (cavePreview.grabbing) cavePreview.commitGrab();
+    else cavePreview.selectAt(pointerNdc);
+    return;
+  }
+  if (tab !== "overworld") return; // nothing to pick in the dungeon preview
   updatePointer(e);
   if (mode === "grab") { commitGrab(); return; }
   if (mode === "place") { placeArmed(); return; }
@@ -813,13 +1121,15 @@ window.addEventListener("mousemove", (e) => {
     updatePointer(e);
     if (mode === "grab") updateGrab();
     if (mode === "place") updatePlacement();
+    if (tab === "cave" && cavePreview.grabbing) cavePreview.updateGrab(pointerNdc, snapHeld());
   }
 });
 
 canvas.addEventListener("wheel", (e) => {
   e.preventDefault();
   if (e.altKey) {
-    if (selection) scaleSelected(e.deltaY < 0 ? 1.08 : 1 / 1.08);
+    if (tab === "overworld" && selection) scaleSelected(e.deltaY < 0 ? 1.08 : 1 / 1.08);
+    else if (tab === "cave") cavePreview.scaleSelected(e.deltaY < 0 ? 1.08 : 1 / 1.08);
     return;
   }
   freecam.speed = Math.max(2, Math.min(80, freecam.speed * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
@@ -830,6 +1140,37 @@ window.addEventListener("keydown", (e) => {
   const t = e.target;
   if (t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
   editorInput.keys[e.code] = true;
+  // flying the freecam breaks the game-framing snap set by the Camera preview
+  if (camPreview && ["KeyW", "KeyA", "KeyS", "KeyD", "Space", "KeyC"].includes(e.code)) camPreview = null;
+
+  if (e.code === "ControlLeft" || e.code === "ControlRight") {
+    if (mode === "grab") updateGrab();
+    else if (mode === "place") updatePlacement();
+  }
+
+  // the dungeon tab has its own (much smaller) key map
+  if (tab === "dungeon") {
+    if ((e.ctrlKey || e.metaKey) && e.code === "KeyS") {
+      e.preventDefault();
+      if (readOnly) { setStatus("read-only build — run the dev server to save", "error"); return; }
+      dungeonPreview.saveTuning();
+      return;
+    }
+    if (e.ctrlKey || e.metaKey) return;
+    dungeonPreview.handleKey(e.code, e);
+    return;
+  }
+
+  // the cave tab edits a few fixtures (rocks, entrance, mouths) into
+  // layout.json's `cave` block — save & undo share the overworld plumbing
+  if (tab === "cave") {
+    if ((e.ctrlKey || e.metaKey) && e.code === "KeyS") { e.preventDefault(); save(); return; }
+    if ((e.ctrlKey || e.metaKey) && e.code === "KeyZ") { e.preventDefault(); undo(); return; }
+    if ((e.ctrlKey || e.metaKey) && e.code === "KeyD") { e.preventDefault(); cavePreview.duplicateSelected(); return; }
+    if (e.ctrlKey || e.metaKey) return;
+    cavePreview.handleKey(e.code, e);
+    return;
+  }
 
   if ((e.ctrlKey || e.metaKey) && e.code === "KeyS") { e.preventDefault(); save(); return; }
   if ((e.ctrlKey || e.metaKey) && e.code === "KeyZ") { e.preventDefault(); undo(); return; }
@@ -858,7 +1199,13 @@ window.addEventListener("keydown", (e) => {
   }
 });
 
-window.addEventListener("keyup", (e) => { editorInput.keys[e.code] = false; });
+window.addEventListener("keyup", (e) => {
+  editorInput.keys[e.code] = false;
+  if (e.code === "ControlLeft" || e.code === "ControlRight") {
+    if (mode === "grab") updateGrab();
+    else if (mode === "place") updatePlacement();
+  }
+});
 window.addEventListener("blur", () => { editorInput.keys = Object.create(null); lookActive = false; });
 window.addEventListener("beforeunload", (e) => { if (dirty) e.preventDefault(); });
 
@@ -866,6 +1213,7 @@ window.addEventListener("beforeunload", (e) => { if (dirty) e.preventDefault(); 
 fetchInitialLayout().then(() => {
   rebuild(false);
   renderPanel();
+  renderHint();
   setStatus(readOnly
     ? "prod build: browsing bundled layout (saving disabled)"
     : "editing src/game/layout.json — Ctrl+S saves");
@@ -875,6 +1223,12 @@ fetchInitialLayout().then(() => {
     get shop() { return shop; },
     get layout() { return layout; },
     get selection() { return selection; },
+    get tab() { return tab; },
+    get dungeon() { return dungeonPreview.dungeon; },
+    get cave() { return cavePreview.cave; },
+    dungeonPreview,
+    cavePreview,
+    setTab,
     select: setSelection,
     save,
     rebuild,
@@ -889,6 +1243,8 @@ const clock = new THREE.Clock();
 engine.renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.05);
   freecam.update(dt);
+  if (tab === "dungeon") dungeonPreview.update(dt, clock.elapsedTime);
+  if (tab === "cave") cavePreview.update(dt, clock.elapsedTime);
   if (selBox) selBox.update();
   engine.renderer.render(engine.scene, camera);
 });

@@ -25,6 +25,10 @@ export class HUD {
         <span class="bag-btn-ic">${icon("bag")}</span>
         <span class="bag-btn-key">B</span>
       </button>
+      <button id="store-btn" class="hidden" aria-label="Open storeroom (V)">
+        <span class="bag-btn-ic">${icon("box")}</span>
+        <span class="bag-btn-key">V</span>
+      </button>
       <canvas id="minimap" class="hidden" aria-hidden="true"></canvas>
       <div id="banner" class="hidden"><div id="banner-main"></div><div id="banner-sub"></div></div>
       <div id="bossbar" class="hidden">
@@ -170,20 +174,29 @@ export class HUD {
     this.goldChip.classList.toggle("gold-corner", corner);
   }
 
-  // The backpack button is a dungeon-only affordance. Its visibility is also
-  // suppressed while the bag panel itself is open (see _applyBagBtn).
+  // The backpack button is available everywhere; callers keep it up during
+  // normal play. Its visibility is only suppressed while the bag panel itself
+  // is open (see _applyBagBtn).
   showBag(visible) {
     this._bagWanted = visible;
     this._applyBagBtn();
   }
 
-  // Hide the button while the bag panel is up (it would sit right on top of it),
-  // otherwise honour the dungeon-only wanted state.
+  // The storeroom shortcut is shop-only (there's nothing to stock underground).
+  showStore(visible) {
+    this._storeWanted = visible;
+    this._applyBagBtn();
+  }
+
+  // Hide both HUD buttons while any bag-family panel (backpack, storeroom,
+  // equip picker) is up — they'd sit right on top of the card — otherwise
+  // honour each button's wanted state.
   _applyBagBtn() {
-    const btn = this.root.querySelector("#bag-btn");
-    if (!btn) return;
-    const bagOpen = this.sheetEl.classList.contains("bag-sheet");
-    btn.classList.toggle("hidden", !this._bagWanted || bagOpen);
+    const panelOpen = this.sheetEl.classList.contains("bag-sheet");
+    const bag = this.root.querySelector("#bag-btn");
+    if (bag) bag.classList.toggle("hidden", !this._bagWanted || panelOpen);
+    const store = this.root.querySelector("#store-btn");
+    if (store) store.classList.toggle("hidden", !this._storeWanted || panelOpen);
   }
 
   banner(main, sub = "", dur = 2.2) {
@@ -451,22 +464,62 @@ export class HUD {
     this.guideEl.classList.add("hidden");
   }
 
+  /** FTUE "your next move is in the bag" cue: the backpack button pulses and
+   * a bouncing arrow hangs above it. `label` is optional ("Open the backpack"
+   * the first time; the repeat visit gets the arrow alone). The arrow lives
+   * inside the button so it follows it across layouts, and vanishes with it
+   * while the bag sheet is up. Cleared by clearBagAttention(). */
+  bagAttention(label = "") {
+    const btn = this.root.querySelector("#bag-btn");
+    if (!btn) return;
+    this.clearBagAttention();
+    btn.classList.add("attn");
+    const el = document.createElement("div");
+    el.className = "bag-attn";
+    el.innerHTML = `${label ? `<span>${label}</span>` : ""}<b>▼</b>`;
+    btn.appendChild(el);
+  }
+
+  clearBagAttention() {
+    const btn = this.root.querySelector("#bag-btn");
+    btn?.classList.remove("attn");
+    btn?.querySelector(".bag-attn")?.remove();
+  }
+
   /** In-world dialogue bar: a character bust on the left (so you can see who's
    * talking, like the haggle panel) plus a speech box. Non-blocking — the scene
    * stays visible behind it. Click/tap anywhere on the bar to advance. */
-  speak({ name, portrait, text, cta = "tap to continue", onAdvance } = {}) {
+  speak({ name, tag, portrait, text, cta = "tap to continue", onAdvance, choices } = {}) {
     const el = this.dialogEl;
     el.classList.remove("hidden");
+    // With choices, the player picks a reply button; without, the whole bar is
+    // a "tap to continue" advance.
+    const foot = choices && choices.length
+      ? `<div class="dlg-choices">${choices
+          .map((c, i) => `<button class="dlg-choice" data-i="${i}">${c.label}</button>`)
+          .join("")}</div>`
+      : `<div class="dlg-cta">${cta}</div>`;
     el.innerHTML = `
       ${portrait ? `<img class="dlg-portrait" src="${portrait}" alt="">` : ""}
       <div class="dlg-box">
-        ${name ? `<div class="dlg-name">${name}</div>` : ""}
+        ${name ? `<div class="dlg-name">${name}${tag ? `<span class="dlg-tag">${tag}</span>` : ""}</div>` : ""}
         <div class="dlg-text">${text}</div>
-        <div class="dlg-cta">${cta}</div>
+        ${foot}
       </div>`;
     this.speakOpen = true;
-    this._onAdvance = onAdvance;
-    el.onclick = () => this.advanceSpeak();
+    if (choices && choices.length) {
+      this._onAdvance = null; // a tap on the bar does nothing — pick a reply
+      el.onclick = null;
+      el.querySelectorAll(".dlg-choice").forEach((btn) => {
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          choices[Number(btn.dataset.i)]?.fn?.();
+        };
+      });
+    } else {
+      this._onAdvance = onAdvance;
+      el.onclick = () => this.advanceSpeak();
+    }
   }
 
   // Advance the open dialogue bubble (bar tap, or the "ok" key/button routed

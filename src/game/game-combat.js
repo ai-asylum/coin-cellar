@@ -19,16 +19,33 @@ const _v2 = new THREE.Vector3();
 const SAFE_ZONE_FLOOR = 3;
 
 // How close a foe must be for the dash to auto-aim onto it. Kept just past the
-// lunge's own travel + reach so it only snaps onto foes it can actually hit.
+// lunge's own travel + reach so it only nudges toward foes it can actually hit.
 const AUTOAIM_RANGE = 3.2;
+// The dash no longer hard-snaps onto a foe — instead it keeps the direction you
+// steered and only bends toward a foe that's already "aligned enough" (within
+// this cone of the dash). cos(40°) ≈ 0.766, so anything more than ~40° off to
+// the side is left alone and you dash straight where you aimed.
+const AUTOAIM_MIN_DOT = 0.766;
+// How far to rotate the dash toward the aligned foe: a fraction of the angle
+// between your steered direction and the foe, so a near-aligned foe barely
+// shifts the lunge while one near the edge of the cone gets a clearer turn.
+const AUTOAIM_TURN = 0.5;
+// The *gaze* is far more generous than the movement bend: the hero whips around
+// to look at any foe across the whole forward-ish arc (cos(80°) ≈ 0.17) even
+// when the lunge itself only barely homes — so dashing past a foe reads as a
+// dramatic turn-and-strike. Its own held beat keeps facing locked past the
+// lunge so your stick can't yank it straight back.
+const AUTOAIM_FACE_DOT = 0.17;
+const AUTOAIM_FACE_HOLD = 0.28;
 
 export const combatMethods = {
-  // Offset to the nearest living foe within `range` that lies in front of the
-  // dash (or null if none). `dirX/dirZ` is the intended (unit) dash direction;
-  // a foe only counts when the offset to it points the same way as the dash
-  // (dot product > 0), so you never snap backwards onto something behind you.
-  _nearestEnemyWithin(range, dirX, dirZ) {
-    // in the FTUE cave the only things to snap onto are the ambient rats
+  // Offset to the nearest living foe within `range` that sits inside the dash's
+  // aim cone (or null if none). `dirX/dirZ` is the intended (unit) dash
+  // direction; a foe only counts when the (normalised) offset to it aligns with
+  // the dash by at least `minDot`, so foes off to the side or behind you are
+  // left alone and you keep dashing where you steered.
+  _nearestEnemyWithin(range, dirX, dirZ, minDot = 0) {
+    // in the FTUE cave the only things to aim at are the ambient rats
     const targets = this.playerArea === "dungeon" && this.dungeon.active ? this.dungeon.enemies
       : this.playerArea === "cave" && this.cave ? this.cave.rats
       : null;
@@ -41,9 +58,10 @@ export const combatMethods = {
       const dz = e.creature.position.z - p.z;
       const d = dx * dx + dz * dz;
       if (d >= bestD || d <= 0.0001) continue;
-      // only aim at foes ahead of the dash direction
-      if (dx * dirX + dz * dirZ <= 0) continue;
-      bestD = d; best = { dx, dz, dist: Math.sqrt(d) };
+      // only aim at foes aligned enough with the dash direction
+      const dist = Math.sqrt(d);
+      if ((dx * dirX + dz * dirZ) / dist < minDot) continue;
+      bestD = d; best = { dx, dz, dist };
     }
     return best;
   },
@@ -65,24 +83,46 @@ export const combatMethods = {
       dx = Math.sin(this.player.heading);
       dz = Math.cos(this.player.heading);
     }
-    // auto-aim: snap the lunge onto the nearest foe ONLY when one is close enough
-    // for the dash to actually reach it (the lunge travels ~2 units) AND it sits
-    // in front of the way you're dashing (dot product). A foe further out or
-    // behind you is left alone so you keep dashing where you're steering.
-    const target = this._nearestEnemyWithin(AUTOAIM_RANGE, dx, dz);
-    if (target) { dx = target.dx / target.dist; dz = target.dz / target.dist; }
+    // auto-aim: gently bend the lunge toward the nearest foe ONLY when one is
+    // close enough for the dash to reach it (the lunge travels ~2 units) AND it
+    // already sits within the aim cone (aligned enough). Rather than snapping
+    // hard onto the foe, rotate the dash a fraction of the way toward it — a
+    // little turn that reads as "homing" without yanking you off your line.
+    const target = this._nearestEnemyWithin(AUTOAIM_RANGE, dx, dz, AUTOAIM_FACE_DOT);
+    if (target) {
+      const ex = target.dx / target.dist, ez = target.dz / target.dist;
+      // the hero *looks* straight at the foe across a wide arc and holds that
+      // gaze past the lunge — the dramatic turn-and-strike read
+      this._dashFaceDX = ex;
+      this._dashFaceDZ = ez;
+      this._dashFaceT = this._dashDur + AUTOAIM_FACE_HOLD;
+      // ...but the lunge itself only bends softly, and only for a tightly
+      // aligned foe, so you still dash roughly where you steered
+      if (dx * ex + dz * ez >= AUTOAIM_MIN_DOT) {
+        dx += (ex - dx) * AUTOAIM_TURN;
+        dz += (ez - dz) * AUTOAIM_TURN;
+        const l = Math.hypot(dx, dz) || 1;
+        dx /= l; dz /= l;
+      }
+    } else {
+      this._dashFaceT = 0;
+    }
 
     this._dashDX = dx;
     this._dashDZ = dz;
     this._dashT = 0;
     this._dodgeCd = 0.55 * (this.stats.dodgeCdMul || 1);
     this._invulnT = Math.max(this._invulnT, 0.36); // i-frames through the dash
+    this._dashSolidT = 0.36; // keep the hero drawn solid for that whole window
     // fresh damage pass for this dash: each foe / chest takes the hit only once
     this._dashHitIds = new Set();
     this._dashCrit = Math.random() < this._crit;
     this._dashDmg = Math.max(1, Math.round(4 * this.stats.dmgMul)) * (this._dashCrit ? 2 : 1);
-    this.player.heading = Math.atan2(dx, dz);
-    this.player.animator.squash.kick(5);
+    // face the foe on a lock (so the swoosh and the whole body point at it),
+    // otherwise face the lunge line; a heavier squash pop sells the turn-strike
+    const locked = this._dashFaceT > 0;
+    this.player.heading = locked ? Math.atan2(this._dashFaceDX, this._dashFaceDZ) : Math.atan2(dx, dz);
+    this.player.animator.squash.kick(locked ? 8 : 5);
     this.audio.dodge();
     // Keep the dash's own VFX: the blue burst at the feet ...
     _v.copy(this.player.position).setY(0.1);
@@ -180,10 +220,13 @@ export const combatMethods = {
     this.hp = this.maxHp;
     this.hud.setHearts(this.hp, this.maxHp);
     this.hud.setGold(this.gold);
-    // rebuild the player blob (the old one is a ragdoll now)
+    // rebuild the player blob (the old one is a ragdoll now) — carry over the
+    // shoulder-pivot turn rate from the outgoing hero so respawns keep the same
+    // capped-turn feel set at init (PLAYER_TURN_RATE in game.js)
     const held = this.player.heldItem;
+    const turnRate = this.player.turnRate;
     this.player.dispose();
-    this.player = new BlockyCreature("a", { height: 1.3 });
+    this.player = new BlockyCreature("a", { height: 1.3, turnRate });
     this.player.position.set(0, 0, 2.5);
     this._heldWeaponId = this.equipment.weapon;
     this.player.holdItem(weaponMesh(this.equipment.weapon));
@@ -192,7 +235,8 @@ export const combatMethods = {
     this.playerArea = "shop";
     this.lobby.leave();
     this.hud.showHearts(false);
-    this.hud.showBag(false);
+    this.hud.showBag(true);
+    this.hud.showStore(!this.tutorial);
     this.hud.showGold(true);
     this.hud.setGoldCorner(false);
     this._save();
