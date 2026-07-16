@@ -588,6 +588,8 @@ export class Cave {
     this.rats.length = 0;
     this._ftueRat = null;
     this.setFtueVeil(false);
+    for (const s of this.shafts) s.userData.dispose?.();
+    this.shafts.length = 0;
     this.game.engine.scene.remove(this.group);
     this.group.traverse((o) => { o.material?.dispose?.(); o.geometry?.dispose?.(); });
   }

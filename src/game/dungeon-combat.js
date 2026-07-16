@@ -415,7 +415,7 @@ export const combatMethods = {
     g.add(disc, ring);
     this.group.add(g);
     // a bright column of light rising from the stairs (animated via shafts)
-    const shaft = makeLightShaft({ color: shaftColor, length: 4.8, topWidth: 0.5, bottomWidth: 2.2, opacity: 0.55, tilt: 0, spin: 1.6, motes: 16 });
+    const shaft = makeLightShaft({ color: shaftColor, length: 4.8, topWidth: 0.5, bottomWidth: 2.2, opacity: 0.55, tilt: 0, spin: 1.6, motes: 16, always: true });
     shaft.position.set(lx, 3.4, lz);
     this.group.add(shaft);
     this.shafts.push(shaft);

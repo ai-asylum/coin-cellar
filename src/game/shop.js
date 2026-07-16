@@ -380,6 +380,22 @@ export class Shop {
     // the lamp heads glow bright at night, dim to near-dark in daylight
     _tGlow.copy(_GLOW_OFF).lerp(_GLOW_ON, night);
     for (const gm of this.streetLampGlows) gm.color.lerp(_tGlow, k);
+
+    // the street tree/bush billboards are unlit SpriteMaterial, so they don't
+    // pick up hemi/sun like the rest of the world — approximate the diffuse
+    // irradiance (ambient sky fill + warm key) off the already-eased lights and
+    // tint the sprites so they cool and darken into dusk/night with everything
+    // else instead of staying full-bright.
+    const hi = eng.hemi.intensity, si = eng.sun.intensity, hc = eng.hemi.color, sc = eng.sun.color;
+    _tDecor.setRGB(
+      Math.min(1, (hc.r * hi * 0.5 + sc.r * si * 0.22) * 1.25),
+      Math.min(1, (hc.g * hi * 0.5 + sc.g * si * 0.22) * 1.25),
+      Math.min(1, (hc.b * hi * 0.5 + sc.b * si * 0.22) * 1.25),
+    );
+    for (const g of this.decorSprites ?? []) {
+      const m = g.userData.decorMat;
+      if (m) m.color.copy(_tDecor);
+    }
   }
 
   // ------------------------------------------------------------ haggling
@@ -620,6 +636,7 @@ const _tGround = new THREE.Color();
 const _tSun = new THREE.Color();
 const _tBg = new THREE.Color();
 const _tShaft = new THREE.Color();
+const _tDecor = new THREE.Color();
 
 // Re-export the shared data so existing import sites (game.js imports SHOP +
 // ARCHETYPES, admin.js imports ARCHETYPES) keep working unchanged.

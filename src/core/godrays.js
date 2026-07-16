@@ -4,6 +4,20 @@
 // stylised look (blob shadows, additive glows, canvas textures elsewhere).
 import * as THREE from "three";
 
+// God rays are opt-in (off by default). We keep a registry of every live shaft
+// so the ` admin toggle can show/hide them all at once, and newly built shafts
+// inherit the current setting. Toggle via setGodraysEnabled (see game-ui).
+let _godraysEnabled = false;
+const _liveShafts = new Set();
+export function godraysEnabled() {
+  return _godraysEnabled;
+}
+export function setGodraysEnabled(on) {
+  _godraysEnabled = !!on;
+  for (const g of _liveShafts) g.visible = _godraysEnabled;
+  return _godraysEnabled;
+}
+
 let _beamTex = null;
 // Grey beam baked into RGB (additive blending adds it * material.color):
 // bright at the top (the light source), fading down and softly at the edges.
@@ -77,6 +91,7 @@ export function makeLightShaft({
   motes = 12,
   tilt = 0.32,
   spin = 0,
+  always = false, // stairs beams stay lit regardless of the god-rays toggle
 } = {}) {
   const group = new THREE.Group();
   group.rotation.set(tilt, spin, 0);
@@ -166,6 +181,7 @@ export function makeLightShaft({
     if (motePts) motePts.material.color.set(c);
   };
   group.userData.dispose = () => {
+    _liveShafts.delete(group);
     geo.dispose();
     mat.dispose();
     if (motePts) {
@@ -173,5 +189,11 @@ export function makeLightShaft({
       motePts.material.dispose();
     }
   };
+  // "always" shafts (e.g. the columns marking stairs) stay lit and out of the
+  // toggle registry; everything else is hidden until god rays are turned on.
+  if (!always) {
+    group.visible = _godraysEnabled;
+    _liveShafts.add(group);
+  }
   return group;
 }

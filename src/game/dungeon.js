@@ -354,13 +354,13 @@ export class Dungeon {
       this.shafts.push(shaft);
       return shaft;
     };
-    addShaft(this.entrancePos, { color: 0x9a6dff, length: 4.6, topWidth: 0.6, bottomWidth: 2.6, opacity: 0.4, tilt: 0.28, spin: 0.4, motes: 14 });
+    addShaft(this.entrancePos, { color: 0x9a6dff, length: 4.6, topWidth: 0.6, bottomWidth: 2.6, opacity: 0.4, tilt: 0.28, spin: 0.4, motes: 14, always: true });
     if (this.hasDownStairs)
-      addShaft(this.stairsPos, { color: 0xff9a4d, length: 4.6, topWidth: 0.55, bottomWidth: 2.4, opacity: 0.34, tilt: 0.24, spin: 1.2, motes: 12 });
+      addShaft(this.stairsPos, { color: 0xff9a4d, length: 4.6, topWidth: 0.55, bottomWidth: 2.4, opacity: 0.34, tilt: 0.24, spin: 1.2, motes: 12, always: true });
     // the tutorial's up-stairs get a warm "way home" beam that's part of the
     // chest-crack reveal
     if (tutorial) {
-      const homeShaft = addShaft(this.upStairsPos, { color: 0xffd9a0, length: 4.6, topWidth: 0.55, bottomWidth: 2.4, opacity: 0.34, tilt: 0.24, spin: 1.2, motes: 12 });
+      const homeShaft = addShaft(this.upStairsPos, { color: 0xffd9a0, length: 4.6, topWidth: 0.55, bottomWidth: 2.4, opacity: 0.34, tilt: 0.24, spin: 1.2, motes: 12, always: true });
       homeShaft.visible = false;
       this._stairsMeshes.push(homeShaft);
     }

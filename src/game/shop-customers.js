@@ -22,13 +22,20 @@ function archetypeForNpc(npc) {
 
 // How close the player must be for a townsperson to notice them: slow to a
 // curious amble and turn to face them as they pass.
-const NPC_NOTICE_R = 2.2;
+const NPC_NOTICE_R = 2.6;
+// Closer still and they stop altogether — halting to face the player and let
+// them by, the way Animal Crossing villagers pause the moment you walk up to
+// them. Sits inside the notice radius so there's a brief amble before the stop.
+const NPC_STOP_R = 1.45;
 // Townsfolk carry themselves at an unhurried, Animal-Crossing-ish pace: a
 // gentle steady turn, slightly slowed limbs, and a relaxed stroll.
 const NPC_TURN_RATE = 2.6; // rad/s — a soft, unhurried pivot
 const NPC_ANIM_SCALE = 0.85; // slightly slower gait
 const NPC_WALK_MUL = 0.8; // relaxed base walking speed
 const NPC_NOTICE_MUL = 0.3; // extra slow-down when ambling past the player
+// How briskly a stroller eases between paces (walk ↔ amble ↔ full stop). Low
+// enough that speeding up and slowing down reads as a natural roll, not a snap.
+const NPC_ACCEL = 5.5;
 
 export const customerMethods = {
   // Trickle shoppers in all day: as long as something's on the shelves and we
@@ -143,27 +150,41 @@ export const customerMethods = {
         continue;
       }
       p.life -= dt;
-      if (p.pause > 0) {
+      // where the player is relative to this stroller drives the whole beat:
+      // a curious amble at arm's length, a full stop (and a turn to face them)
+      // once they've walked right up — Animal-Crossing style.
+      const pp = game.player.position;
+      const pdist = Math.hypot(pp.x - c.position.x, pp.z - c.position.z);
+      const noticing = pdist < NPC_NOTICE_R;
+      const blocking = pdist < NPC_STOP_R;
+      const facePlayer = Math.atan2(pp.x - c.position.x, pp.z - c.position.z);
+      if (p.pause > 0 && !blocking) {
         p.pause -= dt; // loitering — stand still but keep the idle anim ticking
+        if (noticing) c.heading = facePlayer; // glance over if they wander close
+        p.curSpeed += (0 - p.curSpeed) * Math.min(1, dt * NPC_ACCEL);
       } else {
         const dx = p.tx - c.position.x, dz = p.tz - c.position.z;
         const d = Math.hypot(dx, dz);
-        if (d < 0.35) {
+        if (d < 0.35 && !blocking) {
           // reached the waypoint: dawdle, then pick the next spot (or head off
           // the edge once this stroller's time is up)
           if (p.life <= 0) { p.tx = p.exitX; p.tz = p.exitZ; p.life = -1e9; p.pause = 0; }
           else { this._pickPasserTarget(p); p.pause = Math.random() < 0.4 ? 0.6 + Math.random() * 1.4 : 0; }
+          p.curSpeed += (0 - p.curSpeed) * Math.min(1, dt * NPC_ACCEL);
         } else {
-          // slow to a curious amble and glance over when the player's right
-          // beside them, then pick the pace back up once they've passed
-          const pp = game.player.position;
-          const near = Math.hypot(pp.x - c.position.x, pp.z - c.position.z) < NPC_NOTICE_R;
-          const spd = p.speed * (near ? NPC_NOTICE_MUL : NPC_WALK_MUL);
-          c.position.x += (dx / d) * spd * dt;
-          c.position.z += (dz / d) * spd * dt;
-          c.heading = near
-            ? Math.atan2(pp.x - c.position.x, pp.z - c.position.z)
-            : Math.atan2(dx, dz);
+          // ease speed toward the pace the moment calls for: a full stop when
+          // the player's right up close, a curious amble when they're nearby,
+          // an unhurried stroll otherwise. Smoothing the change (rather than
+          // snapping) is what sells the gentle slow-down and pick-back-up.
+          const mul = blocking ? 0 : noticing ? NPC_NOTICE_MUL : NPC_WALK_MUL;
+          p.curSpeed += (p.speed * mul - p.curSpeed) * Math.min(1, dt * NPC_ACCEL);
+          if (d > 1e-4) {
+            c.position.x += (dx / d) * p.curSpeed * dt;
+            c.position.z += (dz / d) * p.curSpeed * dt;
+          }
+          // face the player when they're near (stopped or ambling past), else
+          // face the way they're walking
+          c.heading = noticing ? facePlayer : Math.atan2(dx, dz);
         }
       }
       c.update(dt, elapsed);
@@ -202,6 +223,7 @@ export const customerMethods = {
       npc,
       seed, // carried over if this stroller is later recruited into the shop
       speed: 1.0 + Math.random() * 0.9,
+      curSpeed: 0, // eased actual pace, so accel/decel reads as a natural roll
       life: 10 + Math.random() * 14, // seconds of milling before they head off
       pause: 0,
       exitX: R.crossNear + Math.random() * (R.crossFar - R.crossNear),

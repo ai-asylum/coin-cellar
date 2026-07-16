@@ -21,21 +21,14 @@ const SAFE_ZONE_FLOOR = 3;
 // How close a foe must be for the dash to auto-aim onto it. Kept just past the
 // lunge's own travel + reach so it only nudges toward foes it can actually hit.
 const AUTOAIM_RANGE = 3.2;
-// The dash no longer hard-snaps onto a foe — instead it keeps the direction you
-// steered and only bends toward a foe that's already "aligned enough" (within
-// this cone of the dash). cos(40°) ≈ 0.766, so anything more than ~40° off to
-// the side is left alone and you dash straight where you aimed.
-const AUTOAIM_MIN_DOT = 0.766;
-// How far to rotate the dash toward the aligned foe: a fraction of the angle
-// between your steered direction and the foe, so a near-aligned foe barely
-// shifts the lunge while one near the edge of the cone gets a clearer turn.
-const AUTOAIM_TURN = 0.5;
-// The *gaze* is far more generous than the movement bend: the hero whips around
-// to look at any foe across the whole forward-ish arc (cos(80°) ≈ 0.17) even
-// when the lunge itself only barely homes — so dashing past a foe reads as a
-// dramatic turn-and-strike. Its own held beat keeps facing locked past the
-// lunge so your stick can't yank it straight back.
+// The dash locks onto any foe inside this forward arc (cos(80°) ≈ 0.17): the
+// lunge redirects into that foe and the hero turns to face it. A generous arc
+// so you dive into — and visibly swing toward — off-axis foes, not just the
+// one dead ahead. Foes further to the side or behind are left alone so you can
+// still dash to reposition.
 const AUTOAIM_FACE_DOT = 0.17;
+// Keep facing the locked foe for this beat past the lunge so the turn reads and
+// your stick doesn't snap the hero straight back the instant the dash ends.
 const AUTOAIM_FACE_HOLD = 0.28;
 
 export const combatMethods = {
@@ -83,27 +76,18 @@ export const combatMethods = {
       dx = Math.sin(this.player.heading);
       dz = Math.cos(this.player.heading);
     }
-    // auto-aim: gently bend the lunge toward the nearest foe ONLY when one is
-    // close enough for the dash to reach it (the lunge travels ~2 units) AND it
-    // already sits within the aim cone (aligned enough). Rather than snapping
-    // hard onto the foe, rotate the dash a fraction of the way toward it — a
-    // little turn that reads as "homing" without yanking you off your line.
+    // auto-aim: whenever a foe sits within the dash arc, LOCK onto it — the
+    // lunge redirects straight into that foe and the hero turns to face it (and
+    // holds that gaze briefly past the lunge). Because the dash now genuinely
+    // dives into an off-axis foe rather than gliding past, you actually see the
+    // hero swing around toward whatever they're about to strike.
     const target = this._nearestEnemyWithin(AUTOAIM_RANGE, dx, dz, AUTOAIM_FACE_DOT);
     if (target) {
-      const ex = target.dx / target.dist, ez = target.dz / target.dist;
-      // the hero *looks* straight at the foe across a wide arc and holds that
-      // gaze past the lunge — the dramatic turn-and-strike read
-      this._dashFaceDX = ex;
-      this._dashFaceDZ = ez;
+      dx = target.dx / target.dist;
+      dz = target.dz / target.dist;
+      this._dashFaceDX = dx;
+      this._dashFaceDZ = dz;
       this._dashFaceT = this._dashDur + AUTOAIM_FACE_HOLD;
-      // ...but the lunge itself only bends softly, and only for a tightly
-      // aligned foe, so you still dash roughly where you steered
-      if (dx * ex + dz * ez >= AUTOAIM_MIN_DOT) {
-        dx += (ex - dx) * AUTOAIM_TURN;
-        dz += (ez - dz) * AUTOAIM_TURN;
-        const l = Math.hypot(dx, dz) || 1;
-        dx /= l; dz /= l;
-      }
     } else {
       this._dashFaceT = 0;
     }

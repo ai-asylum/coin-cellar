@@ -387,6 +387,28 @@ export const buildMethods = {
       this.lampLights.push(glow);
     }
 
+    // a warm wall lantern on the low back wall, centred between the two
+    // back-room doorways. Like the corner lamps it's dark under the bright
+    // midday palette and kindles at night (pushed into lampLights).
+    {
+      const sconce = new THREE.Group();
+      const midX = (EX_DOORS[0] + EX_DOORS[1]) / 2; // -0.8, in the gap between the doors
+      const plate = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.5, 0.12), wood2);
+      plate.position.set(0, 1.45, 0);
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.4), wood2);
+      arm.position.set(0, 1.66, -0.22);
+      const shade = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.28, 10), makeToonMaterial({ color: 0xffd98a, rim: 0 }));
+      shade.position.set(0, 1.86, -0.42);
+      const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffe6a8 }));
+      bulb.position.set(0, 1.72, -0.42);
+      const glow = new THREE.PointLight(0xffca7a, 0, 8, 1.6);
+      glow.position.set(0, 1.72, -0.55);
+      sconce.add(plate, arm, shade, bulb, glow);
+      sconce.position.set(midX, 0, D / 2 - 0.18); // interior face of the back wall
+      g.add(sconce);
+      this.lampLights.push(glow);
+    }
+
     // warm afternoon sun pouring in through the doorway + a high window,
     // slanting into the room to match the low, warm key light.
     const shaftDefs = [

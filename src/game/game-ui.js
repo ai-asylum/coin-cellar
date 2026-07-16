@@ -7,6 +7,7 @@ import { ITEMS } from "./items.js";
 import { SLOTS, SLOT_META, equipInfo } from "./gear.js";
 import { MAX_DEPTH, DUNGEON_ORIGIN } from "./dungeon.js";
 import { dayClockStops } from "./shop.js";
+import { godraysEnabled, setGodraysEnabled } from "../core/godrays.js";
 import { esc } from "./game-util.js";
 import { NAME_KEY } from "./game-persistence.js";
 
@@ -564,6 +565,7 @@ export const uiMethods = {
         <button data-a="heal">${icon("heart")} Full heal</button>
         <button data-a="maxhp">${icon("plus")} +1 heart</button>
         <button data-a="god">${icon("shield")} God: <b>${this.godMode ? "ON" : "off"}</b></button>
+        <button data-a="godrays">${icon("sun")} God rays: <b>${godraysEnabled() ? "ON" : "off"}</b></button>
         <button data-a="fillbag">${icon("bag")} Fill bag</button>
         <button data-a="stockshelves">${icon("box")} Stock shelves</button>
         <button data-a="clearbag">${icon("trash")} Empty bag</button>
@@ -628,6 +630,13 @@ export const uiMethods = {
         this.godMode = !this.godMode;
         this.hud.toast(`God mode ${this.godMode ? "ON" : "off"}`);
         break;
+      case "godrays": {
+        const on = setGodraysEnabled(!godraysEnabled());
+        this.hud.toast(`${icon("sun")} God rays ${on ? "ON" : "off"}`);
+        const b = this.adminEl?.querySelector('[data-a="godrays"] b');
+        if (b) b.textContent = on ? "ON" : "off";
+        break;
+      }
       case "fillbag": {
         // fills whatever you're living out of: the bag below, the stash above
         const ids = Object.keys(ITEMS);

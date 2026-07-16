@@ -1,9 +1,12 @@
-// Billboard scenery. Flat, camera-facing sprites of trees, bushes, flowers,
+// Billboard scenery. Flat, camera-facing cutouts of trees, bushes, flowers,
 // mushrooms, stones and bones (Layer Lab art, see public/decor/NOTICE.md) that
-// dress the street outside the shop and the rooms of the cellar below. Every
-// piece is a THREE.Sprite anchored at its bottom edge so it "stands" on the
-// ground and always turns to face the camera — the cheap, classic way to fill
-// a 3D world with hand-painted 2D set dressing.
+// dress the street outside the shop and the rooms of the cellar below. Each is
+// an upright quad anchored at its bottom edge so it "stands" on the ground and
+// yaws about the vertical (Y) axis to face the camera — an *axial* (cylindrical)
+// billboard, not a full THREE.Sprite. That keeps every piece rooted and plumb:
+// its base stays planted and it never tilts back when the camera looks down,
+// the way a Sprite would. The cheap, classic way to fill a 3D world with
+// hand-painted 2D set dressing.
 import * as THREE from "three";
 import { pick } from "../core/engine.js";
 
@@ -28,38 +31,61 @@ function getTex(path) {
   return e;
 }
 
+// A unit quad in the XY plane, shifted up so it spans y=[0,1]: the bottom edge
+// sits on the group origin, so scaling by `height` plants the base on the
+// ground. Shared across every billboard (never disposed per-instance).
+const _quad = new THREE.PlaneGeometry(1, 1).translate(0, 0.5, 0);
+const _camPos = new THREE.Vector3();
+const _wp = new THREE.Vector3();
+
 // A single billboard. `height` is the world height it stands; its width is
 // derived from the image aspect (applied the moment the texture is decoded, so
 // nothing is squashed). `tint` multiplies the art — handy for dimming/cooling
 // props to sit in the cellar's moodier light. Returned as a Group so callers
-// can position/rotate it like any other prop (rotation is a harmless no-op).
+// can position it like any other prop.
+//
+// Orientation is axial: each frame (via onBeforeRender) the quad yaws about Y
+// to face the camera in the XZ plane but stays perfectly upright, so it reads
+// as a standing cutout rather than a decal that lies flat under a top-down cam.
 export function decorSprite(path, { height = 1, tint = null, opacity = 1 } = {}) {
   const e = getTex(path);
-  const mat = new THREE.SpriteMaterial({
+  const mat = new THREE.MeshBasicMaterial({
     map: e.tex,
     transparent: true,
     alphaTest: 0.14, // keep the soft baked ground-shadow, drop the halo
     opacity,
+    side: THREE.DoubleSide, // readable from either side as it yaws around
   });
   if (tint != null) mat.color.set(tint);
-  const sprite = new THREE.Sprite(mat);
-  sprite.center.set(0.5, 0); // anchor the bottom edge to the group origin
-  const apply = (aspect) => sprite.scale.set(height * aspect, height, 1);
+  const mesh = new THREE.Mesh(_quad, mat);
+  const apply = (aspect) => mesh.scale.set(height * aspect, height, 1);
   if (e.tex.image && e.tex.image.width) apply(e.aspect);
   else {
     apply(e.aspect);
     e.waiters.push(apply);
   }
+  // Y-only billboard: point the quad's +Z face at the camera horizontally, then
+  // fold the fresh yaw straight into matrixWorld so it lands this frame (the
+  // renderer has already composed matrices by the time onBeforeRender fires).
+  mesh.onBeforeRender = (renderer, scene, camera) => {
+    camera.getWorldPosition(_camPos);
+    _wp.setFromMatrixPosition(mesh.matrixWorld);
+    mesh.rotation.y = Math.atan2(_camPos.x - _wp.x, _camPos.z - _wp.z);
+    mesh.updateMatrix();
+    if (mesh.parent) mesh.matrixWorld.multiplyMatrices(mesh.parent.matrixWorld, mesh.matrix);
+    else mesh.matrixWorld.copy(mesh.matrix);
+  };
   const g = new THREE.Group();
-  g.add(sprite);
+  g.add(mesh);
   g.userData.decorMat = mat;
   return g;
 }
 
-// Free the per-sprite materials under a group (textures stay cached & shared).
+// Free the per-billboard materials under a group (the shared quad geometry and
+// the cached textures stay put).
 export function disposeDecor(group) {
   group.traverse((o) => {
-    if (o.isSprite) o.material?.dispose();
+    if (o.isMesh) o.material?.dispose();
   });
 }
 
