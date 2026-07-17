@@ -17,7 +17,7 @@ import { portraitDataURL } from "../chargen/portrait.js";
 import { icon, itemIcon } from "../core/icons.js";
 import { ITEMS } from "./items.js";
 import { SHOP } from "./shop-data.js";
-import { npcLinesFor, timeOfDay } from "./npc-data.js";
+import { npcLinesFor, timeOfDay, npcReflectionLine } from "./npc-data.js";
 import { track } from "../core/analytics.js";
 
 // The Mayor NPC: a fixed character variant (so his walking body matches the
@@ -269,13 +269,23 @@ export const narrativeMethods = {
     track("ftue_step", { step, day: this.day, gold: this.gold });
     // advancing past the last step (the first real descent) ends the FTUE
     if (!this.tutorial) track("ftue_completed", { day: this.day, gold: this.gold });
-    // the first table's just been stocked — send in the scripted first shopper,
-    // who always commits: a plain-table purchase the player just watches land
-    if (this.tutorial === "sell") this.shop.spawnScriptedCustomer();
+    // the first table's just been stocked — the shop's finally open for
+    // business, so let the doors swing for the player again, and send in the
+    // scripted first shopper, who always commits: a plain-table purchase the
+    // player just watches land
+    if (this.tutorial === "sell") {
+      this.shop.doorLocked = false; // open for business — doors swing again
+      this.shop.spawnScriptedCustomer();
+    }
     // the first sale just landed — a beat for the coin to fly, then the hero,
     // alone in their shop, closes the loop's first lap
     if (this.tutorial === "delve")
-      setTimeout(() => this._selfSay(PLAYER_RESOLVE_LINES), 600);
+      setTimeout(() => this._selfSay(PLAYER_RESOLVE_LINES, () => {
+        // send-off: once the resolve monologue lands, the shopfront swings
+        // open on its own — a wordless invitation out to the new life the
+        // heir just named. Released when they reach the cave (see _enterCave).
+        this.shop.doorHeld = true;
+      }), 600);
     if (this.tutorial) setTimeout(() => this._tutHint(), 700);
   },
 
@@ -326,10 +336,10 @@ export const narrativeMethods = {
         // inside — at the descent pit itself. Completes on the first descent.
         if (inShop && this.shop.caveMouthPos) {
           pos = _v.copy(this.shop.caveMouthPos);
-          text = "To the cave — delve for more loot";
+          text = "To the cave — dive for more loot";
         } else if (this.playerArea === "cave") {
           pos = _v.copy(this.cave.descentPos);
-          text = "Delve here for more loot";
+          text = "Dive here for more loot";
         }
         break;
     }
@@ -433,7 +443,8 @@ export const narrativeMethods = {
       const i = this.inventory.indexOf("unclenote");
       if (i !== -1) this.inventory.splice(i, 1);
       this._ftueFreeze = false;
-      this.shop.doorLocked = false; // read up — open for business
+      // doors stay shut through the stock step — they only open for business
+      // once the first table's actually stocked (see _tutAdvance)
       this._depositBag();
       this._tutHint();
     });
@@ -454,6 +465,7 @@ export const narrativeMethods = {
   // already on stage.
   _ensureMayor(pos) {
     if (this._mayor) return this._mayor;
+    this.shop.holdVariantForCameo(MAYOR_VARIANT); // pull any roaming Mayor so there's only one
     const creature = new BlockyCreature(MAYOR_VARIANT, { height: 1.55 });
     creature.position.copy(pos);
     creature.heading = Math.atan2(this.player.position.x - pos.x, this.player.position.z - pos.z);
@@ -484,6 +496,7 @@ export const narrativeMethods = {
     this.hud.hideSpeak();
     m.creature.dispose?.();
     this.shop.group.remove(m.creature);
+    this.shop.releaseCameoVariant(MAYOR_VARIANT); // he can rejoin the ambient crowd
   },
 
   // Cycle a speaker's bubbles through the in-world dialogue bar (portrait +
@@ -515,6 +528,26 @@ export const narrativeMethods = {
     this._speakLines("Me", portraitDataURL(this.player.variant ?? "a", "left"), lines, onDone);
   },
 
+  // ---- purchase reflections -------------------------------------------------
+  // Note what a townsperson made of their visit so they can mention it the next
+  // time you chat. `bucket` is one of the REFLECTION_BUCKETS ids; `itemId` fills
+  // the {item} placeholder in their line (omitted for "nothing caught my eye").
+  // Keyed by npc id, so it follows the person, not the transient customer body.
+  recordNpcReflection(npc, bucket, itemId) {
+    if (!npc?.id || !bucket) return;
+    this._npcMemory.set(npc.id, { bucket, itemId: itemId || null, itemName: itemId ? (ITEMS[itemId]?.name || "") : "" });
+  },
+
+  // Consume a townsperson's pending reflection (if any), returning the spoken
+  // line with {item} filled in — a bespoke item-specific reaction where one
+  // exists, else their generic line. One-shot: cleared as it's read.
+  _takeNpcReflection(npc) {
+    const mem = this._npcMemory?.get(npc?.id);
+    if (!mem) return null;
+    this._npcMemory.delete(npc.id);
+    return npcReflectionLine(npc, mem.bucket, mem.itemId, mem.itemName);
+  },
+
   // ---- chatting with the townsfolk ------------------------------------------
   // Strike up a conversation with a shopper or passer-by. Their body pauses and
   // faces the player (see shop-customers: the `chatting` flag), and the dialogue
@@ -535,10 +568,14 @@ export const narrativeMethods = {
       return d.getHours() + d.getMinutes() / 60;
     })();
     const tod = timeOfDay(hour);
+    // if they've been shopping since you last spoke, they lead with why they
+    // bought (or didn't buy) what they did — a one-off reflection that's cleared
+    // as it's spoken, so the next chat falls back to ordinary time-of-day chatter
+    const reflection = this._takeNpcReflection(npc);
     const lines = npcLinesFor(npc, hour);
     if (target._lineTod !== tod) { target._lineTod = tod; target._lineIdx = 0; }
     else target._lineIdx = (target._lineIdx == null ? 0 : target._lineIdx + 1);
-    const line = lines[target._lineIdx % lines.length];
+    const line = reflection || lines[target._lineIdx % lines.length];
     this._npcChat = { target };
     // the hero walks up and squares off with them as the bubble opens (driven
     // per-frame in _updateTalkApproach — runs even while the dialogue is up)
@@ -619,6 +656,7 @@ export const narrativeMethods = {
   // flanks the bubble like the Mayor's), then heads out through the shopfront.
   _clerkRecovery() {
     if (this._clerk) return;
+    this.shop.holdVariantForCameo(CLERK_VARIANT); // pull any roaming Clerk so there's only one
     const creature = new BlockyCreature(CLERK_VARIANT, { height: 1.5 });
     const p = this.player.position;
     creature.position.set(p.x + 1.1, 0, p.z + 0.3);
@@ -651,6 +689,7 @@ export const narrativeMethods = {
     this.shop.doorHeld = false;
     m.creature.dispose?.();
     this.shop.group.remove(m.creature);
+    this.shop.releaseCameoVariant(CLERK_VARIANT); // he can rejoin the ambient crowd
   },
 
   // Drive the clerk each frame: face you while he talks, then walk his exit path

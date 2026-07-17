@@ -2,7 +2,7 @@
 
 Coin Cellar supports **2-player co-op** over peer-to-peer WebRTC — no server. The
 design goal is a natural division of labor: one player runs the shop while the
-other delves the cellar, both feeding one shared economy.
+other dives the cellar, both feeding one shared economy.
 
 For the wire protocol and sync internals, see
 [Networking](../technical/03-networking.md). This document is the design
@@ -12,13 +12,13 @@ view.
 
 - **The Shopkeeper** stays up top: stocks tables, works customers, haggles, buys
   from sellers.
-- **The Delver** goes below: fights through floors, opens chests, hauls loot back
+- **The Diver** goes below: fights through floors, opens chests, hauls loot back
   up.
 
 Because gold, stock, and debt are all shared, the two roles are genuinely
-interdependent — the delver's loot is the shopkeeper's inventory, and the
+interdependent — the diver's loot is the shopkeeper's inventory, and the
 shopkeeper's gold is what keeps the whole operation solvent against the debt clock.
-Players can also both delve, or both shop; the split is encouraged, not enforced.
+Players can also both dive, or both shop; the split is encouraged, not enforced.
 
 ## What's shared
 
@@ -36,7 +36,7 @@ joins.
 - The **host** simulates: day timer, wallet, customers, enemies, and the dungeon
   seed. Only the host writes the save.
 - The **guest** sends intents (e.g. "I hit this enemy," "I took this drop," "I
-  made this sale," "I want to delve") and renders snapshots the host broadcasts.
+  made this sale," "I want to dive") and renders snapshots the host broadcasts.
 
 This keeps the two clients consistent without a referee server, at the cost of the
 guest depending on the host being present.
@@ -54,7 +54,7 @@ Co-op is organized around a **friends list** rather than one-off room codes.
   invite; if they accept they drop straight into your world as the guest (you're
   the host).
 - A player can **only accept a teleport invite while above ground** — you can't
-  be yanked out of a live cellar delve. Surface first, then accept.
+  be yanked out of a live cellar dive. Surface first, then accept.
 - Access via the friends button in the HUD (or the `C` key).
 
 ## Design differences vs. single-player

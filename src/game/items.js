@@ -89,6 +89,30 @@ export const ITEMS = {
 };
 for (const [id, it] of Object.entries(ITEMS)) it.id = id;
 
+// The four "kinds" a shopper reads an item as — used to give each personality a
+// taste (see npc-data.js PERSONALITIES.taste): the Lazy crowd goes for food,
+// the Jocks want weapons, the Snooty covet treasure, and so on. Derived from
+// the item's own fields so it never drifts from the catalogue:
+//   weapon   — a wieldable (equip.slot === "weapon")
+//   gear     — any other equippable (armour, boots, rings, shields…)
+//   food     — a consumable that restores hearts (heal)
+//   treasure — everything else: gems, trinkets, curios with no use but value
+export const ITEM_KINDS = ["food", "weapon", "gear", "treasure"];
+export const ITEM_KIND_LABELS = {
+  food: "Food & potions",
+  weapon: "Weapons",
+  gear: "Gear & trinkets",
+  treasure: "Treasure & curios",
+};
+export function itemKind(id) {
+  const it = typeof id === "string" ? ITEMS[id] : id;
+  if (!it) return "treasure";
+  if (it.equip?.slot === "weapon") return "weapon";
+  if (it.equip) return "gear";
+  if (it.heal) return "food";
+  return "treasure";
+}
+
 // Gear the bosses hand out as spoils (see dungeon.killEnemy). Every entry is an
 // ITEMS id with an `equip` block. Kept here so the drop table lives next to the
 // catalogue it draws from.

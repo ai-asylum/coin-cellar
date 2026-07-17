@@ -32,11 +32,15 @@ export const buildMethods = {
     this._glowTable = null; // which locked table's floor outline is currently lit
     const { W, D } = SHOP;
 
-    // floor: warm planks (canvas texture keeps it cheap + stylised)
+    // floor: warm planks (canvas texture keeps it cheap + stylised). Must use
+    // the shared toon ramp: three r169 omits gradientMap from the program cache
+    // key, so a ramp-less toon material can inherit a USE_GRADIENTMAP program
+    // from whichever area compiled first (the FTUE cave) and go near-black
+    // sampling the unbound ramp slot.
     const floorTex = makeFloorTexture();
     const floor = new THREE.Mesh(
       new THREE.PlaneGeometry(W, D).rotateX(-Math.PI / 2),
-      new THREE.MeshToonMaterial({ map: floorTex, gradientMap: null })
+      makeToonMaterial({ map: floorTex, rim: 0 })
     );
     g.add(floor);
 

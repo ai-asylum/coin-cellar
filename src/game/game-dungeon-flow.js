@@ -51,6 +51,7 @@ export const dungeonFlowMethods = {
 
   _enterCave() {
     this.playerArea = "cave";
+    this.shop.doorHeld = false; // drop any FTUE send-off hold once they head out
     this.player.position.copy(this.cave.exitPos).add(_v.set(0, 0, -1.8));
     this.player.heading = Math.PI; // walking north, deeper into the dark
     this.player.animator.prevPos.copy(this.player.position);
@@ -87,39 +88,12 @@ export const dungeonFlowMethods = {
     if (this.tutorial === "exit") this._onFtueCaveExit();
   },
 
-  // Confirm sheet at a cave mouth's lip. The first is always open; a deeper
-  // one only offers the dive once its shortcut's been earned (see _shortcutOpen).
+  // A barred cave mouth: spell out how the shortcut opens. (Open mouths dive
+  // straight in — see the cave interact in _contextAction, no confirm sheet.)
   _holePrompt(id) {
-    if (this.hud.sheetOpen) return;
-    const hole = this.cave.holes[id];
-    if (!hole) return;
-    if (!this._shortcutOpen(id)) {
-      // still barred — spell out how the shortcut opens
-      this.hud.toast(`${icon("hole")} Locked — beat the Floor ${id * FLOORS_PER_DUNGEON} boss to open this shortcut`);
-      this.audio.deny();
-      return;
-    }
-    this.paused = !this.net.connected;
-    const sub = id === 0
-      ? ""
-      : `shortcut to Floor ${hole.floor} — ${this._shortcutLabel(id)} left`;
-    const el = this.hud.showSheet(`
-      <div class="sheet-title"><span class="big-emoji">${icon("hole")}</span>
-        <div><b>${hole.name}</b><br/><small>${sub}</small></div></div>
-      <div class="sheet-btns">
-        <button class="btn deny" id="hole-no">${icon("close")} Not this one</button>
-        <button class="btn deal" id="hole-yes">${icon("arrowDown")} Jump in</button>
-      </div>
-    `, "sheet-card");
-    el.querySelector("#hole-yes").onclick = () => {
-      this.paused = false;
-      this.hud.hideSheet();
-      this._delve(id);
-    };
-    el.querySelector("#hole-no").onclick = () => {
-      this.paused = false;
-      this.hud.hideSheet();
-    };
+    if (this._shortcutOpen(id)) return;
+    this.hud.toast(`${icon("hole")} Locked — beat the Floor ${id * FLOORS_PER_DUNGEON} boss to open this shortcut`);
+    this.audio.deny();
   },
 
   // Is cellar mouth `id` open? The entrance (0) always is; the deeper mouths
@@ -127,14 +101,6 @@ export const dungeonFlowMethods = {
   _shortcutOpen(id) {
     if (id <= 0) return true;
     return Date.now() < (this.shortcutUntil?.[id] ?? 0);
-  },
-
-  // Short "time left" label for an open shortcut (e.g. "2h 41m").
-  _shortcutLabel(id) {
-    const ms = Math.max(0, (this.shortcutUntil?.[id] ?? 0) - Date.now());
-    const mins = Math.ceil(ms / 60000);
-    const h = Math.floor(mins / 60), m = mins % 60;
-    return h > 0 ? `${h}h ${m}m` : `${m}m`;
   },
 
   // Open a deeper mouth's shortcut for the full TTL — called on the host when a
@@ -226,12 +192,12 @@ export const dungeonFlowMethods = {
       </div>
       <div class="pack-panel sheet-card">
         <div class="sheet-title"><span class="big-emoji">${icon("bag")}</span>
-          <div><b>Pack your bag</b><br/><small>gear up, then grab supplies for the delve</small></div>
+          <div><b>Pack your bag</b><br/><small>gear up, then grab supplies for the dive</small></div>
           <button class="icon-btn" id="pack-close">${icon("close")}</button></div>
         ${supplies}
         <div class="sheet-btns">
           <button class="btn deny" id="pack-skip">${icon("close")} Travel light</button>
-          <button class="btn deal" id="pack-go">${icon("hole")} Delve</button>
+          <button class="btn deal" id="pack-go">${icon("hole")} Dive</button>
         </div>
       </div>
     `, "pack-split");

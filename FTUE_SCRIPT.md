@@ -65,4 +65,4 @@ ME: ...So that's what you really left me.
 ME: I'll need to get used to this new life...
 ME: But first, let's do some restocking!
 
-GUIDE: To the cave — delve for more loot  (arrow down the road, then the pit)
+GUIDE: To the cave — dive for more loot  (arrow down the road, then the pit)

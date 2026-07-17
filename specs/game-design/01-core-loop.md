@@ -1,13 +1,13 @@
 # 01 — Core Loop
 
-The game director (`src/game/game.js`) drives a repeating **day → night → delve →
+The game director (`src/game/game.js`) drives a repeating **day → night → dive →
 sleep** cycle, gated by the Guild's debt calendar.
 
 ## The phases
 
 The game tracks a `phase` of either `"day"` or `"night"`, plus a `playerArea` of
 either `"shop"` or `"dungeon"`. These are independent: you can be in the dungeon
-during the day phase, though the intended rhythm is delve at night.
+during the day phase, though the intended rhythm is dive at night.
 
 ```
 ┌──────────── MORNING ────────────┐
@@ -24,7 +24,7 @@ during the day phase, though the intended rhythm is delve at night.
                ▼ (timer hits 0 → nightfall)
 ┌──────────── NIGHT (phase="night") ──────────────┐
 │ customers leave · shop closes                    │
-│ choose: delve the cellar, or sleep              │
+│ choose: dive the cellar, or sleep               │
 └──────────────┬───────────────────────────────────┘
                ▼
 ┌──────────────── DUNGEON (optional) ─────────────┐
@@ -45,7 +45,7 @@ during the day phase, though the intended rhythm is delve at night.
 - **Nightfall:** when the day timer reaches 0, the phase flips to `"night"`,
   customers are dismissed, and the trapdoor/bed become the meaningful actions.
 - **New day:** advancing happens on **sleep** (walk to the bed), not automatically
-  at midnight. This lets a player keep delving into the night before turning in.
+  at midnight. This lets a player keep diving into the night before turning in.
 
 ## The calendar & debt
 
@@ -83,13 +83,13 @@ Each morning the director:
 3. Runs debt collection if the day matches the next installment.
 4. Resets the **daily recap tally** (`today`) — gold earned, deals made, deepest
    floor reached, etc.
-5. Ensures a **fresh dungeon seed** so the first delve of the day is a new layout.
+5. Ensures a **fresh dungeon seed** so the first dive of the day is a new layout.
    (The previous day's dungeon is disposed on sleep.)
 
 ## The dungeon is per-day
 
 The cellar is regenerated each day. When you sleep, `dungeon.dispose()` runs and
-the next delve rolls a fresh seed. You can descend multiple floors within one
+the next dive rolls a fresh seed. You can descend multiple floors within one
 night, but you can't "save your spot" across days — each new day is a fresh
 crawl from floor 1.
 
@@ -107,4 +107,4 @@ gold**, HP is restored, and you respawn in the shop. See
   two places at once.
 - **Co-op:** the manual walk-up flow is used instead (to avoid both clients
   auto-opening the same customer). One player typically stays up top to work
-  customers while the other delves. See [Co-op](05-coop.md).
+  customers while the other dives. See [Co-op](05-coop.md).

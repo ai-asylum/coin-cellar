@@ -175,6 +175,11 @@ export const economyMethods = {
   },
 
   _resolveSale(cust, sold, price, grade) {
+    // remember how this went for the shopper — a gushing "loved it" or a shrug
+    // of a whim if it closed, a "wanted it but…" if the haggle fell through
+    if (cust?.npc) {
+      this.recordNpcReflection(cust.npc, sold ? (cust._boughtLoved ? "boughtLoved" : "boughtWhim") : "passedPricey", cust.slot?.item);
+    }
     if (sold) {
       this.combo = grade === "perfect" ? this.combo + 1 : 0;
       this.today.sold++;
@@ -203,6 +208,7 @@ export const economyMethods = {
     const item = ITEMS[slot.item];
     if (!item) return;
     const price = item.base;
+    if (cust?.npc) this.recordNpcReflection(cust.npc, cust._boughtLoved ? "boughtLoved" : "boughtWhim", slot.item);
     this.shop.unstockSlot(slot);
     cust.state = "happy";
     cust.t = 0;

@@ -1,6 +1,6 @@
 # 04 — Economy & Progression
 
-The whole game is a funnel: **delve → loot → shelve → haggle → gold → pay debt**.
+The whole game is a funnel: **dive → loot → shelve → haggle → gold → pay debt**.
 This document covers the numbers that make that funnel tense.
 
 ## Gold
@@ -8,7 +8,7 @@ This document covers the numbers that make that funnel tense.
 - **Starting gold:** 100.
 - Gold is **shared** in co-op (one host-authoritative wallet).
 - **Kills don't fund you meaningfully** — gold comes from *selling* looted
-  merchandise in the shop. A delve is only worth what you can shelve and sell.
+  merchandise in the shop. A dive is only worth what you can shelve and sell.
 - **Death penalty:** dying in the dungeon costs **50% of your current gold**.
 
 ## The debt schedule (the campaign spine)
@@ -31,7 +31,7 @@ days give way to a scramble.
 
 ### Pacing implication
 
-Each payment window is 3 days of shop revenue plus whatever you delve. The jump
+Each payment window is 3 days of shop revenue plus whatever you dive. The jump
 from 1,100 → 2,400 → 5,200 means you must be reaching deeper dungeon tiers (for
 higher-base loot) and landing more **Perfect** deals as the campaign progresses —
 casual selling of tier-1 goods won't keep up.

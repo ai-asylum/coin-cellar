@@ -5,19 +5,19 @@
 **Coin Cellar** is a mobile-first, co-op **dungeon-crawling shopkeeper** game.
 Run a little item shop that happens to sit on top of a monster-filled cellar.
 By day you stock display tables and **haggle** customers as close to their hidden
-pay limit as you dare. By night you delve seeded procedural floors for the loot
+pay limit as you dare. By night you dive seeded procedural floors for the loot
 you'll sell tomorrow. Every third day the merchant Guild collects on an
 escalating debt — pay all five installments and the deed is yours; miss one and
 you lose the shop.
 
-The co-op twist: one player minds the shop while the other delves. Gold, stock,
+The co-op twist: one player minds the shop while the other dives. Gold, stock,
 and debt are all shared.
 
 > **North star:** *Recettear: An Item Shop's Tale.* "Capitalism, ho!"
 
 ## Design pillars
 
-1. **Two verbs, one economy.** *Delve* (get merchandise) and *Deal* (turn it into
+1. **Two verbs, one economy.** *Dive* (get merchandise) and *Deal* (turn it into
    gold) are separate skill loops that feed the same wallet. Neither works alone:
    loot is worthless unstocked, and an empty dungeon starves the shop.
 2. **Haggle as a minigame, not a menu.** Selling is a nerve game against a hidden
@@ -48,15 +48,15 @@ and debt are all shared.
 
 You are a scrappy shopkeeper-adventurer in debt. The fantasy blends two power
 trips: the **merchant** who fleeces a collector for triple base value with a
-perfect pitch, and the **delver** who dodges a brute's overhead slam and walks
+perfect pitch, and the **diver** who dodges a brute's overhead slam and walks
 out with a Dawn Gem. The game is at its best when the same run swings between
-both — a great haggle funds a deeper delve, which funds the next debt payment.
+both — a great haggle funds a deeper dive, which funds the next debt payment.
 
 ## References & inspiration
 
 - **Recettear: An Item Shop's Tale** — the core loop, haggle grades, debt pressure.
 - **Moonlighter** — dungeon-by-night / shop-by-day structure.
-- Classic top-down action-RPG combat (telegraph → dodge → punish) for the delve.
+- Classic top-down action-RPG combat (telegraph → dodge → punish) for the dive.
 
 ## Scope snapshot (current build)
 

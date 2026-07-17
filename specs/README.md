@@ -1,6 +1,6 @@
 # Coin Cellar — Specs
 
-> *Delve by night, deal by day.*
+> *Dive by night, deal by day.*
 
 This folder is the design and technical reference for **Coin Cellar**, a mobile-first
 co-op dungeon-crawling shopkeeper game (a [Recettear](https://en.wikipedia.org/wiki/Recettear:_An_Item_Shop%27s_Tale)-like)

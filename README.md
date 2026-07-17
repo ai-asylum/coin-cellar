@@ -1,4 +1,4 @@
-# 🏪 Coin Cellar — *delve by night, deal by day*
+# 🏪 Coin Cellar — *dive by night, deal by day*
 
 A mobile-first **co-op dungeon-crawling shopkeeper** built with Three.js.
 [Recettear](https://en.wikipedia.org/wiki/Recettear:_An_Item_Shop%27s_Tale) is
@@ -8,7 +8,7 @@ the dungeon for loot at night, put it on your display tables by day, and
 off the Guild's escalating debt before it repossesses your shop.
 Capitalism, ho!
 
-**Co-op twist:** one player keeps shop while the other delves. Shared gold,
+**Co-op twist:** one player keeps shop while the other dives. Shared gold,
 shared stock, one shared debt. (2-player peer-to-peer over WebRTC — no server.)
 
 ## The loop
@@ -18,7 +18,7 @@ shared stock, one shared debt. (2-player peer-to-peer over WebRTC — no server.
    regular, wealthy, collector) has a hidden tolerance around the item's base
    value; pin within ~8% under their limit for a **PERFECT DEAL** and chain
    combos. Push too hard three times and they storm out.
-2. **🌙 Night** — the shop closes. Open the trapdoor and delve seeded
+2. **🌙 Night** — the shop closes. Open the trapdoor and dive seeded
    procedural floors: skitters, slimes, goblins, wisps and brutes drop the
    gold and merchandise you'll sell tomorrow. Stairs go down, risk goes up,
    tiers of loot get shinier. Get carried out at 0 HP and half your gold
@@ -31,7 +31,7 @@ shared stock, one shared debt. (2-player peer-to-peer over WebRTC — no server.
 | Input | Action |
 | --- | --- |
 | Left drag (anywhere) | virtual joystick — move |
-| Big round button | context action: ⚔️ attack · 🗣️ haggle · 🕳️ delve · 🎁 open · ⬇️ descend · 🏠 return · 🛏️ sleep |
+| Big round button | context action: ⚔️ attack · 🗣️ haggle · 🕳️ dive · 🎁 open · ⬇️ descend · 🏠 return · 🛏️ sleep |
 | `WASD` / arrows + `Space` | same thing on desktop |
 | 🎒 | bag — tap an item to put it on a table |
 | 👥 | co-op — host a 4-letter room code or join one |

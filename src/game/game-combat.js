@@ -20,7 +20,9 @@ const SAFE_ZONE_FLOOR = 3;
 
 // How close a foe must be for the dash to auto-aim onto it. Kept just past the
 // lunge's own travel + reach so it only nudges toward foes it can actually hit.
-const AUTOAIM_RANGE = 3.2;
+// Exported: game.js also squares the hero off with any foe inside this range
+// *before* the press, so the coming strike's target is always telegraphed.
+export const AUTOAIM_RANGE = 3.2;
 // The dash locks onto any foe inside this forward arc (cos(80°) ≈ 0.17): the
 // lunge redirects into that foe and the hero turns to face it. A generous arc
 // so you dive into — and visibly swing toward — off-axis foes, not just the
@@ -30,6 +32,12 @@ const AUTOAIM_FACE_DOT = 0.17;
 // Keep facing the locked foe for this beat past the lunge so the turn reads and
 // your stick doesn't snap the hero straight back the instant the dash ends.
 const AUTOAIM_FACE_HOLD = 0.28;
+// A locked dash winds up before it fires: the hero roots for this beat and
+// coils DASH_WINDBACK radians past the foe's bearing, then whips through it as
+// the lunge launches. The coil guarantees a visible swing on every locked dash
+// — even a foe dead ahead gets a wind-back-and-snap instead of no turn at all.
+const DASH_WINDUP = 0.12;
+const DASH_WINDBACK = 0.55; // ~31° past the foe's bearing
 
 export const combatMethods = {
   // Offset to the nearest living foe within `range` that sits inside the dash's
@@ -54,17 +62,18 @@ export const combatMethods = {
       // only aim at foes aligned enough with the dash direction
       const dist = Math.sqrt(d);
       if ((dx * dirX + dz * dirZ) / dist < minDot) continue;
-      bestD = d; best = { dx, dz, dist };
+      bestD = d; best = { dx, dz, dist, foe: e };
     }
     return best;
   },
 
   // The dash is the whole of your offence now: a quick lunge with brief i-frames
   // that damages every foe it sweeps through (and cracks chests / smashes props
-  // in its path — see Dungeon.dashHit). When a foe is close the lunge auto-aims,
-  // snapping onto the nearest one so you dash straight into the fight. Short cd.
+  // in its path — see Dungeon.dashHit). When a foe is close the dash auto-aims:
+  // the hero plants, coils back past the foe's bearing for a beat, then whips
+  // around into the lunge — the wind-up is what makes the turn readable.
   _dodge() {
-    if (this._dashT >= 0 || this._dodgeCd > 0 || this._respawnT >= 0 || this.gameOver) return;
+    if (this._dashT >= 0 || this._dashWindT >= 0 || this._dodgeCd > 0 || this._respawnT >= 0 || this.gameOver) return;
     const mv = this.input.move;
     let dx, dz;
     if (mv.x || mv.y) {
@@ -76,36 +85,74 @@ export const combatMethods = {
       dx = Math.sin(this.player.heading);
       dz = Math.cos(this.player.heading);
     }
-    // auto-aim: whenever a foe sits within the dash arc, LOCK onto it — the
-    // lunge redirects straight into that foe and the hero turns to face it (and
-    // holds that gaze briefly past the lunge). Because the dash now genuinely
-    // dives into an off-axis foe rather than gliding past, you actually see the
-    // hero swing around toward whatever they're about to strike.
-    const target = this._nearestEnemyWithin(AUTOAIM_RANGE, dx, dz, AUTOAIM_FACE_DOT);
-    if (target) {
-      dx = target.dx / target.dist;
-      dz = target.dz / target.dist;
-      this._dashFaceDX = dx;
-      this._dashFaceDZ = dz;
-      this._dashFaceT = this._dashDur + AUTOAIM_FACE_HOLD;
-    } else {
-      this._dashFaceT = 0;
-    }
-
-    this._dashDX = dx;
-    this._dashDZ = dz;
-    this._dashT = 0;
     this._dodgeCd = 0.55 * (this.stats.dodgeCdMul || 1);
+    // auto-aim: whenever a foe sits within the dash arc, LOCK onto it and wind
+    // up — a rooted beat where nothing moves but the hero's shoulders, so the
+    // pivot toward the foe can't get lost under the lunge's VFX. The lunge
+    // itself fires from _launchDash once the beat runs out (ticked in game.js).
+    const target = this._nearestEnemyWithin(AUTOAIM_RANGE, dx, dz, AUTOAIM_FACE_DOT);
+    if (!target) {
+      this._dashFaceT = 0;
+      this._dashDX = dx;
+      this._dashDZ = dz;
+      this._launchDash(false);
+      return;
+    }
+    this._dashFaceDX = target.dx / target.dist;
+    this._dashFaceDZ = target.dz / target.dist;
+    this._dashFaceT = 0; // no stale gaze-hold may steal the coiled pose
+    this._dashWindFoe = target.foe;
+    this._dashWindT = DASH_WINDUP;
+    // i-frames + solid draw from the press — the wind-up must not add a
+    // vulnerable beat to what used to be an instant dodge
+    this._invulnT = Math.max(this._invulnT, DASH_WINDUP + 0.36);
+    this._dashSolidT = DASH_WINDUP + 0.36;
+    // coil: swing to just past the foe's bearing on the near side, crouched,
+    // so the launch always whips visibly through the target
+    const face = Math.atan2(this._dashFaceDX, this._dashFaceDZ);
+    let d = face - this.player.heading;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    this.player.heading = face - (d >= 0 ? 1 : -1) * DASH_WINDBACK;
+    this.player.animator.squash.kick(3);
+    // and flag the locked foe itself, so there's no doubt who's about to get hit
+    _v.copy(target.foe.creature.position).setY(0.3);
+    this.particles.burst(_v, { color: 0xffd76a, n: 10, speed: 2.4, up: 0.9, gravity: 2.5, life: 0.3, size: 0.8 });
+  },
+
+  // Fire the lunge itself — immediately for a plain (unlocked) dash, or at the
+  // end of the wind-up beat for a locked one (game.js ticks _dashWindT down and
+  // calls this with locked=true).
+  _launchDash(locked) {
+    this._dashWindT = -1;
+    if (locked) {
+      // re-aim at where the foe stands NOW — it may have stepped mid-wind-up
+      const foe = this._dashWindFoe;
+      this._dashWindFoe = null;
+      if (foe && !(foe.deadT >= 0) && !foe.creature.dead) {
+        const fdx = foe.creature.position.x - this.player.position.x;
+        const fdz = foe.creature.position.z - this.player.position.z;
+        const dist = Math.hypot(fdx, fdz);
+        if (dist > 0.01) {
+          this._dashFaceDX = fdx / dist;
+          this._dashFaceDZ = fdz / dist;
+        }
+      }
+      this._dashDX = this._dashFaceDX;
+      this._dashDZ = this._dashFaceDZ;
+      // hold the gaze past the lunge so the stick can't snap the whip short
+      this._dashFaceT = this._dashDur + AUTOAIM_FACE_HOLD;
+    }
+    this._dashT = 0;
     this._invulnT = Math.max(this._invulnT, 0.36); // i-frames through the dash
-    this._dashSolidT = 0.36; // keep the hero drawn solid for that whole window
+    this._dashSolidT = Math.max(this._dashSolidT, 0.36); // drawn solid throughout
     // fresh damage pass for this dash: each foe / chest takes the hit only once
     this._dashHitIds = new Set();
     this._dashCrit = Math.random() < this._crit;
     this._dashDmg = Math.max(1, Math.round(4 * this.stats.dmgMul)) * (this._dashCrit ? 2 : 1);
-    // face the foe on a lock (so the swoosh and the whole body point at it),
-    // otherwise face the lunge line; a heavier squash pop sells the turn-strike
-    const locked = this._dashFaceT > 0;
-    this.player.heading = locked ? Math.atan2(this._dashFaceDX, this._dashFaceDZ) : Math.atan2(dx, dz);
+    // snap heading through the target: from the coiled pose this is the whip
+    // the wind-up promised; a heavier squash pop sells the turn-strike
+    this.player.heading = Math.atan2(this._dashDX, this._dashDZ);
     this.player.animator.squash.kick(locked ? 8 : 5);
     this.audio.dodge();
     // Keep the dash's own VFX: the blue burst at the feet ...

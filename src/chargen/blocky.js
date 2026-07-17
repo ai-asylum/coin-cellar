@@ -5,7 +5,7 @@
 // clips (idle / walk / sprint / attack-melee-right / die / …).
 import * as THREE from "three";
 import { Spring } from "../core/engine.js";
-import { makeBlobShadow } from "../core/toon.js";
+import { makeBlobShadow, makeToonMaterial } from "../core/toon.js";
 import { CHARACTERS, CHAR_VARIANTS } from "./assets.js";
 
 // The rig faces +Z (anatomical left arm sits on +X ⇒ forward = +Z), which
@@ -48,16 +48,27 @@ export class BlockyCreature extends THREE.Group {
     const src = CHARACTERS[variant] || CHARACTERS.a;
     const model = src.scene.clone(true);
 
-    // clone materials so per-instance hurt-flash / tint doesn't leak between
-    // creatures that share a texture template
+    // The Kenney GLBs ship KHR_materials_unlit → THREE.MeshBasicMaterial, so
+    // the stock characters ignore the scene's hemi/sun/fog entirely and stay
+    // full-bright while the toon-shaded world darkens around them. Rebuild each
+    // as a MeshToonMaterial over the same atlas so the player + NPCs pick up the
+    // dusk/dungeon lighting like the floors and walls do. Per-instance so the
+    // hurt-flash / tint below don't leak between creatures sharing a template.
     this._mats = [];
     this._baseColors = [];
     model.traverse((o) => {
       if (o.isMesh) {
-        o.material = o.material.clone();
+        // src is the shared template material (clone(true) copies meshes but
+        // keeps material refs), so read from it but never dispose it here.
+        const src = o.material;
+        const mat = makeToonMaterial({ map: src.map ?? null, rim: 0.18 });
+        mat.transparent = src.transparent;
+        mat.alphaTest = src.alphaTest;
+        mat.side = src.side;
+        o.material = mat;
         o.frustumCulled = false;
-        this._mats.push(o.material);
-        this._baseColors.push(o.material.color.clone());
+        this._mats.push(mat);
+        this._baseColors.push(mat.color.clone());
       }
     });
 

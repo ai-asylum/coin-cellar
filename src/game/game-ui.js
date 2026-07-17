@@ -171,7 +171,7 @@ export const uiMethods = {
     }
     if (!rows.length) {
       const where = inDungeon ? "your bag" : "the storeroom";
-      const hint = inDungeon ? "Loot gear from bosses as you delve." : "Bosses drop gear — bring some home first.";
+      const hint = inDungeon ? "Loot gear from bosses as you dive." : "Bosses drop gear — bring some home first.";
       rows.push(`<div class="gear-empty">${icon(meta.icon)}<span>No ${meta.name.toLowerCase()} in ${where}.<br/><small>${hint}</small></span></div>`);
     }
 
@@ -281,7 +281,7 @@ export const uiMethods = {
       </div>
       <div class="bag-panel sheet-card">
         ${this._bagHead(canDrop ? "sip a potion or drop loot to free space" : inShop ? "store items to stock your shelves" : "everything you carry")}
-        <div class="bag-list">${rows || "<small class='empty'>empty — go delve!</small>"}</div>
+        <div class="bag-list">${rows || "<small class='empty'>empty — go dive!</small>"}</div>
       </div>
     `, `bag-sheet bag-split${refresh ? " bag-refresh" : ""}`, { onBackdrop: () => this.hud.hideSheet() });
     this._wireGearDoll(el, "inv");
@@ -307,6 +307,9 @@ export const uiMethods = {
   // supply down). Shop-only; the button that opens it is hidden underground.
   _toggleStore() {
     if (this.hud.sheetOpen) return this.hud.hideSheet();
+    // shop-only, and only from inside the building — matches the HUD button's
+    // visibility so the V shortcut can't reach it out on the street
+    if (this.playerArea !== "shop" || !this.shop.inBuilding) return;
     this._openStoreSheet();
   },
 
@@ -330,7 +333,7 @@ export const uiMethods = {
         <div class="bag-title"><b>Storeroom</b><small>${n ? `${n} item${n === 1 ? "" : "s"} out back` : "empty"}</small></div>
         <button class="icon-btn" id="store-close">${icon("close")}</button>
       </div>
-      <div class="bag-list">${rows || "<small class='empty'>storeroom empty — go delve!</small>"}</div>
+      <div class="bag-list">${rows || "<small class='empty'>storeroom empty — go dive!</small>"}</div>
     `, `store-sheet bag-sheet sheet-card${refresh ? " bag-refresh" : ""}`, { onBackdrop: () => this.hud.hideSheet() });
     el.querySelector("#store-close").onclick = () => this.hud.hideSheet();
     el.querySelectorAll(".bag-act.take").forEach((btn) => {
@@ -376,7 +379,7 @@ export const uiMethods = {
   // Placement menu opened by the context action at a specific empty table.
   _placeMenu(slot) {
     if (this.hud.sheetOpen) return this.hud.hideSheet();
-    if (this.stash.length === 0) return this.hud.toast("Storeroom is empty — go delve!");
+    if (this.stash.length === 0) return this.hud.toast("Storeroom is empty — go dive!");
     this._tableMenu(slot, {
       title: "Place on this table",
       onPick: (i, slotIdx) => this._stockFromStash(i, slotIdx),
@@ -569,7 +572,7 @@ export const uiMethods = {
         <button data-a="fillbag">${icon("bag")} Fill bag</button>
         <button data-a="stockshelves">${icon("box")} Stock shelves</button>
         <button data-a="clearbag">${icon("trash")} Empty bag</button>
-        <button data-a="delve">${icon("hole")} Delve</button>
+        <button data-a="delve">${icon("hole")} Dive</button>
         <button data-a="floor">${icon("arrowDown")} Next floor</button>
         <button data-a="tpexit">${icon("hole")} TP to exit</button>
         <button data-a="key">${itemIcon("key")} Give key</button>
@@ -590,7 +593,7 @@ export const uiMethods = {
         <button data-a="tut:road">${icon("home")} 2 · Road</button>
         <button data-a="tut:stock">${icon("box")} 3 · Stock</button>
         <button data-a="tut:sell">${icon("speak")} 4 · Sell</button>
-        <button data-a="tut:delve">${icon("hole")} 5 · Delve</button>
+        <button data-a="tut:delve">${icon("hole")} 5 · Dive</button>
       </div>
       <div class="admin-hints">keys: <b>WASD</b> move · <b>Shift/RMB</b> dash-attack · <b>E/Space</b> interact · <b>B</b> bag · <b>C</b> friends · <b>M</b> mute</div>
     `;
@@ -678,13 +681,13 @@ export const uiMethods = {
         if (this.playerArea === "dungeon" && this.dungeon.active) {
           if (this.dungeon.floor >= MAX_DEPTH) this.hud.toast("This is the final boss floor — deepest there is.");
           else this._descend();
-        } else this.hud.toast("Delve first!");
+        } else this.hud.toast("Dive first!");
         break;
       case "tpexit": {
         // hop straight to the floor's way onward — the descent stairs, the boss
         // stairs once conjured, or the gate / up-stairs where nothing else leads
         // deeper. Lands a step to the side so the prompt isn't primed on arrival.
-        if (this.playerArea !== "dungeon" || !this.dungeon.active) { this.hud.toast("Delve first!"); break; }
+        if (this.playerArea !== "dungeon" || !this.dungeon.active) { this.hud.toast("Dive first!"); break; }
         const D = this.dungeon;
         if (D.bossStairs) _v.copy(D.bossStairs.pos);
         else if (D.hasDownStairs) _v.copy(D.stairsPos).add(DUNGEON_ORIGIN);
@@ -789,6 +792,7 @@ export const uiMethods = {
       this.tutorial = tut;
       this._doorScene = true;
       this._noteSpawned = this._notePicked = this._noteRead = true;
+      this.shop.doorLocked = true; // stay shut through the stock step (see _tutAdvance)
       this.stash = [...wares];
       this._syncInv();
     };

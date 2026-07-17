@@ -41,7 +41,7 @@ Host (in shop)                    Friend (must be above ground to accept)
 
 - **Host** simulates the authoritative world: day timer, wallet (gold), customers,
   enemies, dungeon `(floor, seed)`. Only the host persists the save.
-- **Guest** sends **intents** ("I want to hit / take / buy / sell / delve") and
+- **Guest** sends **intents** ("I want to hit / take / buy / sell / dive") and
   renders **snapshots** the host broadcasts. It never decides outcomes itself.
 
 Node identity: `newId()` prefixes IDs with `h` (host) or `g` (guest) so IDs never

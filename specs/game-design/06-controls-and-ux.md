@@ -22,7 +22,7 @@ keyboard+mouse on desktop. Input lives in `src/core/input.js`; the HUD in
 
 ## Menus & dialogs on the keyboard
 
-Every modal sheet — the door prompt, the delve / descend / "go deeper or head
+Every modal sheet — the door prompt, the dive / descend / "go deeper or head
 home" prompts, the storeroom pack list, the pause menu — is fully keyboard
 drivable so desktop players never reach for the mouse mid-flow:
 
@@ -50,7 +50,7 @@ icon and behavior based on what's near the player:
 | --- | --- | --- |
 | Near a customer with a `❗` | Haggle | 🗣️ speak |
 | Near a display table (with bag stock) | Stock item | — |
-| On the trapdoor | Delve | 🕳️ hole |
+| On the trapdoor | Dive | 🕳️ hole |
 | At the bed | Sleep (end day) | 🛏️ bed |
 | At a chest (dungeon) | Open | 🎁 chest |
 | On stairs (dungeon) | Descend | ⬇️ arrow-down |
@@ -67,9 +67,9 @@ The HUD is a DOM overlay (`#hud`) on top of the WebGL canvas (`#app`), styled in
 
 - **Gold counter** and **hearts** (current/max HP).
 - **Day clock / phase indicator** (sun/moon, day number, time remaining).
-- **Bag** panel — the always-available (any area: town, cave lobby, delving) view
+- **Bag** panel — the always-available (any area: town, cave lobby, diving) view
   of what you carry and what you've got equipped; tap items to use consumables.
-  Dropping loot is delve-only (tossing it in town or the cave would just lose it).
+  Dropping loot is dive-only (tossing it in town or the cave would just lose it).
 - **Haggle sheet** — Recettear-style deal UI with flanking character portraits and
   mood faces.
 - **Banners & floaties** — floor announcements, floating gold numbers on sales,
@@ -91,7 +91,7 @@ The HUD is a DOM overlay (`#hud`) on top of the WebGL canvas (`#app`), styled in
 There's a lightweight loading screen while character models preload. The
 first-time flow relies on the pulsing context button and readable icons rather
 than a heavy tutorial: a guide arrow (`hud.guide`) walks the new player through
-**delve → loot → return → stock → open → sell** on day one. The recap sheet at
+**dive → loot → return → stock → open → sell** on day one. The recap sheet at
 sleep reinforces the day's outcomes (gold earned, deals made, deepest floor).
 
 ### FTUE: the landlord scene

@@ -124,7 +124,7 @@ the road`.*
 
 *The hero reaches the door. It doesn't open.*
 
-> **A DUSTY SIGN** — "CLOSED — gone delving. Don't wait up. — the management"
+> **A DUSTY SIGN** — "CLOSED — gone diving. Don't wait up. — the management"
 >
 > **ME** — Closed?! You have GOT to be kidding me.
 
@@ -163,7 +163,7 @@ their shop for the first time:*
 
 > **ME** — "Enough for today," huh… not anymore.
 
-**→ GUIDE:** `To the cave — delve for stock` *(arrow down the road, then onto
+**→ GUIDE:** `To the cave — dive for stock` *(arrow down the road, then onto
 the pit once inside)*
 
 - **Trigger:** the scripted shopper's purchase lands (`_autoSell`).
@@ -200,7 +200,7 @@ Mayor strolls up the road for a word.*
 | "But a town is like a shop, friend — restock it, and the customers come back." | Lovely, but redundant next to the ask. | The Mayor's toast when the **last** lot is rebuilt. |
 | "There's a whole dungeon under your floor." / "Keep the shelves full. I'll handle the rest." | Replaced by the potatoes line + "Go see." | — |
 | "Every dark window here is a family that left." | Died with the overlook scene — a whole walk-outside beat for one (good) line. | The Mayor's praise visit, or ambient villager chatter. |
-| The overlook scene itself (follow the Mayor to the ruins) | An extra escort beat between the sale and the delve; the road now passes the ruins anyway. | — |
+| The overlook scene itself (follow the Mayor to the ruins) | An extra escort beat between the sale and the dive; the road now passes the ruins anyway. | — |
 
 ## Future threads (planted, never resolved here)
 

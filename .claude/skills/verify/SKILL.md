@@ -25,9 +25,13 @@ Boot sequence per page:
 3. `waitForFunction(() => !!window.__game)` — `window.__game` is the debug handle
 
 Useful handles on `__game`:
-- `tutorial = null; _hadSave = true` — skip first-run tutorial
+- `tutorial = null; _hadSave = true; _cine = null; _ftueFreeze = false` — skip
+  the first-run tutorial. Nulling `_cine` matters: the FTUE's opening cutscene
+  short-circuits the whole player update (timers freeze, the script walks the
+  hero around) even after you teleport elsewhere.
 - `playerName = "..."` — identity for lobby presence (skips name UI)
-- `_startDelve()` → sewer; `_holePrompt(k)` + click `#hole-yes` → hole k's dungeon
+- `_delve(0)` → the entrance dungeon (`_delve(k)` for a deeper open mouth);
+  wait for `!_holeDive` after — the dive cutscene also freezes combat timers
 - `player.position.set(...)` to walk; `playerArea`, `dungeon.floor/seed` to assert
 - Multiplayer lobby (Supabase Realtime): `lobby.zone`, `lobby.count`,
   `_lobbyAvatars` — open two browser contexts and assert each sees the other

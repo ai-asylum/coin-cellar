@@ -22,7 +22,7 @@ import { persistenceMethods, SAVE_KEY, NAME_KEY } from "./game-persistence.js";
 import { netMethods } from "./game-net.js";
 import { uiMethods } from "./game-ui.js";
 import { narrativeMethods } from "./game-narrative.js";
-import { combatMethods } from "./game-combat.js";
+import { combatMethods, AUTOAIM_RANGE } from "./game-combat.js";
 import { economyMethods } from "./game-economy.js";
 import { dungeonFlowMethods } from "./game-dungeon-flow.js";
 import { setLayout } from "./layout-store.js";
@@ -102,6 +102,10 @@ export class Game {
     this._dashFaceDX = 0;
     this._dashFaceDZ = 0;
     this._dashFaceT = 0;
+    // the locked dash winds up before it fires: a rooted beat where the hero
+    // coils past the foe's bearing, then whips through it as the lunge launches
+    this._dashWindT = -1;
+    this._dashWindFoe = null;
     this._dashHitIds = null; // foes / chests struck by the current dash (dedupe)
     this._dashDmg = 0;
     this._dashCrit = false;
@@ -147,6 +151,10 @@ export class Game {
     // the Mayor cutscene: a walking NPC driven through the FTUE's scenes (and
     // the praise beat when the first home goes up).
     this._mayor = null;
+    // What each townsperson last thought of their shopping trip, keyed by npc
+    // id — surfaced (once) as their opening line the next time you chat with
+    // them (see recordNpcReflection / _talkToNpc). In-memory flavour only.
+    this._npcMemory = new Map();
     // the FTUE's scripted opening cinematic (see _updateCaveIntro)
     this._cine = null;
 
@@ -260,6 +268,11 @@ export class Game {
     // person it froze is released back onto the move
     if (this._npcChat && !this.hud.speakOpen) this._endNpcChat();
     this.shop.update(dt, elapsed);
+    // Storeroom is the back room — its shortcut only makes sense while the
+    // player is actually inside the building, not out on the street or at the
+    // cave mouth (both of which are still the "shop" area).
+    if (this.playerArea === "shop")
+      this.hud.showStore(this.shop.inBuilding && !this.tutorial);
     this._updateMayor(dt, elapsed);
     this._updateClerk(dt, elapsed);
     this.dungeon.update(dt, elapsed);
@@ -396,6 +409,13 @@ export class Game {
       (underground && this.input.actionEdge);
     if (attackPress && !sheetBlocked) this._dodge();
 
+    // wound up on a locked foe: rooted while the shoulders coil back, then the
+    // lunge itself fires the frame the beat runs out (see _dodge / _launchDash)
+    if (this._dashWindT >= 0) {
+      this._dashWindT -= dt;
+      if (this._dashWindT < 0) this._launchDash(true);
+    }
+
     if (this._dashT >= 0) {
       // committed dash: ease-out lunge along the dash direction, damaging every
       // foe / chest / prop it sweeps through (resolved per frame in _dashStrike)
@@ -409,23 +429,32 @@ export class Game {
       // instead of hanging in the air where the dash began
       this.slash.follow(c.position.x, 0.62, c.position.z);
       if (this._dashT >= this._dashDur) this._dashT = -1;
-    } else if (!sheetBlocked && (mv.x || mv.y)) {
+    } else if (!sheetBlocked && this._dashWindT < 0 && (mv.x || mv.y)) {
       const speed = 3.7 * (this.stats.speedMul || 1); // boots / heavy-armour tweak
       c.position.x += mv.x * speed * dt;
       c.position.z += mv.y * speed * dt;
     }
 
-    // facing: when a dash locked onto a foe, look straight at it for the lunge
-    // plus a short lingering beat (turnRate makes the shoulders visibly swing),
-    // so the auto-aim reads. Otherwise facing follows the direction of travel —
-    // the committed dash direction while lunging, else the movement input.
+    // facing: through a wind-up the hero holds the coiled pose set at the press
+    // (nothing may snap it away — the coil-then-whip IS the turn read); when a
+    // dash locked onto a foe, look straight at it for the lunge plus a short
+    // lingering beat. Otherwise facing follows the direction of travel — the
+    // committed dash direction while lunging, else the movement input.
     if (this._dashFaceT > 0) this._dashFaceT -= dt;
-    if (this._dashFaceT > 0) {
+    if (this._dashWindT >= 0) {
+      // coiled — heading was set once in _dodge, leave it be
+    } else if (this._dashFaceT > 0) {
       c.heading = Math.atan2(this._dashFaceDX, this._dashFaceDZ);
     } else if (this._dashT >= 0) {
       c.heading = Math.atan2(this._dashDX, this._dashDZ);
-    } else if (!sheetBlocked && (mv.x || mv.y)) {
-      c.heading = Math.atan2(mv.x, mv.y);
+    } else if (!sheetBlocked) {
+      // inside auto-aim range the hero squares off with the nearest foe —
+      // standing or strafing — so who the next dash will strike is telegraphed
+      // before the press ever lands. The stick only steers facing when nothing
+      // is close enough to fight. (minDot -2: any bearing, no forward-arc cut.)
+      const foe = this._nearestEnemyWithin(AUTOAIM_RANGE, 0, 0, -2);
+      if (foe) c.heading = Math.atan2(foe.dx, foe.dz);
+      else if (mv.x || mv.y) c.heading = Math.atan2(mv.x, mv.y);
     }
     const colliders = this.playerArea === "shop" ? this.shop.playerColliders
       : this.playerArea === "cave" ? this.cave.colliders : this.dungeon.colliders;
@@ -635,7 +664,7 @@ export class Game {
           if (hole.id === 0 && !this.cave.trapdoorOpen) continue;
           if (!this._shortcutOpen(hole.id))
             return { label: "warning", hint: "Locked", fn: () => this._holePrompt(hole.id), focus: _v.clone().setY(0.06), color: 0x9aa0aa };
-          return { label: "hole", hint: hole.name, fn: () => this._holePrompt(hole.id), focus: _v.clone().setY(0.06), color: hole.color };
+          return { label: "hole", hint: hole.name, fn: () => this._delve(hole.id), focus: _v.clone().setY(0.06), color: hole.color };
         }
       }
       return { label: null };
@@ -949,7 +978,7 @@ export class Game {
       if (slot.disabled) return;
       if (slot.item) this._replaceMenu(slot);
       else if (this.stash.length > 0) this._placeMenu(slot);
-      else this.hud.toast("Storeroom's empty — delve for stock.");
+      else this.hud.toast("Storeroom's empty — dive for stock.");
     }
   }
 

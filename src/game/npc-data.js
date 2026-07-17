@@ -17,53 +17,78 @@
 // fans splurge like Collectors, snooty and smug folk buy like the Wealthy,
 // grumbling cranky and can't-be-bothered lazy types pinch coins like
 // Cheapskates, and the steady normal/jock/sisterly crowd shop as Regulars.
+//
+// `taste` is what *kind* of thing tempts them (the archetype only sets how much
+// they'll pay). `kinds` multiplies an item's appeal by its kind (see itemKind
+// in items.js: food / weapon / gear / treasure) — >1 draws them to it, <1 turns
+// their nose up. `tierLean` biases them toward cheap-and-cheerful (negative) or
+// rare-and-costly (positive) goods on top of that. A shopper's favourite is the
+// item that scores highest across these, so who buys what now reads off their
+// personality: the Lazy go for snacks, the Jocks for heavy weapons, the Snooty
+// for glittering treasure.
 export const PERSONALITIES = {
   peppy: {
     name: "Peppy",
     mood: "faceStar",
     archetype: "Collector",
+    // starry-eyed magpies — everything's exciting, sparkly treasure most of all
+    taste: { kinds: { food: 1.15, weapon: 1.0, gear: 1.1, treasure: 1.4 }, tierLean: 0.3 },
     blurb: "Bubbly, breathless and starry-eyed. Everything is the best thing ever.",
   },
   lazy: {
     name: "Lazy",
     mood: "faceNeutral",
     archetype: "Cheapskate",
+    // snack-minded and thrifty — a bite to eat beats anything they'd have to carry
+    taste: { kinds: { food: 1.8, weapon: 0.7, gear: 0.8, treasure: 0.9 }, tierLean: -0.5 },
     blurb: "Easygoing and snack-minded. Would rather nap than hurry anywhere.",
   },
   cranky: {
     name: "Cranky",
     mood: "faceAngry",
     archetype: "Cheapskate",
+    // practical old grumps — useful kit over frippery, and nothing overpriced
+    taste: { kinds: { food: 1.0, weapon: 1.15, gear: 1.3, treasure: 0.6 }, tierLean: -0.6 },
     blurb: "Gruff and grumbling on the outside, quietly rooting for you underneath.",
   },
   snooty: {
     name: "Snooty",
     mood: "faceMonocle",
     archetype: "Wealthy",
+    // only the finest — rare treasure and fine trinkets; food is beneath them
+    taste: { kinds: { food: 0.5, weapon: 0.75, gear: 1.2, treasure: 1.7 }, tierLean: 1.0 },
     blurb: "Haughty and image-conscious. Only the finest will do, darling.",
   },
   jock: {
     name: "Jock",
     mood: "faceSmile",
     archetype: "Regular",
+    // gains-focused — big weapons and gear to haul, plus protein
+    taste: { kinds: { food: 1.1, weapon: 1.7, gear: 1.4, treasure: 0.7 }, tierLean: 0.2 },
     blurb: "All energy and gains. Turns every errand into a workout.",
   },
   normal: {
     name: "Normal",
     mood: "faceHappy",
     archetype: "Regular",
+    // level-headed homebodies — a soft spot for homely food, otherwise even-handed
+    taste: { kinds: { food: 1.3, weapon: 0.95, gear: 1.05, treasure: 1.0 }, tierLean: 0.0 },
     blurb: "Warm, level-headed and neighbourly. The heart of the town.",
   },
   smug: {
     name: "Smug",
     mood: "faceRoll",
     archetype: "Wealthy",
+    // image is everything — luxury treasure and status trinkets to be admired with
+    taste: { kinds: { food: 0.7, weapon: 0.9, gear: 1.3, treasure: 1.6 }, tierLean: 0.8 },
     blurb: "Smooth, polished and endlessly charming — mostly to themselves.",
   },
   sisterly: {
     name: "Sisterly",
     mood: "faceHuff",
     archetype: "Regular",
+    // caretakers — food to feed folk and sturdy gear that'll last, no fuss
+    taste: { kinds: { food: 1.4, weapon: 1.0, gear: 1.15, treasure: 0.9 }, tierLean: -0.1 },
     blurb: "Tough-talking big-sibling type who looks out for everyone.",
   },
 };
@@ -100,6 +125,24 @@ export function npcLinesFor(npc, hour) {
 export const NPCS = [
   {
     id: "pip", name: "Pip", variant: "b", personality: "peppy",
+    buyLines: {
+      boughtLoved: [
+        "I got the {item}! The {item}!! Best buy of my WHOLE life, hee!",
+        "Eeee, I bought a {item} and I already love it more than words!",
+      ],
+      boughtWhim: [
+        "I didn't NEED the {item}, but my hand just grabbed it, hee!",
+        "Oops, bought a {item}! No regrets. Okay, a tiny one. No, none!",
+      ],
+      passedPricey: [
+        "I wanted that {item} SO bad, but eee, my coins said no!",
+        "The {item} was calling my name! I was strong though. Barely!",
+      ],
+      passedMeh: [
+        "Nothing jumped out at me today, can you believe it?!",
+        "I looked at EVERYTHING and my heart didn't go boing. Weird!",
+      ],
+    },
     lines: {
       morning: [
         "Morning morning MORNING! Best part of the day, obviously!",
@@ -133,6 +176,24 @@ export const NPCS = [
   },
   {
     id: "barrow", name: "Barrow", variant: "c", personality: "cranky",
+    buyLines: {
+      boughtLoved: [
+        "Got myself a {item}. Don't tell anyone I'm pleased. Hmph.",
+        "That {item}'s a proper bit of kit. Worth the coin, not that I'd say so.",
+      ],
+      boughtWhim: [
+        "Bought a {item}. Don't rightly know why. Momentary weakness.",
+        "Walked out with a {item}. Bah. Impulse. Won't happen again.",
+      ],
+      passedPricey: [
+        "That {item} caught my eye, then I saw the price. Robbery.",
+        "Wanted the {item}. Not at that price, I didn't. Hmph.",
+      ],
+      passedMeh: [
+        "Nothing worth my coin today. Same as most days.",
+        "Bah. Looked, saw nothing, left. Story of my life.",
+      ],
+    },
     lines: {
       morning: [
         "Hmph. Up at this hour? Least you've got some sense.",
@@ -166,6 +227,24 @@ export const NPCS = [
   },
   {
     id: "tansy", name: "Tansy", variant: "d", personality: "normal",
+    buyLines: {
+      boughtLoved: [
+        "I picked up a lovely {item}, dear. Just what I was after!",
+        "That {item}'s a little treasure. I'm ever so glad I got it.",
+      ],
+      boughtWhim: [
+        "I treated myself to a {item}. A bit silly, but why not, dear!",
+        "Bought a {item} on a whim. Don't tell my sensible side.",
+      ],
+      passedPricey: [
+        "I did fancy that {item}, but I thought better of it today.",
+        "That {item} was tempting, dear. Maybe another day.",
+      ],
+      passedMeh: [
+        "Nothing quite caught me today, but it was nice to browse.",
+        "I had a good look round, dear, but nothing came home with me.",
+      ],
+    },
     lines: {
       morning: [
         "Good morning! Isn't it a lovely one? Fresh and bright.",
@@ -199,11 +278,29 @@ export const NPCS = [
   },
   {
     id: "nib", name: "Nib the Clerk", variant: "e", personality: "normal", reserved: true,
+    buyLines: {
+      boughtLoved: [
+        "Treated myself to a {item}. Old habits — I do know a good one.",
+        "Got a {item}. Even a retired clerk can't resist a fine piece.",
+      ],
+      boughtWhim: [
+        "Bought a {item}. Force of habit more than need, I'll admit.",
+        "Walked out with a {item}. The counter instinct never quite leaves you.",
+      ],
+      passedPricey: [
+        "Eyed that {item}, but I've priced enough goods to know when to wait.",
+        "The {item} tempted me. I put it back. Discipline, that.",
+      ],
+      passedMeh: [
+        "Nothing I needed today. Just keeping my eye in.",
+        "Had a browse, bought nowt. Sometimes that's the sensible call.",
+      ],
+    },
     lines: {
       morning: [
         "Morning! Or is it? Hard to keep track down in that cave.",
         "Counter's all yours now. Suits you better than it did me.",
-        "We keep an early eye out for delvers. Habit, I suppose.",
+        "We keep an early eye out for divers. Habit, I suppose.",
         "Fresh start every day. That's the shopkeeper's life.",
         "Holler if you need a hand. That's what I'm here for.",
       ],
@@ -232,6 +329,24 @@ export const NPCS = [
   },
   {
     id: "rocco", name: "Rocco", variant: "f", personality: "jock",
+    buyLines: {
+      boughtLoved: [
+        "Grabbed a {item}! Perfect for the grind, champ! LET'S GO!",
+        "Got the {item}! Feel the GAINS already, no joke!",
+      ],
+      boughtWhim: [
+        "Bought a {item}. Didn't plan to, but hey, spontaneity's a muscle too!",
+        "Snagged a {item} outta nowhere. Impulse rep, ha!",
+      ],
+      passedPricey: [
+        "That {item} looked awesome, but my wallet needed a rest day.",
+        "Wanted the {item}, champ, but I'm savin' up for the big lift!",
+      ],
+      passedMeh: [
+        "Nothin' got my heart rate up today. Rare, I know!",
+        "Browsed the whole floor, no burn. Maybe tomorrow, champ!",
+      ],
+    },
     lines: {
       morning: [
         "YO! Morning workout DONE. Now I'm ready to shop!",
@@ -265,6 +380,24 @@ export const NPCS = [
   },
   {
     id: "marlowe", name: "Marlowe", variant: "g", personality: "smug",
+    buyLines: {
+      boughtLoved: [
+        "I acquired a {item}. It suits me, naturally. Everything does.",
+        "The {item} is mine now. It was practically begging to be seen with me.",
+      ],
+      boughtWhim: [
+        "I bought a {item} on a whim. My whims have exquisite taste.",
+        "A {item}? Impulse. Though even my impulses are rather refined.",
+      ],
+      passedPricey: [
+        "That {item} was tempting, but I don't chase — things come to me.",
+        "I admired the {item}. Admiring is often enough, don't you find?",
+      ],
+      passedMeh: [
+        "Nothing quite lived up to me today. A common problem.",
+        "I browsed, I dazzled, I bought nothing. The shop's loss.",
+      ],
+    },
     lines: {
       morning: [
         "Good morning, and what a fetching one — much like myself.",
@@ -298,6 +431,24 @@ export const NPCS = [
   },
   {
     id: "clementine", name: "Clementine", variant: "h", personality: "snooty",
+    buyLines: {
+      boughtLoved: [
+        "I secured the {item}. Finally, something with a shred of taste.",
+        "The {item} is acceptable. High praise, from me, darling.",
+      ],
+      boughtWhim: [
+        "I bought a {item}. A lapse. Even I have my careless moments.",
+        "A {item}? An impulse purchase. Do not make me regret it.",
+      ],
+      passedPricey: [
+        "The {item} was almost worthy. Almost. I'll wait for better.",
+        "I considered the {item}, but one mustn't reward the mediocre.",
+      ],
+      passedMeh: [
+        "Nothing here met my standards today. Quelle surprise.",
+        "I saw nothing worth my coin. Do try harder, darling.",
+      ],
+    },
     lines: {
       morning: [
         "Morning. This town could use a touch of taste before noon.",
@@ -331,6 +482,24 @@ export const NPCS = [
   },
   {
     id: "sunny", name: "Sunny", variant: "i", personality: "peppy",
+    buyLines: {
+      boughtLoved: [
+        "I got a {item}! Ahh, it's SO me, I can't even!",
+        "The {item} is MINE now and I love-love-LOVE it!",
+      ],
+      boughtWhim: [
+        "Bought a {item} without thinking! Best kind of buying, wheee!",
+        "Oops, a {item} followed me home! Impulse, hee!",
+      ],
+      passedPricey: [
+        "I really wanted that {item}, but I'm being good with my coins!",
+        "The {item} was so shiny, ahh! Saving up though, gotta be strong!",
+      ],
+      passedMeh: [
+        "Nothing sparkled at me today, weird huh?!",
+        "Looked at it all and my heart just went 'meh'. So rare!",
+      ],
+    },
     lines: {
       morning: [
         "Morning! The sun's up and I'm SO ready, ahh!",
@@ -364,6 +533,24 @@ export const NPCS = [
   },
   {
     id: "ozzie", name: "Ozzie", variant: "j", personality: "lazy",
+    buyLines: {
+      boughtLoved: [
+        "Got a {item}. Worth wakin' up for, honestly. Rare praise.",
+        "Mmn, bought a {item}. Snack-tier purchase. Very satisfied.",
+      ],
+      boughtWhim: [
+        "Bought a {item}. Dunno why. Seemed like less effort than not to.",
+        "A {item} just kinda ended up in my hands. Too tired to say no.",
+      ],
+      passedPricey: [
+        "Sorta wanted that {item}, but reachin' for my coins? Effort.",
+        "The {item} looked alright. Not 'get-up-and-pay' alright, though.",
+      ],
+      passedMeh: [
+        "Nothin' grabbed me. Then again, I wasn't grabbin' hard.",
+        "Looked around, got sleepy, left. Standard trip, really.",
+      ],
+    },
     lines: {
       morning: [
         "Mmn... mornin'. Is it though? Feels too early for that.",
@@ -397,6 +584,24 @@ export const NPCS = [
   },
   {
     id: "delphine", name: "Delphine", variant: "k", personality: "sisterly",
+    buyLines: {
+      boughtLoved: [
+        "Snagged a {item}, hon. Just the thing — big sib knows quality.",
+        "Got a {item}. Real pleased with it, kiddo. You stock good stuff.",
+      ],
+      boughtWhim: [
+        "Treated myself to a {item}. Don't usually, but eh, why not.",
+        "Bought a {item} on a whim. Even I'm allowed a little something.",
+      ],
+      passedPricey: [
+        "Had my eye on that {item}, kiddo, but I held off this time.",
+        "The {item} tempted me, hon. I'll come back for it, maybe.",
+      ],
+      passedMeh: [
+        "Nothin' called to me today, but your shop's lookin' good.",
+        "Browsed a while, bought nothin'. No harm in lookin', kiddo.",
+      ],
+    },
     lines: {
       morning: [
         "Mornin', kiddo! Up with the sun, good on ya.",
@@ -430,6 +635,24 @@ export const NPCS = [
   },
   {
     id: "gus", name: "Gus", variant: "l", personality: "lazy",
+    buyLines: {
+      boughtLoved: [
+        "Got a {item}. Effort well spent, and I don't say that lightly.",
+        "Mmn, a {item}. That one's worth the walk over. Cozy buy.",
+      ],
+      boughtWhim: [
+        "Bought a {item}. Was easier than decidin' not to, y'know?",
+        "A {item} sorta happened. I let it. Too comfy to argue.",
+      ],
+      passedPricey: [
+        "Kinda wanted the {item}. Kinda didn't wanna spend. Guess who won.",
+        "The {item} was nice. My coins were nicer where they were, though.",
+      ],
+      passedMeh: [
+        "Nothin' woke me up today. Which, fair, takes a lot.",
+        "Had a look. Had a yawn. Left empty-handed. Classic.",
+      ],
+    },
     lines: {
       morning: [
         "Mmn? Oh, mornin'. I was restin' my eyes. And my legs.",
@@ -463,6 +686,24 @@ export const NPCS = [
   },
   {
     id: "vera", name: "Vera", variant: "m", personality: "snooty",
+    buyLines: {
+      boughtLoved: [
+        "I claimed the {item}. At last, an item of genuine breeding.",
+        "The {item} will do nicely. And I am not easily done nicely by.",
+      ],
+      boughtWhim: [
+        "I bought a {item}. A moment of weakness. It happens to the best.",
+        "A {item}, on impulse. Even my impulses outclass most people's plans.",
+      ],
+      passedPricey: [
+        "The {item} nearly tempted me. Nearly. I have standards to keep.",
+        "I inspected the {item} and found it wanting. As I found everything.",
+      ],
+      passedMeh: [
+        "Nothing today rose to my level. Predictable, frankly.",
+        "I saw not one thing worth owning. Do restock with taste.",
+      ],
+    },
     lines: {
       morning: [
         "You may address me. Yes, I'm this fabulous before noon.",
@@ -496,6 +737,24 @@ export const NPCS = [
   },
   {
     id: "bruno", name: "Bruno", variant: "n", personality: "jock",
+    buyLines: {
+      boughtLoved: [
+        "YESSS, got a {item}! This is gonna be great for the grind!",
+        "Bought a {item}, champ! Feels HEAVY, feels GOOD, whoo!",
+      ],
+      boughtWhim: [
+        "Grabbed a {item} on impulse! Sometimes ya just gotta send it!",
+        "Bought a {item} outta nowhere. No plan, all vibes, ha!",
+      ],
+      passedPricey: [
+        "That {item} was sweet, but I gotta save up for the big gains!",
+        "Wanted the {item}, champ. Rest day for the wallet, though!",
+      ],
+      passedMeh: [
+        "Nothin' pumped me up today. Weird workout, this shoppin'!",
+        "Did a full lap, nothin' clicked. Catch the gains next time!",
+      ],
+    },
     lines: {
       morning: [
         "HEY HEY! Push-ups done, sun's up, let's GO!",
@@ -529,6 +788,24 @@ export const NPCS = [
   },
   {
     id: "hazel", name: "Hazel", variant: "o", personality: "normal",
+    buyLines: {
+      boughtLoved: [
+        "I got a lovely {item}, dear. Just perfect — I'm so pleased.",
+        "That {item} was made for me, I'd say. A little joy, that.",
+      ],
+      boughtWhim: [
+        "I treated myself to a {item}. A touch indulgent, but there we are.",
+        "Bought a {item} on a whim, dear. Even bakers deserve a surprise.",
+      ],
+      passedPricey: [
+        "I did like that {item}, but I'll think on it a while yet.",
+        "The {item} tempted me, dear. Perhaps when I've saved a little.",
+      ],
+      passedMeh: [
+        "Nothing quite spoke to me today, but it was lovely to look.",
+        "Had a browse and a good think. Nothing came home, though.",
+      ],
+    },
     lines: {
       morning: [
         "Good morning! I baked too much bread again. Want some?",
@@ -562,11 +839,29 @@ export const NPCS = [
   },
   {
     id: "silas", name: "Silas", variant: "p", personality: "smug",
+    buyLines: {
+      boughtLoved: [
+        "I acquired a {item}. A fine piece — fitting, for a fine fellow.",
+        "The {item} is mine. It pairs beautifully with my jawline.",
+      ],
+      boughtWhim: [
+        "Bought a {item} on impulse. My instincts, like me, are impeccable.",
+        "A {item}? A whim. But a gentleman's whims are never wrong.",
+      ],
+      passedPricey: [
+        "The {item} was tempting, but a gentleman never appears eager.",
+        "I let the {item} be. Restraint is its own kind of elegance.",
+      ],
+      passedMeh: [
+        "Nothing measured up to me today. A recurring theme, I fear.",
+        "I graced the shop, admired myself, and left. Nothing else compelled me.",
+      ],
+    },
     lines: {
       morning: [
         "Ah, the shopkeeper. And me, radiant as the morning. Fancy.",
         "I rose early. The mirror and I had much to discuss.",
-        "A gentleman never delves in a wrinkled shirt. Remember that.",
+        "A gentleman never dives in a wrinkled shirt. Remember that.",
         "You drive a hard bargain — nearly as hard as my jawline.",
         "Farewell for now. Try to have a passable morning.",
       ],
@@ -595,6 +890,24 @@ export const NPCS = [
   },
   {
     id: "mayor", name: "The Mayor", variant: "q", personality: "smug", reserved: true,
+    buyLines: {
+      boughtLoved: [
+        "I procured a {item}! A fine addition to a fine town. Mine, mostly.",
+        "The {item} is mine — an investment in civic splendour, naturally.",
+      ],
+      boughtWhim: [
+        "I bought a {item} on impulse. A mayor's caprice stimulates the economy!",
+        "A spontaneous {item}! Commerce in action. You're welcome, town.",
+      ],
+      passedPricey: [
+        "The {item} tempted me, but a prudent mayor watches the treasury.",
+        "I admired the {item}. Fiscal restraint stayed my hand — re-election, you see.",
+      ],
+      passedMeh: [
+        "Nothing today befitted my office. We'll fund better stock, perhaps.",
+        "I surveyed the wares and bought nothing. A mayor mustn't be seen to overspend.",
+      ],
+    },
     lines: {
       morning: [
         "Ah, the heir! Up early — the pride of our little town!",
@@ -628,6 +941,24 @@ export const NPCS = [
   },
   {
     id: "maple", name: "Maple", variant: "r", personality: "sisterly",
+    buyLines: {
+      boughtLoved: [
+        "Got myself a {item}, kid. Just right — you pick good stock.",
+        "Snagged a {item} and I couldn't be happier, champ. Solid find.",
+      ],
+      boughtWhim: [
+        "Treated myself to a {item}. Don't usually splurge, but hey.",
+        "Bought a {item} on a whim, kid. Even I get to be spontaneous.",
+      ],
+      passedPricey: [
+        "Had my eye on that {item}, but I'll hold off for now, champ.",
+        "The {item} was callin' me, kid. Comin' back for it, though.",
+      ],
+      passedMeh: [
+        "Nothin' grabbed me today, but the shop's lookin' great, kid.",
+        "Browsed a bit, bought nothin'. No shame in a look-round, champ.",
+      ],
+    },
     lines: {
       morning: [
         "Mornin', champ! There's the new owner, up bright and early.",
@@ -661,9 +992,11 @@ export const NPCS = [
   },
 ];
 
-// The ambient crowd draws from everyone except the scripted cameos, so the
-// Mayor's and the Clerk's skins stay free for their set-pieces.
-export const CROWD_NPCS = NPCS.filter((n) => !n.reserved);
+// The ambient crowd is the whole town — everyone roams the street and shops,
+// the Mayor and the Clerk included. Their scripted set-pieces (see
+// game-narrative.js) briefly "hold" their skin so no doppelgänger roams while
+// the cameo is on stage; the `reserved` flag just tags who has such a cameo.
+export const CROWD_NPCS = NPCS;
 
 const _byId = new Map(NPCS.map((n) => [n.id, n]));
 const _byVariant = new Map(NPCS.map((n) => [n.variant, n]));
@@ -686,4 +1019,198 @@ export function personalityName(npc) {
 // Returns an ARCHETYPES name (see shop-data.js); defaults to "Regular".
 export function personalityArchetype(npc) {
   return PERSONALITIES[npc?.personality]?.archetype || "Regular";
+}
+
+// A townsperson's taste (see PERSONALITIES.taste) — what kind of goods tempt
+// them and whether they lean cheap or costly. Always returns a usable shape so
+// callers can read `.kinds[kind]` (defaulting to 1) and `.tierLean` safely.
+const _DEFAULT_TASTE = { kinds: {}, tierLean: 0 };
+export function personalityTaste(npc) {
+  return PERSONALITIES[npc?.personality]?.taste || _DEFAULT_TASTE;
+}
+
+// The four outcomes a shopper reflects on after a visit — what they'll tell the
+// player next time they chat (see game-narrative _talkToNpc). `item` = whether
+// the line refers to a specific item (so the sim knows to fill {item} in).
+export const REFLECTION_BUCKETS = [
+  { id: "boughtLoved", label: "Loved it & bought", item: true },
+  { id: "boughtWhim", label: "Bought on a whim", item: true },
+  { id: "passedPricey", label: "Wanted it, passed", item: true },
+  { id: "passedMeh", label: "Nothing caught their eye", item: false },
+];
+
+// Pick one of an NPC's purchase-reasoning lines for the given outcome bucket,
+// filling in {item} with the item's name. `roll` is a 0–1 number (so callers
+// can seed it); returns null if the NPC has no line for that bucket.
+export function npcBuyLine(npc, bucket, itemName = "", roll = Math.random()) {
+  const pool = npc?.buyLines?.[bucket];
+  if (!pool || !pool.length) return null;
+  const line = pool[Math.floor(roll * pool.length) % pool.length];
+  return line.replace(/\{item\}/g, itemName || "that");
+}
+
+// Item-specific reactions: certain signature items get a bespoke line instead of
+// the generic templated one, only when they actually *buy* it (loved it, or an
+// out-of-character whim). Curated per personality voice — the items echo what
+// that temperament already goes on about (Peppy's sparkly treasures, the Lazy's
+// snacks, Cranky's honest cave kit, the Snooty/Smug's finery, the Jock's heavy
+// gear, the homely Normal/Sisterly's food). Keyed by personality → item id →
+// bucket. Any item/bucket without an entry simply falls back to buyLines.
+// {item} is still filled in with the item's name.
+export const SPECIAL_REACTIONS = {
+  peppy: {
+    gem: {
+      boughtLoved: ["A {item}! It's like holding a tiny sunrise, eee! Mine forever!"],
+      boughtWhim: ["The {item} sparkled and POOF, my coins were gone. Worth every one!"],
+    },
+    star: {
+      boughtLoved: ["I got a {item}! An actual STAR! I'm basically cosmic now, hee!"],
+      boughtWhim: ["The {item} twinkled at me. What was I gonna do, NOT buy it?!"],
+    },
+    crystal: {
+      boughtLoved: ["My very own {item}! All purple and glittery, I can't cope!"],
+      boughtWhim: ["Grabbed a {item} 'cause it shimmered. Totally valid reason, right?!"],
+    },
+    crown: {
+      boughtLoved: ["A {item}?! I'm ROYALTY now! Okay, a shopkeeper's pal with a crown!"],
+      boughtWhim: ["Bought a {item} on impulse and now I'm fancy. No big deal, hee!"],
+    },
+  },
+  lazy: {
+    bread: {
+      boughtLoved: ["Got the {item}. Warm, soft, no chewin' effort. Perfect food, honestly."],
+      boughtWhim: ["The {item} was right there. Reachin' for it was the most I've moved all day."],
+    },
+    meat: {
+      boughtLoved: ["A whole {item}. Now THIS is worth stayin' awake for. Mmn."],
+      boughtWhim: ["Bought a {item}. Didn't plan to. Smelled good. That's the whole story."],
+    },
+    mushroom: {
+      boughtLoved: ["Snagged a {item}. Snack of champions. Well, snack of nappers."],
+      boughtWhim: ["A {item} kinda fell into my hands. Wasn't gonna fight it."],
+    },
+    jelly: {
+      boughtLoved: ["The {item} wobbles AND you can eat it. Two hobbies in one. Love it."],
+      boughtWhim: ["Bought a {item}. It jiggled. I was powerless, honestly."],
+    },
+  },
+  cranky: {
+    lantern: {
+      boughtLoved: ["Got a {item}. A body needs light down that cave. Sensible purchase."],
+      boughtWhim: ["Bought a {item}. Well. Beats stubbin' my toe in the dark, I suppose."],
+    },
+    shield: {
+      boughtLoved: ["A {item}. Now that's honest kit. Keeps a fool from gettin' flattened."],
+      boughtWhim: ["Walked out with a {item}. Bah. Can't say it won't come in handy."],
+    },
+    wsword: {
+      boughtLoved: ["Got the {item}. Simple, sturdy, does the job. Like things used to be made."],
+      boughtWhim: ["Bought a {item}. Don't need it. Might. Hmph."],
+    },
+    boots: {
+      boughtLoved: ["The {item}. My knees'll thank me, and they never thank anyone."],
+      boughtWhim: ["Bought {item}. My old ones had holes. Fine. There, I said it."],
+    },
+  },
+  snooty: {
+    crown: {
+      boughtLoved: ["The {item} is mine. Finally, something befitting one's station."],
+      boughtWhim: ["I acquired a {item}. A whim, but a regal one, naturally."],
+    },
+    gem: {
+      boughtLoved: ["A {item} of true quality. I shall be the envy of lesser browsers."],
+      boughtWhim: ["The {item} caught the light just so. One does deserve nice things."],
+    },
+    amulet: {
+      boughtLoved: ["The {item} has breeding. I can always tell. It's a gift, really."],
+      boughtWhim: ["I took the {item}. An indulgence. I am, after all, worth it."],
+    },
+    ring: {
+      boughtLoved: ["This {item} is almost tasteful enough for my hand. Almost. I'll allow it."],
+      boughtWhim: ["A {item}, on impulse. Even careless, I have exquisite instincts."],
+    },
+  },
+  jock: {
+    ssword: {
+      boughtLoved: ["Got the {item}! Look at the WEIGHT on this, champ! Gains incoming!"],
+      boughtWhim: ["Grabbed a {item} on impulse. It's heavy. Heavy is good. Sold!"],
+    },
+    armor: {
+      boughtLoved: ["The {item}! Extra weight to haul AND it guards the gains. Perfect!"],
+      boughtWhim: ["Bought {item} outta nowhere. Feels like a weighted vest. LOVE that!"],
+    },
+    shield: {
+      boughtLoved: ["A {item}, champ! Great for blockin' AND for arm day. Two-in-one!"],
+      boughtWhim: ["Snagged a {item}. Didn't need it. Do now. That's how it works, ha!"],
+    },
+    fang: {
+      boughtLoved: ["The {item}! A trophy AND a workout to carry. Whoo, let's GO!"],
+      boughtWhim: ["Bought a {item} on a whim. It's heavy, it's metal. Say no more!"],
+    },
+  },
+  normal: {
+    bread: {
+      boughtLoved: ["Got a lovely {item}, dear. Fresh-baked's the heart of a good day."],
+      boughtWhim: ["Bought a {item} on a whim. You can never have too much, can you?"],
+    },
+    herb: {
+      boughtLoved: ["The {item}! Just the thing for the pot tonight. Ever so pleased."],
+      boughtWhim: ["Picked up a {item}, dear. It'll come in handy in the kitchen, I'm sure."],
+    },
+    meat: {
+      boughtLoved: ["A fine {item}, dear. That's supper sorted, and a happy table with it."],
+      boughtWhim: ["Bought a {item} on impulse. A little treat for the household, why not."],
+    },
+    potion: {
+      boughtLoved: ["Got a {item} — for scrapes and sniffles. Best to be prepared, dear."],
+      boughtWhim: ["Took a {item} home. One likes to keep something handy for a poorly day."],
+    },
+  },
+  smug: {
+    amulet: {
+      boughtLoved: ["The {item} suits me. Then again, what doesn't? A fine acquisition."],
+      boughtWhim: ["I took a {item} on a whim. It'll look marvellous against my collar."],
+    },
+    ring: {
+      boughtLoved: ["This {item} was made for a hand like mine. Elegant. Effortless. Me."],
+      boughtWhim: ["A spontaneous {item}. My fingers, like the rest of me, deserve adornment."],
+    },
+    crown: {
+      boughtLoved: ["A {item}. Some are born to wear such things. I simply bought one."],
+      boughtWhim: ["I acquired a {item}. Overkill? For anyone else. For me, merely fitting."],
+    },
+    bell: {
+      boughtLoved: ["The {item} rings as sweetly as my reputation. Naturally I bought it."],
+      boughtWhim: ["A {item}, on a whim. It'll announce my arrivals rather handsomely."],
+    },
+  },
+  sisterly: {
+    bread: {
+      boughtLoved: ["Got the {item}, kid. Nobody in my house goes hungry, not on my watch."],
+      boughtWhim: ["Bought a {item} on a whim. Always room for more at the table, champ."],
+    },
+    meat: {
+      boughtLoved: ["A good {item}, hon. That's a proper meal in someone tonight. Job done."],
+      boughtWhim: ["Grabbed a {item}. Somebody needs feedin' up — they always do."],
+    },
+    potion: {
+      boughtLoved: ["Got a {item}, kid. For when someone comes home banged up. Big sib's ready."],
+      boughtWhim: ["Bought a {item} on impulse. Better to have it and not need it, y'know?"],
+    },
+    armor: {
+      boughtLoved: ["The {item}. If my folks won't stay outta trouble, they'll stay protected."],
+      boughtWhim: ["Snagged some {item}. Sturdy. I like knowin' someone's covered, champ."],
+    },
+  },
+};
+
+// Resolve the line a townsperson says about their trip: a bespoke item-specific
+// reaction if one exists for their personality + this item + bucket, otherwise
+// their generic buyLine. {item} is filled with the item's name either way.
+export function npcReflectionLine(npc, bucket, itemId, itemName = "", roll = Math.random()) {
+  const special = SPECIAL_REACTIONS[npc?.personality]?.[itemId]?.[bucket];
+  const pool = special && special.length ? special : npc?.buyLines?.[bucket];
+  if (!pool || !pool.length) return null;
+  const line = pool[Math.floor(roll * pool.length) % pool.length];
+  return line.replace(/\{item\}/g, itemName || "that");
 }

@@ -70,7 +70,7 @@ beats exposition, nothing is wasted (cuts go to the graveyard).
 
 **Rule 7 — a ten-year-old reads every line.** Plain words, no archaisms, no
 literary phrasing ("kin," "stood dark," "in the blood," and eventually the
-whole "gone delving" sign died to this rule). Character voice comes from
+whole "gone diving" sign died to this rule). Character voice comes from
 rhythm and what people choose to say, not from vocabulary.
 
 **Rule 8 — one pointer at a time.** Arrows wait for the dialogue bar to
@@ -220,8 +220,8 @@ first time:*
 >
 > **ME** — But first, let's do some restocking!
 
-**→ GUIDE:** `To the cave — delve for more loot` *(arrow down the road, then
-`Delve here for more loot` on the pit once inside)*
+**→ GUIDE:** `To the cave — dive for more loot` *(arrow down the road, then
+`Dive here for more loot` on the pit once inside)*
 
 - **Trigger:** the scripted shopper's purchase lands (`_autoSell`) — unchanged.
 - **Teaches:** stock → customer → coin, zero mechanical burden. Haggling still
@@ -232,7 +232,7 @@ first time:*
 - Three bubbles, one arc: the theme (the bookend line), the settling
   ("this new life" quietly accepts the inheritance), and the turn back to
   work — "let's do some restocking!" is the hero giving *themselves* the
-  delve order, so the guide arrow that follows is their own intent, not a
+  dive order, so the guide arrow that follows is their own intent, not a
   tutorial's.
 - **The pit is never mentioned by anyone.** The guide arrow leads the player
   back for loot, and the trapdoor swinging open on arrival is the reveal —
@@ -261,10 +261,10 @@ Cuts from the rewrite and its editing passes:
 | --- | --- | --- |
 | "Whew. That should be enough for today." | The "enough" theme belonged to the drifter. | A late-game milestone echo, if "enough" ever earns its way back. |
 | "Now — where was that exit…" | The guide arrow says it. | — |
-| "Finally — a village. My back is killing me." | Scene 1's grumble carries the complaining now. | Post-delve self-talk. |
+| "Finally — a village. My back is killing me." | Scene 1's grumble carries the complaining now. | Post-dive self-talk. |
 | "Closed?! You have GOT to be kidding me." | The heir isn't surprised, just tired. | A regular customer rattling the door if the shop's left unattended. |
-| THE SIGN: "CLOSED — gone delving. Don't wait up. — the management" | One less tap; the uncle's story moved fully off-screen. | The best grave here: a *second* sign deep in the dungeon lands harder if the player never saw a first. |
-| "'Gone delving.' A year, and that's all you wrote?" | Died with the sign. | Hero self-talk on finding the uncle's traces below. |
+| THE SIGN: "CLOSED — gone diving. Don't wait up. — the management" | One less tap; the uncle's story moved fully off-screen. | The best grave here: a *second* sign deep in the dungeon lands harder if the player never saw a first. |
+| "'Gone diving.' A year, and that's all you wrote?" | Died with the sign. | Hero self-talk on finding the uncle's traces below. |
 | "…the only way to this stupid TOWN?" | "Stupid" softened in the edit pass. | — |
 | "Smaller than the paperwork made it sound." | Plainer is better; the will can stay a background fact. | — |
 | "Don't bother, friend — he's been gone a year." / "…I have a mad idea." / "The shop's yours. Rent-free." | The whole Mayor-as-benefactor beat: the shop was never his to give. | — |
@@ -322,8 +322,8 @@ cinematic changes:
   `MAYOR_DOOR_LINES` (3 → 2 bubbles), `MAYOR_SALE_LINES` (3 → 1),
   `PLAYER_RESOLVE_LINE`; removed `SIGN_TEXT` and the sign bubble from
   `_shopDoorScene` (the hero's line now leads straight to the Mayor).
-- Guide strings: `Sell your haul here` → `Inspect`; `…delve for stock` →
-  `…delve for more loot` (both variants). Hint toasts aligned.
+- Guide strings: `Sell your haul here` → `Inspect`; `…dive for stock` →
+  `…dive for more loot` (both variants). Hint toasts aligned.
 - `MAYOR_PRAISE_LINES` (epilogue) left in code, pending a decision.
 - Runtime-verified with a Playwright drive of a fresh save: all 8 bubbles in
   order, no sign bubble, both new guide texts, steps advanced
@@ -354,7 +354,7 @@ scenes were rebuilt around the key and the note:
 - Bag: `_tutStart` seeds the key at the top of the bag. The change grew into
   a general one: the backpack now opens anywhere, for everyone — it's the
   always-available view of what you carry and wear (`_openBagSheet`). Drop
-  is delve-only (loot tossed in town would just be lost) *and* withheld
+  is dive-only (loot tossed in town would just be lost) *and* withheld
   during the FTUE, so a new player can't throw away the haul the tutorial
   is about to teach them to sell.
 - Admin FTUE jumps no longer spawn a watching Mayor; the road jump re-seeds

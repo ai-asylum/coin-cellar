@@ -1,7 +1,7 @@
 {
   "name": "Coin Cellar",
   "short_name": "Coin Cellar",
-  "description": "Co-op dungeon-crawling shopkeeper — delve by night, deal by day.",
+  "description": "Co-op dungeon-crawling shopkeeper — dive by night, deal by day.",
   "id": "/",
   "start_url": ".",
   "scope": ".",

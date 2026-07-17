@@ -134,5 +134,5 @@ At 0 HP you don't wipe the run:
 - You **lose 50% of your gold**.
 - HP is restored to full.
 
-This keeps a bad delve costly but recoverable — the pressure is the debt clock,
+This keeps a bad dive costly but recoverable — the pressure is the debt clock,
 not permadeath.

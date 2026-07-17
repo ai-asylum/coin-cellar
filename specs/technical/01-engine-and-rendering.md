@@ -42,7 +42,7 @@ The most important structural trick: **the shop and the dungeon coexist in one
 - Fog + distance mean you never see the "other" area.
 
 This avoids scene-swap hitches and lets both areas animate simultaneously (useful
-in co-op when one player shops while the other delves).
+in co-op when one player shops while the other dives).
 
 **Coordinate note:** dungeon geometry is placed group-local, but **enemies and
 colliders live in world space** — so a lot of dungeon code adds `DUNGEON_ORIGIN`

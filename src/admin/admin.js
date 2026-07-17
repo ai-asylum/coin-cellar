@@ -6,7 +6,7 @@
 // catalogue always reflects the current game — it can't drift.
 import * as THREE from "three";
 
-import { ITEMS, itemSprite, itemMesh, EQUIP_DROPS } from "../game/items.js";
+import { ITEMS, itemSprite, itemMesh, EQUIP_DROPS, itemKind, ITEM_KINDS, ITEM_KIND_LABELS } from "../game/items.js";
 import { makeChest, makeGate, makeStairs, makeDescent } from "../game/dungeon-geometry.js";
 import { makeCaveMouth, buildLotParts } from "../game/shop-build.js";
 import layoutData from "../game/layout.json";
@@ -14,7 +14,7 @@ import { weaponMesh } from "../game/gear.js";
 import { ENEMY_KINDS, DUNGEON_MIX, HOLE_THEMES, DUNGEON_LOOT, BOSSES, bossDefFor, FLOORS_PER_DUNGEON } from "../game/dungeon.js";
 import { HOLE_DEFS } from "../game/cave.js";
 import { ARCHETYPES } from "../game/shop.js";
-import { NPCS, CROWD_NPCS, PERSONALITIES, personalityName, personalityArchetype, TIMES_OF_DAY } from "../game/npc-data.js";
+import { NPCS, CROWD_NPCS, PERSONALITIES, personalityName, personalityArchetype, personalityTaste, REFLECTION_BUCKETS, SPECIAL_REACTIONS, TIMES_OF_DAY } from "../game/npc-data.js";
 import { Creature } from "../chargen/creature.js";
 import { BlockyCreature, variantForSeed } from "../chargen/blocky.js";
 import { CHAR_VARIANTS, loadCharacters } from "../chargen/assets.js";
@@ -462,8 +462,8 @@ function buildEnemies() {
 
 function buildCustomers() {
   // Each townsperson shops as a fixed archetype set by their personality, so the
-  // crowd's wealth mix is just the count of townsfolk per archetype (reserved
-  // story cameos don't join the ambient crowd, so they're left out).
+  // crowd's wealth mix is just the count of townsfolk per archetype (the whole
+  // town roams and shops now — Mayor and Clerk included).
   const counts = new Map(ARCHETYPES.map((a) => [a.name, 0]));
   for (const npc of CROWD_NPCS) {
     const name = personalityArchetype(npc);
@@ -516,11 +516,89 @@ function buildNpcs() {
           ["Personality", personalityName(npc)],
           ["Shops as", personalityArchetype(npc)],
           ["Skin", `character-${npc.variant}`],
-          ["Role", npc.reserved ? "Scripted cameo" : "Shopper / passer-by"],
+          ["Role", npc.reserved ? "Shopper / passer-by (+ story cameo)" : "Shopper / passer-by"],
         ],
         lineGroups: TIMES_OF_DAY.map((t) => ({
           label: `${t[0].toUpperCase()}${t.slice(1)}`,
           lines: npc.lines?.[t] || [],
+        })),
+      });
+    }
+  }
+  return cards;
+}
+
+// A short human summary of a personality's item taste: which kinds tempt them
+// (mult > 1), which they turn their nose up at (mult < 1), and their tier lean.
+function tasteSummary(taste) {
+  const favours = ITEM_KINDS
+    .filter((k) => (taste.kinds[k] ?? 1) > 1.05)
+    .sort((a, b) => (taste.kinds[b] ?? 1) - (taste.kinds[a] ?? 1))
+    .map((k) => ITEM_KIND_LABELS[k]);
+  const avoids = ITEM_KINDS
+    .filter((k) => (taste.kinds[k] ?? 1) < 0.95)
+    .sort((a, b) => (taste.kinds[a] ?? 1) - (taste.kinds[b] ?? 1))
+    .map((k) => ITEM_KIND_LABELS[k]);
+  const lean = taste.tierLean;
+  const leanTxt = lean > 0.3 ? `leans costly (+${lean.toFixed(1)})`
+    : lean < -0.3 ? `leans thrifty (${lean.toFixed(1)})`
+    : "no strong tier lean";
+  return { favours, avoids, leanTxt };
+}
+
+// Tastes & reasoning: what draws each personality to (or away from) a kind of
+// item, and the lines every resident says next time you chat after they've been
+// shopping — a "loved it", a whim, a "wanted it but…", or "nothing caught me".
+// Grouped by personality (the taste is shared) with the buy-lines per resident.
+function buildTastes() {
+  const cards = [];
+  const order = Object.keys(PERSONALITIES);
+  const byPersona = new Map(order.map((k) => [k, []]));
+  for (const npc of NPCS) (byPersona.get(npc.personality) || []).push(npc);
+
+  for (const key of order) {
+    const persona = PERSONALITIES[key];
+    const group = byPersona.get(key);
+    if (!group || !group.length) continue;
+    const taste = personalityTaste({ personality: key });
+    const { favours, avoids, leanTxt } = tasteSummary(taste);
+    cards.push({
+      section: `${persona.name} — favours ${favours.join(", ") || "everything evenly"} · ${leanTxt}`,
+      icon: icon(persona.mood),
+    });
+    // signature items: the ones this temperament reacts to with a bespoke line
+    // when they buy (see SPECIAL_REACTIONS). Shown once per personality since the
+    // special voice is shared across everyone who shares that temperament.
+    const specials = SPECIAL_REACTIONS[key] || {};
+    for (const [itemId, byBucket] of Object.entries(specials)) {
+      const it = ITEMS[itemId];
+      cards.push({
+        title: `${it?.name || itemId}`,
+        id: `signature item · ${itemId}`,
+        icon: itemIcon(itemId),
+        badges: [{ text: "SIGNATURE ITEM", kind: "boss" }, { text: ITEM_KIND_LABELS[itemKind(itemId)], kind: "" }],
+        tier: it?.tier,
+        lineGroups: REFLECTION_BUCKETS
+          .filter((b) => byBucket[b.id]?.length)
+          .map((b) => ({ label: b.label, lines: byBucket[b.id] })),
+      });
+    }
+    for (const npc of group) {
+      cards.push({
+        title: npc.name,
+        id: `${npc.id} · character-${npc.variant}`,
+        icon: icon(persona.mood),
+        badges: [{ text: personalityName(npc), kind: "" }, { text: personalityArchetype(npc), kind: "" }],
+        visual: `<div class="model3d" data-kind="blocky" data-variant="${npc.variant}"></div>`,
+        stats: [
+          ...ITEM_KINDS.map((k) => [ITEM_KIND_LABELS[k], `${(taste.kinds[k] ?? 1).toFixed(2)}×`]),
+          ["Tier lean", leanTxt],
+          ["Favours", favours.join(", ") || "—"],
+          ["Turns up nose at", avoids.join(", ") || "—"],
+        ],
+        lineGroups: REFLECTION_BUCKETS.map((b) => ({
+          label: b.label,
+          lines: npc.buyLines?.[b.id] || [],
         })),
       });
     }
@@ -802,6 +880,7 @@ const TABS = [
   { id: "enemies", icon: "ogre", label: "Monsters", build: buildEnemies, unit: "monster" },
   { id: "customers", icon: "faceHappy", label: "Shoppers", build: buildCustomers, unit: "archetype" },
   { id: "npcs", icon: "people", label: "Townsfolk", build: buildNpcs, unit: "resident" },
+  { id: "tastes", icon: "faceMonocle", label: "Tastes", build: buildTastes, unit: "resident" },
   { id: "cast", icon: "people", label: "Cast", build: buildCast, unit: "character" },
   { id: "floors", icon: "hole", label: "Dungeon", build: buildFloors, unit: "floor" },
   { id: "town", icon: "shop", label: "Town", build: buildTown, unit: "model" },

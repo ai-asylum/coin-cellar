@@ -39,6 +39,7 @@ export class Shop {
     this.customers = [];
     this.passersby = []; // ambient pedestrians strolling the street outside
     this._npcInUse = new Set(); // skins (variants) currently on screen — kept unique
+    this._cameoHold = new Set(); // skins held off the ambient crowd while a scripted cameo (Mayor/Clerk) is on stage
     this.shafts = []; // god-ray light shafts (animated each frame)
     this.lampLights = []; // interior lamp point-lights, lit after dusk
     this.streetLampLights = []; // lamppost point-lights out on the street
@@ -292,6 +293,9 @@ export class Shop {
     const inBuilding = !!pp && this.game.playerArea === "shop" &&
       pp.x > br.minX - 0.3 && pp.x < br.maxX + 0.3 &&
       pp.z > br.minZ - 0.3 && pp.z < br.maxZ + 0.3;
+    // Exposed so the HUD can gate the shop-only storeroom shortcut to the
+    // building interior (not the street / cave mouth, which are also "shop").
+    this.inBuilding = inBuilding;
 
     // The roof and the wall nearest the camera disappear while the player is
     // anywhere inside (shop + back rooms), keeping the whole interior readable.

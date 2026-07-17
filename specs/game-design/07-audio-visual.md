@@ -20,7 +20,7 @@ color, rim light, and juice rather than expensive rendering.
 ### Palette & atmosphere (`src/core/engine.js`)
 
 - Background is a **purple twilight** (`#1a1030`) with distance fog — cozy-but-
-  moody, fitting "delve by night."
+  moody, fitting "dive by night."
 - **ACES tone mapping**, exposure ~1.05, pixel ratio capped at 2.
 - Lighting is a hemisphere ambient (cool) + a warm directional "sun." No shadow
   maps anywhere.

@@ -383,9 +383,9 @@ export class Cave {
   // fence), right on the path out, ready for the FTUE's throwaway dash-kill.
   spawnFtueRat() {
     if (this._ftueRat) return this._ftueRat;
-    const zone = { x: 4, y: 6, w: 3, h: 2 }; // the lit tunnel between hero and slime
+    const zone = { x: 4, y: 8, w: 3, h: 2 }; // the lit tunnel by the daylight mouth
     const c = new Creature(ratSpec({ key: "cave_ftue_rat", seed: 77, scale: 0.55 }));
-    c.position.copy(cellPos(6, 7)).add(CAVE_ORIGIN); // out in the light, on the way down
+    c.position.copy(cellPos(5, 9)).add(CAVE_ORIGIN); // out in the light, right by the entrance
     c.heading = Math.random() * Math.PI * 2;
     this.game.engine.scene.add(c);
     const rat = { creature: c, tx: c.position.x, tz: c.position.z, pause: 0.6, zone };

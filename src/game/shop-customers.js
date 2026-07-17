@@ -5,10 +5,10 @@
 // using `this` unchanged.
 import * as THREE from "three";
 import { BlockyCreature, variantForSeed, HARD_SEED } from "../chargen/blocky.js";
-import { ITEMS, LOOT_BY_TIER } from "./items.js";
+import { ITEMS, LOOT_BY_TIER, itemKind } from "./items.js";
 import { rng, pick, clamp } from "../core/engine.js";
 import { ARCHETYPES, SELLER_CHANCE, MAX_CUSTOMERS } from "./shop-data.js";
-import { CROWD_NPCS, npcById, npcByVariant, personalityArchetype } from "./npc-data.js";
+import { CROWD_NPCS, npcById, npcByVariant, personalityArchetype, personalityTaste } from "./npc-data.js";
 
 const _d = new THREE.Vector3();
 
@@ -18,6 +18,15 @@ const _d = new THREE.Vector3();
 const _archByName = new Map(ARCHETYPES.map((a) => [a.name, a]));
 function archetypeForNpc(npc) {
   return _archByName.get(personalityArchetype(npc)) || ARCHETYPES[1] || ARCHETYPES[0];
+}
+
+// Did an item land squarely in this townsperson's taste? True when their
+// personality strongly favours that item's kind (see PERSONALITIES.taste) —
+// used to tell an "I loved it!" purchase from an out-of-character impulse buy.
+const LOVE_THRESHOLD = 1.3;
+function _lovesKind(npc, itemId) {
+  const t = personalityTaste(npc);
+  return (t.kinds[itemKind(itemId)] ?? 1) >= LOVE_THRESHOLD;
 }
 
 // How close the player must be for a townsperson to notice them: slow to a
@@ -126,6 +135,15 @@ export const customerMethods = {
     return cust;
   },
 
+  // How many strollers may wander the street at once. The town starts out
+  // sleepy and half-empty — the note's "the town just needs fixing up" — so
+  // during the first-run FTUE (through the player's very first walk into the
+  // village) only a couple of souls are about; the street fills out to its
+  // usual bustle once onboarding is done.
+  _maxPassersby() {
+    return this.game.tutorial ? 2 : 3;
+  },
+
   // Cosmetic pedestrians that mill about the whole street — not just a single
   // sidewalk lane. Each strolls between random waypoints spread across the road
   // (and now and then down the alley to the plaza), pausing here and there,
@@ -135,7 +153,7 @@ export const customerMethods = {
     const game = this.game;
     if (!game.gameOver) {
       this._passerT -= dt;
-      if (this._passerT <= 0 && this.passersby.length < 3) {
+      if (this._passerT <= 0 && this.passersby.length < this._maxPassersby()) {
         this._passerT = 1.6 + Math.random() * 3;
         this._spawnPasserby();
       }
@@ -241,10 +259,11 @@ export const customerMethods = {
   // given, keeps the pick stable for a repeat body.
   _allocNpc(seed = null) {
     const taken = this._npcInUse;
+    const held = this._cameoHold;
     const heroV = this.game.player?.variant;
     const mateV = this.game.remote?.creature?.variant;
     const free = CROWD_NPCS.filter(
-      (n) => !taken.has(n.variant) && n.variant !== heroV && n.variant !== mateV
+      (n) => !taken.has(n.variant) && !held.has(n.variant) && n.variant !== heroV && n.variant !== mateV
     );
     if (!free.length) return null;
     const npc = seed != null
@@ -257,6 +276,27 @@ export const customerMethods = {
   // Release a townsperson's skin back into the pool once they've left the scene.
   _freeNpc(npc) {
     if (npc) this._npcInUse.delete(npc.variant);
+  },
+
+  // A scripted cameo (the Mayor, the Clerk) is about to take the stage as this
+  // exact townsperson: pull any roaming/shopping copy of them off-screen and
+  // bar the skin from the ambient crowd so there's never two of them at once.
+  holdVariantForCameo(variant) {
+    this._cameoHold.add(variant);
+    for (const p of [...this.passersby]) {
+      if (p.npc?.variant !== variant) continue;
+      this._freeNpc(p.npc);
+      p.creature.dispose();
+      this.passersby = this.passersby.filter((x) => x !== p);
+    }
+    for (const cust of [...this.customers]) {
+      if (cust.npc?.variant === variant) this._removeCustomer(cust);
+    }
+  },
+
+  // The cameo's done — let their skin rejoin the ambient crowd.
+  releaseCameoVariant(variant) {
+    this._cameoHold.delete(variant);
   },
 
   // Pull a stroller off the street to send into the shop: their body, skin and
@@ -272,27 +312,16 @@ export const customerMethods = {
 
   _spawnCustomer() {
     const game = this.game;
-    // Shoppers are recruited from the street crowd — an existing stroller peels
-    // off and heads for the door. Only when the road happens to be empty do we
-    // send a fresh arrival in from the village end, so a shopper always comes
-    // from the street, never conjured inside the shop.
-    let creature, npc, seed;
+    // Shoppers are always someone already out on the street: a stroller peels
+    // off and heads for the door, carrying their body, skin and seed straight
+    // over — so the person at your counter is the very one you saw wandering
+    // past. If nobody's roaming yet, we hold the arrival (the passer-by pump
+    // tops the crowd back up) rather than conjure a fresh body from thin air.
     const fromStreet = this._takePasserbyForShop();
-    if (fromStreet) {
-      creature = fromStreet.creature;
-      npc = fromStreet.npc;
-      seed = fromStreet.seed ?? pick(rng(Math.random() * 1e9), this._custSeedPool);
-    } else {
-      seed = pick(rng(Math.random() * 1e9), this._custSeedPool) + Math.floor(Math.random() * 4) * 100;
-      npc = this._allocNpc(seed);
-      if (!npc) return false; // every skin's on screen — hold this arrival a beat
-      creature = makeCustomerBody(npc, seed);
-      // in from the village (south) end — the cave caps the north
-      creature.position.copy(this.streetEndS);
-      creature.position.x += (Math.random() - 0.5) * 0.5; // drift across the lane
-      creature.heading = Math.PI;
-      this.group.add(creature);
-    }
+    if (!fromStreet) return false;
+    const creature = fromStreet.creature;
+    const npc = fromStreet.npc;
+    const seed = fromStreet.seed ?? pick(rng(Math.random() * 1e9), this._custSeedPool);
 
     // A shopper always shops in character: their archetype is a fixed trait of
     // who they are (set by their personality — see npc-data.js), so the same
@@ -419,11 +448,19 @@ export const customerMethods = {
     return free.length ? pick(rng(Math.random() * 1e9), free) : undefined;
   },
 
-  // How much this shopper fancies a given item — pricier goods tug harder at
-  // wealthier archetypes, with a dose of personal-taste noise.
+  // How much this shopper fancies a given item. Three pulls stack on top of the
+  // item's base value: the archetype's wealth lean (richer folk are drawn to
+  // pricier goods), the personality's taste for this *kind* of thing (see
+  // itemKind + PERSONALITIES.taste — a Jock covets weapons, the Lazy want food),
+  // and their lean toward cheap or costly tiers. A dose of personal-taste noise
+  // keeps two same-personality shoppers from always fancying the exact same item.
   _appeal(cust, slot) {
-    const base = ITEMS[slot.item].base;
-    return base * (0.5 + cust.arch.hi * 0.3) * (0.6 + Math.random() * 0.8);
+    const item = ITEMS[slot.item];
+    const taste = personalityTaste(cust.npc);
+    const kindMul = taste.kinds[itemKind(item)] ?? 1;
+    // tierLean > 0 pulls toward rare/costly (tier 4), < 0 toward cheap (tier 1)
+    const tierMul = clamp(1 + taste.tierLean * (item.tier - 2.5) * 0.18, 0.4, 1.9);
+    return item.base * (0.5 + cust.arch.hi * 0.3) * kindMul * tierMul * (0.6 + Math.random() * 0.8);
   },
 
   // Done browsing: maybe make an offer on their favourite, maybe just wander off.
@@ -437,6 +474,9 @@ export const customerMethods = {
       cust.slot = fav;
       const base = ITEMS[fav.item].base;
       cust.maxPay = Math.round(base * (cust.arch.lo + Math.random() * (cust.arch.hi - cust.arch.lo)));
+      // did their favourite land squarely in their wheelhouse? decides whether,
+      // once the sale actually closes, they gush ("loved it") or shrug ("a whim")
+      cust._boughtLoved = _lovesKind(cust.npc, fav.item);
       cust.t = 0;
       this.game.net.send({ t: "custWant", id: cust.id, slotIdx: this.slots.indexOf(fav), maxPay: cust.maxPay });
       if (fav.fancy) {
@@ -457,8 +497,11 @@ export const customerMethods = {
         cust.emote = this.game.hud.emote(cust.creature, "moneyfly", 999);
       }
     } else {
-      // browsed but not sold on anything — shrug and head out
+      // browsed but not sold on anything — shrug and head out. They'll remember
+      // why for next time: a favourite they balked at (passedPricey) vs nothing
+      // that caught their eye at all (passedMeh).
       if (fav) this.game.hud.emote(cust.creature, pick(rng(cust.seed + cust.visited), ["faceThink", "faceNeutral", "faceRoll", "thought"]), 1.4);
+      this.game.recordNpcReflection?.(cust.npc, fav && fav.item ? "passedPricey" : "passedMeh", fav?.item);
       cust.state = "leave";
       cust._atDoor = false;
       cust.t = 0;
@@ -693,6 +736,8 @@ export const customerMethods = {
           if (cust.t > cust.patience) {
             this._clearEmote(cust);
             game.hud.emote(c, "anger", 1.5);
+            // waited for their pick but the queue never cleared — they wanted it
+            game.recordNpcReflection?.(cust.npc, "passedPricey", slot.item);
             cust.state = "leave";
             cust._atDoor = false;
           }
@@ -751,7 +796,13 @@ export const customerMethods = {
         if (!cust._atDoor) {
           if (walkTo(this.doorInside, 2.2)) cust._atDoor = true;
         } else if (!cust._outside) {
-          if (walkTo(this.doorPos, 2.4)) cust._outside = true;
+          if (walkTo(this.doorPos, 2.4)) {
+            cust._outside = true;
+            // The FTUE's first shopper doesn't just vanish once they've bought:
+            // they step back out and fold into the ambient crowd, so the very
+            // person the player just served stays on to wander the town.
+            if (cust.scripted) { this._convertCustomerToPasserby(cust); return; }
+          }
         } else if (walkTo(cust.exitPoint, 1.8)) {
           this._removeCustomer(cust);
           return;
@@ -815,6 +866,33 @@ export const customerMethods = {
     cust.creature.dispose();
     this.customers = this.customers.filter((x) => x !== cust);
     this.game.net.send({ t: "custDel", id: cust.id });
+  },
+
+  // Retire a shopper from the counter sim but keep their body on its feet,
+  // handing it straight to the ambient crowd as a stroller. Used for the FTUE's
+  // first customer, who lingers to wander the town after their purchase instead
+  // of walking off and despawning. The skin stays marked in-use (same body), so
+  // it's simply moved between systems, never freed and re-allocated.
+  _convertCustomerToPasserby(cust) {
+    this._clearEmote(cust);
+    this.customers = this.customers.filter((x) => x !== cust);
+    this.game.net.send({ t: "custDel", id: cust.id });
+    const R = this.streetRegion;
+    const span = R.alongMax + 2.5;
+    const p = {
+      creature: cust.creature,
+      npc: cust.npc,
+      seed: cust.seed, // carried over if they're later recruited back in
+      speed: 1.0 + Math.random() * 0.9,
+      curSpeed: 0,
+      life: 14 + Math.random() * 12, // a good long amble before they head off
+      pause: 0,
+      exitX: R.crossNear + Math.random() * (R.crossFar - R.crossNear),
+      exitZ: span,
+      tx: 0, tz: 0,
+    };
+    this._pickPasserTarget(p);
+    this.passersby.push(p);
   },
 
   /** The customer at the head of the counter queue, waiting to be served — a
