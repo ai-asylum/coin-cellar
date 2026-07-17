@@ -169,6 +169,13 @@ export const combatMethods = {
   // guest sends the hit and lets the host echo it back.
   _dashStrike() {
     if (this._dashT < 0 || !this._dashHitIds) return;
+    if (this.playerArea === "shop") {
+      // above ground the dash forages: it smashes the meadow's flower clumps,
+      // berry bushes and nut saplings for edible loot (no foes to fight here)
+      const reach = this.player.radius + 0.5;
+      this.shop.smashForage(this.player.position, reach);
+      return;
+    }
     if (this.playerArea === "cave" && this.cave) {
       this.cave.dashHit(this.player);
       return;

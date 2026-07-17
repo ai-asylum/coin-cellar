@@ -17,7 +17,7 @@ import { portraitDataURL } from "../chargen/portrait.js";
 import { icon, itemIcon } from "../core/icons.js";
 import { ITEMS } from "./items.js";
 import { SHOP } from "./shop-data.js";
-import { npcLinesFor, timeOfDay, npcReflectionLine } from "./npc-data.js";
+import { npcLinesFor, timeOfDay, npcReflectionLine, npcIntroLines } from "./npc-data.js";
 import { track } from "../core/analytics.js";
 
 // The Mayor NPC: a fixed character variant (so his walking body matches the
@@ -269,23 +269,26 @@ export const narrativeMethods = {
     track("ftue_step", { step, day: this.day, gold: this.gold });
     // advancing past the last step (the first real descent) ends the FTUE
     if (!this.tutorial) track("ftue_completed", { day: this.day, gold: this.gold });
-    // the first table's just been stocked — the shop's finally open for
-    // business, so let the doors swing for the player again, and send in the
-    // scripted first shopper, who always commits: a plain-table purchase the
-    // player just watches land
+    // the first table's just been stocked — send in the scripted first shopper,
+    // who always commits: a plain-table purchase the player just watches land.
+    // The doorway stays FTUE-locked so the player can't wander out mid-sale: the
+    // leaves still swing open and the customer paths in (they read the base
+    // colliders), but the player is fenced by shop.playerColliders until the
+    // send-off (the "delve" step below).
     if (this.tutorial === "sell") {
-      this.shop.doorLocked = false; // open for business — doors swing again
       this.shop.spawnScriptedCustomer();
     }
     // the first sale just landed — a beat for the coin to fly, then the hero,
     // alone in their shop, closes the loop's first lap
-    if (this.tutorial === "delve")
+    if (this.tutorial === "delve") {
+      this.shop.doorLocked = false; // sale's done — the shopfront's free to leave now
       setTimeout(() => this._selfSay(PLAYER_RESOLVE_LINES, () => {
         // send-off: once the resolve monologue lands, the shopfront swings
         // open on its own — a wordless invitation out to the new life the
         // heir just named. Released when they reach the cave (see _enterCave).
         this.shop.doorHeld = true;
       }), 600);
+    }
     if (this.tutorial) setTimeout(() => this._tutHint(), 700);
   },
 
@@ -559,6 +562,23 @@ export const narrativeMethods = {
     const c = target.creature;
     c.heading = Math.atan2(this.player.position.x - c.position.x, this.player.position.z - c.position.z);
     target.chatting = true;
+    this._npcChat = { target };
+    // the hero walks up and squares off with them as the bubble opens (driven
+    // per-frame in _updateTalkApproach — runs even while the dialogue is up)
+    this._talkApproach = { target, t: 0, stopDist: 1.15 };
+    const firstMeeting = !this._npcMet.has(npc.id);
+    track("npc_talk", { npc: npc.id, personality: npc.personality, firstMeeting });
+    this.audio.pickup?.();
+    // the very first chat with someone: they clock the new face and introduce
+    // themselves before any small talk. Marked (and saved) so it never repeats,
+    // and any pending shopping reflection is left for the next, ordinary chat.
+    const intro = firstMeeting ? npcIntroLines(npc) : [];
+    if (intro.length) {
+      this._npcMet.add(npc.id);
+      this._save();
+      return this._npcSayLines(npc, intro);
+    }
+    if (firstMeeting) this._npcMet.add(npc.id); // no intro line for them, but they've now been met
     // small talk keyed to the town's day/night clock: pick the bucket for the
     // current hour (admin can pin it via debugHour), then cycle its five lines.
     // A per-bucket line index keeps the greeting fresh within a time of day and
@@ -576,19 +596,26 @@ export const narrativeMethods = {
     if (target._lineTod !== tod) { target._lineTod = tod; target._lineIdx = 0; }
     else target._lineIdx = (target._lineIdx == null ? 0 : target._lineIdx + 1);
     const line = reflection || lines[target._lineIdx % lines.length];
-    this._npcChat = { target };
-    // the hero walks up and squares off with them as the bubble opens (driven
-    // per-frame in _updateTalkApproach — runs even while the dialogue is up)
-    this._talkApproach = { target, t: 0, stopDist: 1.15 };
-    track("npc_talk", { npc: npc.id, personality: npc.personality });
-    this.audio.pickup?.();
-    this.hud.speak({
-      name: npc.name,
-      portrait: portraitDataURL(npc.variant, "left"),
-      text: line,
-      cta: "▸ close",
-      onAdvance: () => this._endNpcChat(),
-    });
+    this._npcSayLines(npc, [line]);
+  },
+
+  // Cycle one or more bubbles through the dialogue bar in a townsperson's voice,
+  // closing the chat when the last is dismissed. Used for both the one-off
+  // first-meeting intro and ordinary single-line small talk.
+  _npcSayLines(npc, lines) {
+    let i = 0;
+    const step = () => {
+      if (i >= lines.length) return this._endNpcChat();
+      const last = i === lines.length - 1;
+      this.hud.speak({
+        name: npc.name,
+        portrait: portraitDataURL(npc.variant, "left"),
+        text: lines[i],
+        cta: last ? "▸ close" : "▸ next",
+        onAdvance: () => { i++; step(); },
+      });
+    };
+    step();
   },
 
   _endNpcChat() {

@@ -1,19 +1,14 @@
 // Shop world construction: the room, shopfront, counter, tables, the street
-// outside, the flanking rooms, and the restoration lots. Split out of shop.js
-// as prototype methods (mixed onto Shop via Object.assign) so they keep using
-// `this` unchanged.
+// outside, and the restoration lots. Split out of shop.js as prototype methods
+// (mixed onto Shop via Object.assign) so they keep using `this` unchanged.
 import * as THREE from "three";
 import { makeToonMaterial } from "../core/toon.js";
 import { makeLightShaft } from "../core/godrays.js";
-import { placeStreetDecor } from "./decor.js";
+import { placeStreetDecor, decorSprite, DECOR, DECOR_BURST, FIELD_FORAGE } from "./decor.js";
 import { buildStreetTerrain } from "./street-terrain.js";
 import { SHOP, MAX_CUSTOMERS } from "./shop-data.js";
 import { getLayout } from "./layout-store.js";
-
-// The two buyable back rooms' doorways, cut through the shop's low back wall
-// (pre-rotation coords): door centres along x, and each gap's half-width.
-const EX_DOORS = [-3.4, 1.8];
-const EX_DOOR_HW = 1.0;
+import { rng, pick } from "../core/engine.js";
 
 export const buildMethods = {
   _build() {
@@ -62,17 +57,10 @@ export const buildMethods = {
       if (sx > 0) this.nearCameraWalls.push(wall);
       this.colliders.push({ x: sx, z: 0, hw: 0.35, hd: D / 2 });
     }
-    // front wall (pre-rotation): low so the view stays open, split around the
-    // two framed doorways into the buyable back rooms (see _buildTown)
-    {
-      const xs = [-W / 2, EX_DOORS[0] - EX_DOOR_HW, EX_DOORS[0] + EX_DOOR_HW,
-        EX_DOORS[1] - EX_DOOR_HW, EX_DOORS[1] + EX_DOOR_HW, W / 2];
-      for (let i = 0; i < xs.length; i += 2) {
-        const x0 = xs[i], x1 = xs[i + 1];
-        mkWall(x1 - x0, 1.1, 0.35, (x0 + x1) / 2, 0.55, D / 2, wallMat2);
-        this.colliders.push({ x: (x0 + x1) / 2, z: D / 2, hw: (x1 - x0) / 2, hd: 0.3 });
-      }
-    }
+    // front wall (pre-rotation): a full-height solid wall closing off the back
+    // of the shop (post-rotation this is the far wall, away from the camera)
+    mkWall(W, wallH, 0.35, 0, wallH / 2, D / 2, wallMat2);
+    this.colliders.push({ x: 0, z: D / 2, hw: W / 2, hd: 0.3 });
 
     // back wall = the shopfront: a door on the left, a display window
     // ("vitrine") on the right. Post-rotation the door sits on the up-street
@@ -391,12 +379,11 @@ export const buildMethods = {
       this.lampLights.push(glow);
     }
 
-    // a warm wall lantern on the low back wall, centred between the two
-    // back-room doorways. Like the corner lamps it's dark under the bright
-    // midday palette and kindles at night (pushed into lampLights).
+    // a warm wall lantern on the low back wall. Like the corner lamps it's dark
+    // under the bright midday palette and kindles at night (pushed into lampLights).
     {
       const sconce = new THREE.Group();
-      const midX = (EX_DOORS[0] + EX_DOORS[1]) / 2; // -0.8, in the gap between the doors
+      const midX = -0.8;
       const plate = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.5, 0.12), wood2);
       plate.position.set(0, 1.45, 0);
       const arm = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.4), wood2);
@@ -506,18 +493,27 @@ export const buildMethods = {
     // walk-through trigger lives in Game._updateCaveTravel).
     this._buildCaveMouth(mkGround);
 
-    // the rest of the town: two empty rooms flanking the shop, two walk-in
-    // buildings across the road, and the plaza floor beneath them all.
-    this._buildTown(mkWall, mkGround, wallMat2, wood2, roadFar, streetW, wallH, backZ);
+    // the rest of the town: the restoration lots across the road, the plaza
+    // floor beneath them, the building footprint and the camera zones.
+    this._buildTown(mkGround, roadFar, streetW);
 
     // primitive-built terrain under and around it all: the meadow, cobbles,
     // turf patches, boulders and horizon hills (cave centre mirrors
     // _buildCaveMouth, ground stop-line mirrors _buildTown's backLimit)
-    buildStreetTerrain(g, {
+    const terrain = buildStreetTerrain(g, {
       streetW, backZ, paveFar, roadFar,
       backLimit: roadFar - 3.0,
       cave: { x: -12.6, z: -8.5 },
+      bounds: this.bounds, // set by _buildTown above; rings the walkable meadow with hills
     });
+    // make the ring of horizon hills solid so the widened meadow reads as a
+    // field fenced by rolling ground — the player is stopped at the foot of
+    // each slope instead of clipping up into it. Pushed as pre-rotation AABBs
+    // (footprint of the hill's ground silhouette) so _rotateTown turns them
+    // with the town, like every other collider.
+    for (const h of terrain.hills) {
+      this.colliders.push({ x: h.x, z: h.z, hw: h.r * 0.82, hd: h.r * 0.82 });
+    }
 
     // quarter-turn the whole town so the road runs down the screen (portrait
     // play): the cave mouth lands at the bottom, the ruined row along the far
@@ -534,6 +530,12 @@ export const buildMethods = {
     // doors start shut: block the opening (added after nav bake so the grid
     // still treats the doorway as walkable for when they're opened)
     this.colliders.push(this._doorCollider);
+
+    // scatter destructible forage (blossoms, berry bushes, nut saplings,
+    // mushrooms) across the walkable meadow — smashable for edible loot, just
+    // like the cellar's decor. Runs last so it can reject against every finished
+    // collider (walls, lots, cave, hills) and the settled walkable bounds.
+    this._buildForage();
   },
 
   // Fold layout.json's optional `camera` block over the code-defined camera
@@ -575,8 +577,8 @@ export const buildMethods = {
       const nx = -c.z, nz = c.x, hw = c.hd, hd = c.hw;
       c.x = nx; c.z = nz; c.hw = hw; c.hd = hd;
     };
-    // expansion door colliders and lot colliders live inside this array too
-    // (shared object refs), so one pass covers them all
+    // lot colliders live inside this array too (shared object refs), so one
+    // pass covers them all
     for (const c of this.colliders) rotC(c);
     rotC(this._doorCollider); // joins the list after the nav bake
     rotV(this.counterPos);
@@ -591,7 +593,6 @@ export const buildMethods = {
     }
     for (const t of this.tables) rotV(t.interactPos);
     for (const lot of this.lots) rotV(lot.interactPos);
-    for (const ex of this.expansions) rotV(ex.interactPos);
     for (const z of this.zones) {
       Object.assign(z, {
         minX: -z.maxZ, maxX: -z.minZ, minZ: z.minX, maxZ: z.maxX,
@@ -637,87 +638,15 @@ export const buildMethods = {
     this.caveMouthPos = new THREE.Vector3(cx + 1.4, 0, cz);
   },
 
-  // Build the rest of the town around the shop: two empty rooms flanking it
-  // (entered through the doorways cut into the side walls), two walk-in
-  // buildings across the road, the plaza floor, and the camera zones that lock
-  // the view onto whichever room the player is standing in.
-  _buildTown(mkWall, mkGround, wallMat, trimMat, roadFar, streetW, wallH, backZ) {
+  // Build the rest of the town around the shop: the restoration lots across the
+  // road, the plaza floor, the building footprint and the camera zone that locks
+  // the view onto the shop while the player is standing inside it.
+  _buildTown(mkGround, roadFar, streetW) {
     const { W, D } = SHOP;
 
-    // --- buyable extensions: two sealed rooms hanging off the BACK of the
-    // building (the post-rotation west side — away from the street, so they
-    // never eat road frontage). Until bought, each is a pitch-black void
-    // behind a locked door framed into the low back wall; paying the fee (see
-    // game.js) swings the door open and lights the room up as an extension. ---
-    const roomD = 7; // how far the rooms extend behind the shop
-    const roomZ0 = D / 2, roomZ1 = D / 2 + roomD;
-    const roomCz = (roomZ0 + roomZ1) / 2;
-    const black = () => new THREE.MeshBasicMaterial({ color: 0x000000 });
-    const doorPanelMat = makeToonMaterial({ color: 0x7a4a28, rim: 0 });
-    const doorTrimMat = makeToonMaterial({ color: 0x5c3720, rim: 0, polygonOffset: true });
-    const handleMat = makeToonMaterial({ color: 0xe6c26a, rim: 0 });
-    this.expansions = [];
-    this._townWallMat = wallMat; // restored onto a room's walls when it's bought
-    // the divider the two rooms share, black until either room is bought
-    const divider = mkWall(0.4, wallH, roomD, 0, wallH / 2, roomCz, wallMat);
-    divider.material = black();
-    this.colliders.push({ x: 0, z: roomCz, hw: 0.35, hd: roomD / 2 });
-    for (const side of [-1, 1]) {
-      const cx = side * W / 4; // each room takes half the building's width
-      const doorX = side < 0 ? EX_DOORS[0] : EX_DOORS[1];
-      // floor + the enclosing walls, all blacked out until the room's bought
-      const floor = mkGround(W / 2 - 0.2, roomD, cx, roomCz, 0);
-      floor.material = black();
-      const outerWall = mkWall(0.4, wallH, roomD, side * W / 2, wallH / 2, roomCz, wallMat);
-      const backWall = mkWall(W / 2, wallH, 0.4, cx, wallH / 2, roomZ1, wallMat);
-      if (side > 0) this.nearCameraWalls.push(outerWall);
-      const litColor = side < 0 ? 0x8a7a5f : 0x86748f; // floor colour once bought
-      const dark = [outerWall, backWall, divider];
-      outerWall.material = black();
-      backWall.material = black();
-      // the rug, hidden until the room is opened up
-      const rugMesh = mkGround(2.6, 1.7, cx, roomCz - 1, side < 0 ? 0x6a4f6a : 0x4f5f6a);
-      rugMesh.position.y = 0.02;
-      rugMesh.visible = false;
-      this.colliders.push(
-        { x: side * W / 2, z: roomCz, hw: 0.35, hd: roomD / 2 }, // outer wall
-        { x: cx, z: roomZ1, hw: W / 4, hd: 0.35 } // back wall
-      );
-
-      // a framed door standing in the low wall's gap: jambs + lintel + a
-      // hinged leaf that swings into the room once the fee is paid. A collider
-      // bars the doorway while it's locked.
-      mkWall(0.18, 2.3, 0.38, doorX - EX_DOOR_HW, 1.15, D / 2, doorTrimMat);
-      mkWall(0.18, 2.3, 0.38, doorX + EX_DOOR_HW, 1.15, D / 2, doorTrimMat);
-      mkWall(EX_DOOR_HW * 2 + 0.18, 0.22, 0.38, doorX, 2.35, D / 2, doorTrimMat);
-      const pivot = new THREE.Group();
-      pivot.position.set(doorX - EX_DOOR_HW + 0.08, 0, D / 2); // hinge on the left jamb
-      const panel = new THREE.Mesh(new THREE.BoxGeometry(EX_DOOR_HW * 2 - 0.2, 2.1, 0.12), doorPanelMat);
-      panel.position.set(EX_DOOR_HW - 0.06, 1.05, 0);
-      pivot.add(panel);
-      const handle = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), handleMat);
-      handle.position.set(EX_DOOR_HW * 1.7 - 0.2, 1.05, 0.12);
-      pivot.add(handle);
-      this.group.add(pivot);
-      const doorCollider = { x: doorX, z: D / 2, hw: EX_DOOR_HW, hd: 0.3 };
-      this.colliders.push(doorCollider);
-
-      this.expansions.push({
-        side,
-        cost: side < 0 ? 5000 : 10000,
-        unlocked: false,
-        floor, litColor,
-        walls: dark,
-        rug: rugMesh,
-        pivot,
-        doorCollider,
-        _doorA: 0, // eased 0 = shut, 1 = swung open
-        interactPos: new THREE.Vector3(doorX, 0, D / 2 - 1.1),
-      });
-    }
-    // the whole building's footprint (shop + back rooms) — the roof reads it
-    // to duck out of the way while the player is anywhere inside
-    this.buildingRect = { minX: -W / 2, maxX: W / 2, minZ: -D / 2, maxZ: roomZ1 };
+    // the shop's footprint — the roof reads it to duck out of the way while the
+    // player is inside
+    this.buildingRect = { minX: -W / 2, maxX: W / 2, minZ: -D / 2, maxZ: D / 2 };
 
     // --- the far side of the street is now an unbroken row of restoration lots
     // (built in _buildLots): no more walk-in buildings hogging the middle. Just
@@ -729,26 +658,24 @@ export const buildMethods = {
     const plaza = mkGround(streetW, roadFar - backLimit, 0, (roadFar + backLimit) / 2, this.roadColor);
     plaza.position.y = -0.03;
 
-    // camera zones: standing inside one locks the camera to its centre (like
-    // the shop); out on the open street/plaza the camera follows the player.
+    // camera zone: standing inside the shop locks the camera to its centre;
+    // out on the open street/plaza the camera follows the player.
     this.zones = [
-      { minX: -W / 2, maxX: W / 2, minZ: -D / 2 - 0.4, maxZ: roomZ0, cx: 0, cz: 0 }, // shop
-      { minX: -W / 2, maxX: 0, minZ: roomZ0, maxZ: roomZ1 + 0.4, cx: -W / 4, cz: roomCz }, // back room A
-      { minX: 0, maxX: W / 2, minZ: roomZ0, maxZ: roomZ1 + 0.4, cx: W / 4, cz: roomCz }, // back room B
+      { minX: -W / 2, maxX: W / 2, minZ: -D / 2 - 0.4, maxZ: D / 2 + 0.4, cx: 0, cz: 0 }, // shop
     ];
-    // walkable fence for the whole town: the road out front is free to roam
-    // corner to corner (colliders do the fine work — walls and the lot
-    // footprints). Beside the building there's no ground north of the
-    // shopfront line, so seal those two flanks with an invisible wall along it.
-    const edgeX = streetW / 2 - 1.0; // road's walkable half-width
-    for (const s of [-1, 1]) {
-      this.colliders.push({ x: s * (W / 2 + edgeX) / 2, z: backZ, hw: (edgeX - W / 2) / 2, hd: 0.35 });
-    }
+    // The player is free to roam right off the main street and out into the
+    // meadow fields that wrap the town. The old invisible flank walls that
+    // sealed the street to a narrow corridor are gone; the real containment is
+    // now the solid buildings, restoration lots, cave mound and the ring of
+    // hills (their colliders), with `bounds` only a soft outer fence at the
+    // meadow's edge so nobody strolls off into the void. In pre-rotation coords
+    // the street runs along X and the meadow spreads far up- and down-street
+    // (±Z here becomes the field flanks after the quarter-turn).
     this.bounds = {
-      minX: -edgeX,
-      maxX: edgeX,
-      minZ: backLimit + 0.5,
-      maxZ: roomZ1 + 0.5,
+      minX: -streetW / 2 - 12, // out past both street ends into the meadow
+      maxX: streetW / 2 + 12,
+      minZ: backLimit - 18, // deep field beyond the lot row / cave hillside
+      maxZ: D / 2 + 27, // open meadow behind the shop and up the far flank
     };
   },
 
@@ -785,6 +712,61 @@ export const buildMethods = {
         group: lotGroup, before, after, collider,
         restored: false,
         interactPos: offV(def.x, def.z, 0, 2.3, yaw), // stand on the road side
+      });
+    }
+  },
+
+  // ---- meadow forage ---------------------------------------------------------
+  // Freckle the walkable fields around town with destructible scenery — flower
+  // clumps, berry bushes, nut saplings and mushrooms — each smashable with a
+  // dash for edible loot (see Shop.smashForage / decor.FIELD_FORAGE). Runs in
+  // post-rotation WORLD space (after _rotateTown), rejecting any spot on the
+  // paved street, inside the shop footprint, over a collider (walls, lots, cave,
+  // hills) or crowding another prop, so props only ever land out on open grass.
+  _buildForage() {
+    this.forageProps = [];
+    this.drops = []; // ground loot dropped by smashed forage (see Shop.update)
+    const r = rng(0x5A1AD5);
+    const cats = Object.keys(FIELD_FORAGE);
+    const totalW = cats.reduce((s, c) => s + FIELD_FORAGE[c].weight, 0);
+    const rollCat = () => {
+      let roll = r() * totalW;
+      for (const c of cats) { roll -= FIELD_FORAGE[c].weight; if (roll <= 0) return c; }
+      return cats[cats.length - 1];
+    };
+    const b = this.bounds;
+    const br = this.buildingRect;
+    // the paved street corridor (pavement + road + plaza), post-rotation — kept
+    // clear so forage reads as growing off the road, not on it. Mirrors the
+    // pre-rotation street bands laid out in _build / _buildTown.
+    const street = { minX: 3.5, maxX: 18, minZ: -23, maxZ: 23 };
+    const inRect = (x, z, rect, m = 0) =>
+      x > rect.minX - m && x < rect.maxX + m && z > rect.minZ - m && z < rect.maxZ + m;
+    const hitsCollider = (x, z, pad) =>
+      this.colliders.some((c) => !c.disabled &&
+        Math.abs(x - c.x) < c.hw + pad && Math.abs(z - c.z) < c.hd + pad);
+
+    const target = 52; // how many props to try to plant
+    let tries = 0;
+    while (this.forageProps.length < target && tries < target * 60) {
+      tries++;
+      const x = b.minX + 1 + r() * (b.maxX - b.minX - 2);
+      const z = b.minZ + 1 + r() * (b.maxZ - b.minZ - 2);
+      if (inRect(x, z, street)) continue; // off the road
+      if (inRect(x, z, br, 1.2)) continue; // clear of the building
+      if (hitsCollider(x, z, 0.9)) continue; // not inside a wall / lot / hill / cave
+      if (this.forageProps.some((p) => Math.abs(p.x - x) < 1.6 && Math.abs(p.z - z) < 1.6)) continue;
+      const cat = rollCat();
+      const [h0, h1] = FIELD_FORAGE[cat].height;
+      const height = h0 + r() * (h1 - h0);
+      const s = decorSprite(pick(r, DECOR[cat]), { height });
+      s.position.set(x, 0, z);
+      this.group.add(s);
+      this.forageProps.push({
+        group: s, cat, x, z, height,
+        color: DECOR_BURST[cat],
+        radius: Math.max(0.55, Math.min(1.1, height * 0.45)),
+        id: this.forageProps.length,
       });
     }
   },

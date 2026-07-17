@@ -338,13 +338,16 @@ export const combatMethods = {
     }
     // loot: enemies only drop merchandise — gold comes solely from selling it.
     // Mostly the monster's own signature loot, sometimes the dungeon's themed
-    // table, with rare finds growing likelier toward each hole's boss floor.
+    // table. Rare finds can't turn up on a dungeon's entry floor (localFloor 0)
+    // at all — they only start appearing deeper, growing likelier toward the
+    // hole's boss floor.
     const r = rng(e.seed + 99);
     if (r() < (e.def.dropRate ?? 0.6)) {
       const table = DUNGEON_LOOT[dungeonIndexFor(this.floor)] ?? DUNGEON_LOOT[0];
       const localFloor = (this.floor - 1) % FLOORS_PER_DUNGEON;
+      const rareChance = localFloor > 0 ? 0.12 + localFloor * 0.06 : 0;
       const id = e.def.loot && r() < 0.65 ? pick(r, e.def.loot)
-        : r() < 0.12 + localFloor * 0.06 ? pick(r, table.rare)
+        : r() < rareChance ? pick(r, table.rare)
         : pick(r, table.common);
       this.spawnDrop(id, e.creature.position.x, e.creature.position.z);
     }
@@ -478,8 +481,9 @@ export const combatMethods = {
     // cracking the tutorial chest is what unlocks the way home
     if (this.tutorial) this.revealStairs();
     const r = rng(this.seed + chest.id * 313);
-    // chest loot draws from the dungeon's own themed table, with the rare
-    // shelf growing likelier the closer the floor sits to the hole's boss
+    // chest loot draws from the dungeon's own themed table. The rare shelf is
+    // sealed on a dungeon's entry floor (localFloor 0) and only opens deeper,
+    // growing likelier the closer the floor sits to the hole's boss.
     const table = DUNGEON_LOOT[dungeonIndexFor(this.floor)] ?? DUNGEON_LOOT[0];
     const localFloor = (this.floor - 1) % FLOORS_PER_DUNGEON;
     const cx = chest.mesh.position.x + DUNGEON_ORIGIN.x; // chest is group-local
@@ -499,7 +503,8 @@ export const combatMethods = {
       this.spawnDrop("meat", cx + 0.7, cz);
       return "mushroom";
     }
-    const item = r() < 0.22 + localFloor * 0.18 ? pick(r, table.rare) : pick(r, table.common);
+    const rareChance = localFloor > 0 ? 0.22 + localFloor * 0.18 : 0;
+    const item = r() < rareChance ? pick(r, table.rare) : pick(r, table.common);
     this.spawnDrop(item, cx, cz + 0.8);
     if (r() < 0.6) this.spawnDrop(pick(r, table.common), cx + 0.7, cz);
     return item;

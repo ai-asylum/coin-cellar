@@ -169,6 +169,18 @@ export const DECOR_LOOT = {
   stones: { chance: 0.55, items: ["crystal"] },
 };
 
+// The forageable scenery dotted across the meadow fields around town, and the
+// edible loot each kind coughs up when the player dashes through it. Unlike the
+// cellar's grim decor, everything out here pays out food you can eat or sell —
+// blossoms, berries, nuts, mushrooms, herbs. `weight` biases how often each
+// kind is scattered (see Shop._buildForage); `chance`/`items` mirror DECOR_LOOT.
+export const FIELD_FORAGE = {
+  flowers:    { weight: 0.42, chance: 0.85, items: ["flower", "flower", "herb"], height: [0.4, 0.7] },
+  bushes:     { weight: 0.22, chance: 0.75, items: ["berries", "berries", "flower"], height: [0.7, 1.1] },
+  smallTrees: { weight: 0.18, chance: 0.75, items: ["nuts", "nuts", "berries"], height: [1.3, 2.0] },
+  mushrooms:  { weight: 0.18, chance: 0.7, items: ["mushroom", "mushroom", "caveshroom"], height: [0.4, 0.75] },
+};
+
 // --------------------------------------------------------- dungeon floors
 // Freckle the cellar with grim set dressing: dark stones and pale mushrooms
 // tucked into room corners, the odd gnarled dead tree against a wall, and a

@@ -31,9 +31,9 @@ export const persistenceMethods = {
         shortcutUntil: this.shortcutUntil,
         bossBeaten: this.bossBeaten,
         equipment: this.equipment,
-        expansions: this.expansionsBought,
         town: this.townRestored,
         tables: this.tablesRepaired,
+        npcMet: [...this._npcMet],
       }));
     } catch {}
   },
@@ -64,12 +64,13 @@ export const persistenceMethods = {
           if (s.bossBeaten === undefined && this.shortcutUntil.some((t) => t > 0))
             this.bossBeaten = true;
         }
-        if (Array.isArray(s.expansions))
-          this.expansionsBought = [!!s.expansions[0], !!s.expansions[1]];
         if (Array.isArray(s.town))
           this.townRestored = s.town.map(Boolean);
         if (Array.isArray(s.tables))
           this.tablesRepaired = s.tables.map(Boolean);
+        // townsfolk already introduced (so first-meeting hellos don't repeat)
+        if (Array.isArray(s.npcMet))
+          this._npcMet = new Set(s.npcMet.filter((id) => typeof id === "string"));
         // restore the loadout, dropping any worn piece whose id no longer maps
         // to a real item of the right slot (schema drift / removed content)
         if (s.equipment) {

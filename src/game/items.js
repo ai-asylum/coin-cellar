@@ -56,6 +56,14 @@ export const ITEMS = {
   mushroom: { name: "Wild Mushroom",    icon: "mushroom",  base: 10,  tier: 1, heal: 1 },
   meat:     { name: "Roast Meat",       icon: "meat",      base: 18,  tier: 1, heal: 2 },
   rathide:  { name: "Rat Hide",         icon: "rathide",   base: 6,   tier: 1 },
+  // ---- wild forage: edible bits smashed out of the meadow scenery around
+  // town (flower patches, berry bushes, nut saplings). No colour PNG art —
+  // they render from their own tiny procedural mesh in-world (`proc`) and an
+  // inline SVG glyph in the bag (see core/icons.js). All food you can eat or
+  // sell, like the herbs and mushrooms foraged down in the cellar.
+  flower:   { name: "Honey Blossom",    icon: "flower",    base: 6,   tier: 1, heal: 1, proc: true },
+  berries:  { name: "Wild Berries",     icon: "berries",   base: 7,   tier: 1, heal: 1, proc: true },
+  nuts:     { name: "Forest Nuts",      icon: "nuts",      base: 9,   tier: 1, heal: 1, proc: true },
   egg:      { name: "Griffon Egg",      icon: "egg",       base: 40,  tier: 2 },
   key:      { name: "Brass Key",        icon: "key",       base: 52,  tier: 2 },
   // FTUE-only quest props. `quest` items show no price, offer only the story
@@ -206,6 +214,39 @@ const makers = {
       mesh(new THREE.SphereGeometry(0.05, 10, 8), M(0xe1738a), 0.11, 0.1),
       mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.1).rotateZ(Math.PI / 2), M(0xf1ead8), -0.16, 0.1)
     ),
+  // a single meadow bloom: a slim green stem, a golden button eye and a ring
+  // of bright petals, with one leaf sprigging off the stalk
+  flower: () =>
+    group(
+      mesh(new THREE.CylinderGeometry(0.012, 0.018, 0.22, 6), M(0x4f9a4e), 0, 0.11),
+      mesh(new THREE.ConeGeometry(0.03, 0.11, 5), M(0x57c26f), -0.04, 0.11, 0, 0, 0.6),
+      ...[0, 1, 2, 3, 4].map((i) =>
+        mesh(
+          new THREE.SphereGeometry(0.035, 8, 6),
+          M(0xe86aa8),
+          Math.cos((i / 5) * Math.PI * 2) * 0.072,
+          0.24,
+          Math.sin((i / 5) * Math.PI * 2) * 0.072
+        )
+      ),
+      mesh(new THREE.SphereGeometry(0.042, 10, 8), M(0xf6c744), 0, 0.245)
+    ),
+  // a little cluster of ripe berries on a leafy sprig
+  berries: () =>
+    group(
+      mesh(new THREE.ConeGeometry(0.05, 0.15, 5), M(0x57c26f), 0.02, 0.2, 0, 0, 0.35),
+      mesh(new THREE.SphereGeometry(0.048, 10, 8), M(0x8a2f9a), -0.05, 0.06),
+      mesh(new THREE.SphereGeometry(0.052, 10, 8), M(0x9a3ba8), 0.045, 0.055),
+      mesh(new THREE.SphereGeometry(0.045, 10, 8), M(0x7d2f8a), 0, 0.12)
+    ),
+  // a pair of acorn-style nuts: rounded shells under ridged caps
+  nuts: () =>
+    group(
+      mesh(new THREE.SphereGeometry(0.07, 10, 8), M(0x9c6a38), -0.05, 0.07),
+      mesh(new THREE.CylinderGeometry(0.078, 0.06, 0.05, 10), M(0x6e4522), -0.05, 0.135),
+      mesh(new THREE.SphereGeometry(0.06, 10, 8), M(0x8a5a2e), 0.06, 0.06),
+      mesh(new THREE.CylinderGeometry(0.066, 0.05, 0.045, 10), M(0x6e4522), 0.06, 0.115)
+    ),
   // a small rolled-up pelt: a stubby tan bundle cinched by a paler cord
   rathide: () =>
     group(
@@ -338,6 +379,18 @@ function itemTexture(icon) {
 }
 
 export function itemSprite(id, size = 0.5) {
+  // `proc` items have no colour PNG — render their tiny 3D model instead, sized
+  // to roughly match a sprite of `size` so drop/shelf call sites (which then
+  // scale the returned group) land at the same on-screen size as billboarded
+  // wares. Wrapped in an outer group so a caller's `scale.setScalar()` and
+  // `add(shadow)` behave exactly as they do for the sprite branch.
+  if (ITEMS[id]?.proc) {
+    const inner = itemMesh(id);
+    inner.scale.setScalar(size * 4);
+    const g = new THREE.Group();
+    g.add(inner);
+    return g;
+  }
   const icon = ITEMS[id]?.icon || id;
   const sprite = new THREE.Sprite(
     new THREE.SpriteMaterial({ map: itemTexture(icon), transparent: true, alphaTest: 0.5 })

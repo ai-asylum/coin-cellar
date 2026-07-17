@@ -870,7 +870,7 @@ function renderPanel() {
     panelEl.append(el("div", { className: "muted", textContent: "amber = room extent · blue = street walkable · green = focus travel · cones = camera spots" }));
 
     shop.zones.forEach((z, i) => {
-      panelEl.append(el("h4", { textContent: i === 0 ? "zone · shop" : `zone · back room ${i}` }));
+      panelEl.append(el("h4", { textContent: i === 0 ? "zone · shop" : `zone · ${i}` }));
       panelEl.append(
         row("min x", numInput(round2(z.minX), (v) => editCam((c) => { c.zones[i].minX = v; }))),
         row("max x", numInput(round2(z.maxX), (v) => editCam((c) => { c.zones[i].maxX = v; }))),

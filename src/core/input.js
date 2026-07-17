@@ -31,6 +31,13 @@ export class Input {
     this.tapEdge = false;
     this.tap = null;
     this.isTouch = matchMedia("(pointer: coarse)").matches;
+    // Landscape touch swaps the on-screen attack button for tap-to-attack (see
+    // `tapAttack`): the screen's the target, so a quick tap fires the dash.
+    const oriMq = matchMedia("(orientation: landscape)");
+    this.isLandscape = oriMq.matches;
+    const syncOri = () => (this.isLandscape = oriMq.matches);
+    if (oriMq.addEventListener) oriMq.addEventListener("change", syncOri);
+    else oriMq.addListener(syncOri);
 
     this.onKey = null; // set by the game to receive shortcut keydowns
 
@@ -133,11 +140,19 @@ export class Input {
     }
   }
 
+  // Touch landscape drops the on-screen attack button: a quick tap on the play
+  // area fires the dash instead (the game reads this to route taps to combat).
+  get tapAttack() {
+    return this.isTouch && this.isLandscape;
+  }
+
   // Label the primary button with an icon name (the crossed-swords attack glyph
   // while delving, a context icon above ground), or pass a falsy name to hide
   // it. Touch-only: never forces it visible on desktop, where CSS keeps it
-  // hidden.
+  // hidden. In tap-to-attack mode (landscape) the swords button is suppressed —
+  // the tap is the attack, so the button would just be dead weight.
   setActionLabel(name, show = true) {
+    if (name === "swords" && this.tapAttack) name = null;
     const on = !!name;
     if (this.isTouch) this.actionBtn.style.display = on ? "" : "none";
     // Let CSS know the primary button is live so the bag/store buttons can slot
@@ -180,6 +195,11 @@ export class Input {
         this.stick.style.display = "block";
         this._joyBase.style.transform = `translate(${p.x}px, ${p.y}px)`;
         this._joyKnob.style.transform = `translate(${p.x}px, ${p.y}px)`;
+      } else if (this.tapAttack) {
+        // moving with one thumb: a second finger anywhere is an attack (dash),
+        // so landscape players can strike without lifting off the joystick
+        e.preventDefault();
+        this._dodgeQueued = true;
       }
     }
   }

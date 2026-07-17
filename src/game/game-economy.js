@@ -1,6 +1,6 @@
 // The shop economy: the wallet, dungeon pickups, stocking/unstocking the
 // storeroom, the haggle callbacks (sell + buy), sale/buy juice, and the
-// town/expansion purchases. Attached to Game.prototype via Object.assign, so
+// town restoration purchases. Attached to Game.prototype via Object.assign, so
 // `this` is the live Game instance.
 import * as THREE from "three";
 import { icon, itemIcon } from "../core/icons.js";
@@ -65,6 +65,29 @@ export const economyMethods = {
     // the loot flies across the screen into the backpack
     this.hud.flyToBag(_v.copy(drop.mesh.position).setY(0.8), itemIcon(it.icon));
     this._tutAdvance("loot");
+    this._save();
+  },
+
+  // Pocket a piece of meadow forage off the ground. Kept separate from
+  // _pickupDrop (which is bound to the dungeon's synced drop list): forage is
+  // scattered client-side out in the fields, so the grab is resolved locally —
+  // it drops into the bag and syncs the bag onward like any other change.
+  _pickupForage(drop) {
+    if (this.inventory.length >= this.invCap) {
+      if (!this._bagFullT || performance.now() - this._bagFullT > 2000) {
+        this.hud.bagFull();
+        this._bagFullT = performance.now();
+      }
+      return;
+    }
+    this.shop.takeForageDrop(drop);
+    if (this.today) this.today.looted++;
+    this.audio.pickup();
+    this.inventory.push(drop.item);
+    this._syncInv();
+    const it = ITEMS[drop.item];
+    this.hud.float(_v.copy(drop.mesh.position).setY(1.2), `${itemIcon(it.icon)} ${it.name}`, "loot");
+    this.hud.flyToBag(_v.copy(drop.mesh.position).setY(0.8), itemIcon(it.icon));
     this._save();
   },
 
@@ -297,26 +320,6 @@ export const economyMethods = {
     this.today = this._freshDayStats();
     this._syncState();
     this._save();
-  },
-
-  // Buy the flanking room i (2000g). The door swings open for good and the
-  // room lights up as an extension of the shop. Purchase is persisted.
-  _extendShop(i) {
-    if (this.net.isGuest) return this.hud.toast("Only the host runs the shop.");
-    const ex = this.shop.expansions && this.shop.expansions[i];
-    if (!ex || ex.unlocked) return;
-    if (this.gold < ex.cost) {
-      this.audio.deny();
-      return this.hud.toast(`${icon("coin")} Not enough gold — need ${ex.cost}g`);
-    }
-    this._spendGold(ex.cost, ex.interactPos);
-    this.shop.unlockExpansion(i);
-    this.expansionsBought[i] = true;
-    this.audio.chest();
-    this.engine.shake(0.12);
-    this.hud.toast(`${icon("shop")} Shop extended!`);
-    this._save();
-    this._syncState();
   },
 
   // Pay to repair display table `i`: a broken shelf (200g) or the fancy vitrine

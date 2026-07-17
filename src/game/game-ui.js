@@ -280,7 +280,7 @@ export const uiMethods = {
         ${this._gearDollHTML("inv")}
       </div>
       <div class="bag-panel sheet-card">
-        ${this._bagHead(canDrop ? "sip a potion or drop loot to free space" : inShop ? "store items to stock your shelves" : "everything you carry")}
+        ${this._bagHead(canDrop ? "sip a potion or drop loot to free space" : inShop ? "store items in the storeroom" : "everything you carry")}
         <div class="bag-list">${rows || "<small class='empty'>empty — go dive!</small>"}</div>
       </div>
     `, `bag-sheet bag-split${refresh ? " bag-refresh" : ""}`, { onBackdrop: () => this.hud.hideSheet() });

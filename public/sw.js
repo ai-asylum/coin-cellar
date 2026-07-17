@@ -1,7 +1,7 @@
 // Coin Cellar service worker — makes the game installable and lets it launch
 // offline once its assets have been visited. Runtime cache only (no build-time
 // precache list), so it survives Vite's hashed filenames without a manifest.
-const CACHE = "coin-cellar-v1";
+const CACHE = "coin-cellar-v2";
 
 self.addEventListener("install", (e) => {
   self.skipWaiting();
@@ -18,14 +18,37 @@ self.addEventListener("activate", (e) => {
   );
 });
 
-// Stale-while-revalidate for same-origin GETs: serve from cache instantly when
-// present, and refresh the cached copy in the background. Falls back to the
-// network (and, for navigations, to the cached shell) when offline.
+// Navigations (the HTML shell) are network-first so a fresh deploy is picked up
+// immediately — the shell references content-hashed bundles, and serving a stale
+// shell would pin the app to an old build. Everything else (the hashed assets
+// themselves) uses stale-while-revalidate: instant from cache, refreshed in the
+// background. Both fall back gracefully when offline.
 self.addEventListener("fetch", (e) => {
   const req = e.request;
   if (req.method !== "GET") return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
+
+  if (req.mode === "navigate") {
+    e.respondWith(
+      (async () => {
+        const cache = await caches.open(CACHE);
+        try {
+          const res = await fetch(req);
+          if (res && res.ok) cache.put(req, res.clone());
+          return res;
+        } catch {
+          return (
+            (await cache.match(req)) ||
+            (await cache.match("./index.html")) ||
+            (await cache.match("index.html")) ||
+            Response.error()
+          );
+        }
+      })()
+    );
+    return;
+  }
 
   e.respondWith(
     (async () => {
@@ -40,11 +63,6 @@ self.addEventListener("fetch", (e) => {
       if (cached) return cached;
       const res = await network;
       if (res) return res;
-      // offline & uncached navigation → fall back to the app shell
-      if (req.mode === "navigate") {
-        const shell = await cache.match("./index.html") || await cache.match("index.html");
-        if (shell) return shell;
-      }
       return Response.error();
     })()
   );

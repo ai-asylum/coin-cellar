@@ -5,9 +5,10 @@
 // The Recettear loop: buy low in the dungeon, pin the price just under each
 // customer's hidden tolerance, chain PERFECT deals.
 import * as THREE from "three";
-import { makeToonMaterial, feedOccluder } from "../core/toon.js";
+import { feedOccluder, makeBlobShadow } from "../core/toon.js";
 import { variantForSeed } from "../chargen/blocky.js";
 import { ITEMS, itemSprite } from "./items.js";
+import { disposeDecor, FIELD_FORAGE } from "./decor.js";
 import { rng, pick } from "../core/engine.js";
 import { buildMethods } from "./shop-build.js";
 import { pathMethods } from "./shop-pathfinding.js";
@@ -65,24 +66,6 @@ export class Shop {
     this.camStreetOffset = new THREE.Vector3().fromArray(CAMERA_STREET_OFFSET);
     this.camShopFitAspect = CAMERA_SHOP_FIT_ASPECT;
     this._build();
-  }
-
-  // Buy your way into a flanking room: swing its door open for good, lift the
-  // doorway collider so the player can stroll through, and light the room up
-  // (floor, walls and rug) so it reads as an extension of the shop. `instant`
-  // skips the swing (used when restoring a saved purchase on load).
-  unlockExpansion(i, instant = false) {
-    const ex = this.expansions && this.expansions[i];
-    if (!ex || ex.unlocked) return;
-    ex.unlocked = true;
-    ex.floor.material = makeToonMaterial({ color: ex.litColor, rim: 0 });
-    for (const w of ex.walls) w.material = this._townWallMat;
-    ex.rug.visible = true;
-    this.colliders = this.colliders.filter((c) => c !== ex.doorCollider);
-    if (instant) {
-      ex._doorA = 1;
-      ex.pivot.rotation.y = -1.7;
-    }
   }
 
   // Rebuild lot `i`: hide the ruin/plot, reveal the finished house. `instant`
@@ -231,10 +214,101 @@ export class Shop {
     return this.slots.filter((s) => s.item).length;
   }
 
+  // ------------------------------------------------------------ meadow forage
+  // Smash every destructible forage prop within `reach` of `pos` (the dashing
+  // hero). Each pops in a leafy burst and may drop a bit of edible loot on the
+  // grass where it stood. Returns whether anything was hit. Runs client-side
+  // (the scatter is seeded, so peers agree); loot is granted locally on pickup.
+  smashForage(pos, reach) {
+    const props = this.forageProps;
+    if (!props || !props.length) return false;
+    let hit = false;
+    for (let i = props.length - 1; i >= 0; i--) {
+      const d = props[i];
+      if (Math.hypot(d.x - pos.x, d.z - pos.z) > reach + d.radius) continue;
+      props.splice(i, 1);
+      this._burstForage(d);
+      this._dropForageLoot(d);
+      hit = true;
+    }
+    return hit;
+  }
+
+  // Pop one forage prop: a two-tone particle spray scaled to its size, a light
+  // crunch, then free the billboard's material.
+  _burstForage(d) {
+    const game = this.game;
+    const n = Math.round(10 + d.height * 8);
+    _fv.set(d.x, d.height * 0.45, d.z);
+    game.particles.burst(_fv, { color: d.color ?? 0x9bd77a, n, speed: 3 + d.height, up: 2 + d.height * 0.8, life: 0.6, size: 0.9 + d.height * 0.2 });
+    game.particles.burst(_fv, { color: 0xffffff, n: Math.ceil(n * 0.35), speed: 2.4, up: 2.2, life: 0.45, size: 0.7 });
+    game.audio.projHit?.();
+    disposeDecor(d.group);
+    d.group.removeFromParent();
+  }
+
+  // Roll a prop's forage drop from FIELD_FORAGE and spawn it where it fell.
+  // Seeded off the prop's stable id so a given prop always yields the same haul.
+  _dropForageLoot(d) {
+    const table = FIELD_FORAGE[d.cat];
+    if (!table) return;
+    const r = rng(0xF0 + d.id * 131 + 7);
+    if (r() > table.chance) return;
+    this.spawnForageDrop(pick(r, table.items), d.x, d.z);
+  }
+
+  // Drop an item onto the grass at (x, z): a little billboarded/mesh pickup that
+  // hops out, settles, and is drawn into the bag by the shop-area loot magnet
+  // (see Game._updatePlayer). Mirrors Dungeon.spawnDrop, kept local to the shop.
+  spawnForageDrop(itemId, x, z) {
+    const mesh = itemSprite(itemId);
+    const rx = x + (Math.random() - 0.5) * 0.5;
+    const rz = z + (Math.random() - 0.5) * 0.5;
+    mesh.position.set(rx, 0.35, rz);
+    mesh.scale.setScalar(1.35);
+    const shadow = makeBlobShadow(0.3);
+    shadow.position.set(0, -mesh.position.y + 0.02, 0);
+    mesh.add(shadow);
+    this.group.add(mesh);
+    const drop = {
+      id: this.game.net.newId(), item: itemId, mesh,
+      phase: Math.random() * 9, restX: rx, restZ: rz, pull: 0,
+      fly: { fromX: rx, fromZ: rz, t: 0, dur: 0.38, arc: 0.5 },
+    };
+    this.drops.push(drop);
+    return drop;
+  }
+
+  takeForageDrop(drop) {
+    drop.mesh.removeFromParent();
+    this.drops = this.drops.filter((d) => d !== drop);
+  }
+
+  // Animate the ground loot: the freshly-dropped hop/arc onto the grass, then a
+  // gentle idle bob (same feel as the dungeon's floor drops).
+  _updateForageDrops(dt, elapsed) {
+    if (!this.drops) return;
+    for (const drop of this.drops) {
+      if (drop.fly) {
+        const f = drop.fly;
+        f.t += dt;
+        const k = Math.min(1, f.t / f.dur);
+        const e = 1 - (1 - k) * (1 - k);
+        drop.mesh.position.x = f.fromX + (drop.restX - f.fromX) * e;
+        drop.mesh.position.z = f.fromZ + (drop.restZ - f.fromZ) * e;
+        drop.mesh.position.y = 0.35 + Math.sin(k * Math.PI) * f.arc;
+        if (k >= 1) drop.fly = null;
+      } else {
+        drop.mesh.position.y = 0.35 + Math.sin(elapsed * 3 + drop.phase) * 0.09;
+      }
+    }
+  }
+
   // ------------------------------------------------------------ customers
   update(dt, elapsed) {
     for (const s of this.shafts) s.userData.update(dt, elapsed);
     this._updateLighting(dt);
+    this._updateForageDrops(dt, elapsed);
 
     // throb the floor outline on whichever locked table is the current target
     if (this._glowTable && this._glowTable.outline)
@@ -279,16 +353,6 @@ export class Shop {
       this.doorLeaves[1].rotation.y = base - a;
     }
 
-    // ease each bought expansion door open (they swing into their room and stay)
-    if (this.expansions) {
-      for (const ex of this.expansions) {
-        const tgt = ex.unlocked ? 1 : 0;
-        if (Math.abs(ex._doorA - tgt) < 0.001) continue;
-        ex._doorA += (tgt - ex._doorA) * Math.min(1, dt * 6);
-        ex.pivot.rotation.y = -ex._doorA * 1.7; // swing into the back room
-      }
-    }
-
     const br = this.buildingRect;
     const inBuilding = !!pp && this.game.playerArea === "shop" &&
       pp.x > br.minX - 0.3 && pp.x < br.maxX + 0.3 &&
@@ -298,7 +362,7 @@ export class Shop {
     this.inBuilding = inBuilding;
 
     // The roof and the wall nearest the camera disappear while the player is
-    // anywhere inside (shop + back rooms), keeping the whole interior readable.
+    // inside the shop, keeping the whole interior readable.
     if (this.nearCameraWalls) {
       for (const wall of this.nearCameraWalls) wall.visible = !inBuilding;
     }
@@ -398,6 +462,12 @@ export class Shop {
     );
     for (const g of this.decorSprites ?? []) {
       const m = g.userData.decorMat;
+      if (m) m.color.copy(_tDecor);
+    }
+    // the meadow forage props are the same unlit billboards — dim them with the
+    // rest of the world so they cool into dusk/night too
+    for (const p of this.forageProps ?? []) {
+      const m = p.group?.userData.decorMat;
       if (m) m.color.copy(_tDecor);
     }
   }
@@ -635,6 +705,7 @@ function sampleDayClock(hour) {
 const _GLOW_OFF = _col(0x2a2418);
 const _GLOW_ON = _col(0xffe6a8);
 const _tGlow = new THREE.Color();
+const _fv = new THREE.Vector3();
 const _tSky = new THREE.Color();
 const _tGround = new THREE.Color();
 const _tSun = new THREE.Color();

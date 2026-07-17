@@ -136,11 +136,19 @@ button { font-family: inherit; cursor: pointer; }
 @keyframes chipbounce { 30% { transform: scale(1.18); } }
 #hearts {
   position: absolute;
-  top: calc(env(safe-area-inset-top) + 6px);
+  bottom: calc(env(safe-area-inset-bottom) + 14px);
   left: 50%; transform: translateX(-50%);
   z-index: 20;
   letter-spacing: -1px; line-height: 1;
   filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.45));
+}
+/* portrait: tuck the health into the lower-left corner, just under the delving
+   coin total (see #gold-chip.gold-corner) rather than centred along the bottom */
+@media (orientation: portrait) {
+  #hearts {
+    left: calc(env(safe-area-inset-left) + 12px);
+    transform: none;
+  }
 }
 .chip-btns { margin-left: auto; display: flex; gap: 6px; }
 .icon-btn {
@@ -449,7 +457,7 @@ button { font-family: inherit; cursor: pointer; }
   box-shadow: 0 2px 0 #4a2c14;
 }
 #store-btn:active { transform: scale(0.93); }
-#bag-btn.pop { animation: bagpop 0.34s ease-out; }
+#bag-btn.pop, #store-btn.pop { animation: bagpop 0.34s ease-out; }
 @keyframes bagpop {
   0% { transform: scale(1); }
   40% { transform: scale(1.22); }
@@ -505,9 +513,14 @@ button { font-family: inherit; cursor: pointer; }
   /* store sits beside the bag when both are up (shop) */
   #store-btn { right: calc(102px + env(safe-area-inset-right)); }
 
-  /* while the action button owns the corner, slide the bag inboard of it */
+  /* while the action button owns the corner, slide the bag inboard of it —
+     and push the storeroom further in still so it stays beside the bag rather
+     than overlapping it */
   #hud.action-on #bag-btn {
     right: calc(114px + env(safe-area-inset-right));
+  }
+  #hud.action-on #store-btn {
+    right: calc(198px + env(safe-area-inset-right));
   }
 }
 
@@ -595,16 +608,20 @@ button { font-family: inherit; cursor: pointer; }
 .hg-speech.pop { animation: chipbounce 0.3s; }
 
 /* ---- in-world dialogue (the Mayor & co.) ---- */
-/* claim the bottom third of the screen: a full-width speech box with the
+/* full-screen overlay so a click/tap anywhere advances the line; the speech
+ * block itself floats in the lower-middle (~3/4 down the screen), with the
  * character bust rising up from behind its top edge. */
 #dialog {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
-  height: 34vh; min-height: 170px;
-  display: flex; flex-direction: column; justify-content: flex-end;
-  padding: 0 14px 14px;
+  position: fixed; inset: 0; z-index: 40;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
+  padding: 0 14px 22vh;
   pointer-events: auto; cursor: pointer;
 }
 #dialog.hidden { display: none; }
+/* holds the box (in flow) with the bust rising up from behind its top edge */
+.dlg-wrap {
+  position: relative; width: 100%; max-width: 960px; box-sizing: border-box;
+}
 
 /* ---- chat input bar (press T) ---- */
 #chat-bar {
@@ -622,11 +639,16 @@ button { font-family: inherit; cursor: pointer; }
 #chat-input:focus { border-color: var(--gold); }
 
 .dlg-portrait {
-  /* sit behind the box (underneath) but tall enough to peek above its top edge */
-  position: absolute; left: 26px; bottom: 0; z-index: 1;
-  /* fluid: scales with the smaller viewport dimension so it grows on desktop
-     yet stays sensible on short/narrow phones */
-  height: clamp(240px, 52vmin, 520px); width: auto;
+  /* the bust sits behind the box and stretches to the bubble: its base pins to
+     the box bottom while the head peeks a fixed amount above the top edge, so a
+     taller bubble (e.g. with reply choices) grows the portrait with it instead
+     of swallowing it. object-fit keeps the character's proportions and pins the
+     head up top as the frame stretches down. */
+  position: absolute; left: 26px; z-index: 1;
+  top: calc(-1 * clamp(120px, 24vmin, 260px)); /* how far the head rises above the box */
+  bottom: 0;                                    /* stretch down to the box's base */
+  width: clamp(160px, 32vmin, 320px);
+  object-fit: cover; object-position: center top;
   filter: drop-shadow(0 6px 14px rgba(30, 16, 4, 0.45));
   animation: portraitin 0.28s ease-out; pointer-events: none;
 }
@@ -675,7 +697,7 @@ button { font-family: inherit; cursor: pointer; }
   60% { transform: translateX(10px); opacity: 1; }
 }
 @media (max-width: 720px) {
-  #dialog { height: 32vh; min-height: 150px; }
+  #dialog { padding-bottom: 18vh; }
   .dlg-portrait { left: 14px; }
 }
 .hg-capitalism {
@@ -853,8 +875,10 @@ button { font-family: inherit; cursor: pointer; }
 
 /* inventory */
 .inv-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 12px; }
-.inv-grid.swap-grid { grid-template-columns: repeat(4, 1fr); --swap-row-h: 68px; }
-.swap-grid .inv-item { height: var(--swap-row-h); }
+.inv-grid.swap-grid { grid-template-columns: repeat(3, 1fr); --swap-row-h: 96px; }
+.swap-grid .inv-item { height: var(--swap-row-h); gap: 4px; padding: 12px 4px 10px; font-size: 32px; }
+.swap-grid .inv-item small { font-size: 11px; }
+.swap-grid .inv-item span { font-size: 12px; }
 /* the storeroom grid is a fixed window of two rows, then scrolls */
 .swap-stash {
   grid-auto-rows: var(--swap-row-h);
@@ -1038,34 +1062,6 @@ button { font-family: inherit; cursor: pointer; }
 .fs-gate-txt {
   margin-top: 14px; font-size: 18px; font-weight: 800; letter-spacing: 0.4px;
   text-shadow: 0 2px 0 var(--wood-dark);
-}
-
-/* ============================================================ forced landscape */
-/* Touch phones only play in landscape. When the browser won't honour a Screen
-   Orientation lock (e.g. iOS Safari) we render landscape anyway by rotating the
-   whole game 90° into a box the size of the (portrait) viewport with its axes
-   swapped. Game._initLandscapeLock toggles this class and flips `viewport` so
-   every screen-space calculation follows the rotated layout. */
-html.force-landscape #app,
-html.force-landscape #hud {
-  inset: 0 auto auto 0;
-  width: 100vh;
-  height: 100vw;
-  transform-origin: 0 0;
-  transform: translateX(100vw) rotate(90deg);
-}
-/* iOS Safari resolves `vh`/`vw` against the *largest* viewport (address bar
-   hidden), so the rotated box ends up bigger than the visible screen — the
-   scene scales up and the bottom-edge touch buttons slide off. Dynamic units
-   track the currently-visible viewport, matching the window.innerHeight/Width
-   the renderer sizes itself from, so the two stay locked together. */
-@supports (width: 100dvh) {
-  html.force-landscape #app,
-  html.force-landscape #hud {
-    width: 100dvh;
-    height: 100dvw;
-    transform: translateX(100dvw) rotate(90deg);
-  }
 }
 
 /* ============================================================ admin panel */

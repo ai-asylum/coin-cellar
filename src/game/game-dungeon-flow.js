@@ -80,10 +80,20 @@ export const dungeonFlowMethods = {
     this.player.heading = 0; // face south, down the road toward the shop
     this.player.animator.prevPos.copy(this.player.position);
     this.hud.showBag(true); // the bag is reachable everywhere, town included
-    this.hud.showStore(this.playerArea === "shop" && !this.tutorial);
+    const storeUp = this.playerArea === "shop" && !this.tutorial;
+    this.hud.showStore(storeUp);
     this.hud.setGoldCorner(false);
     this.audio.stairs();
     this._snapCamera();
+    // homecoming juice: the loot banked on the way up (see _depositBag) whooshes
+    // from the backpack button across to the now-visible storeroom button. Give
+    // the layout a beat to settle before measuring the buttons.
+    const loot = this._pendingStoreFly;
+    this._pendingStoreFly = null;
+    if (storeUp && loot && loot.length) {
+      this.audio.chest?.();
+      setTimeout(() => this.hud.flyBagToStore(loot, () => this.audio.pickup?.()), 320);
+    }
     // the FTUE's first walk-out is a beat of its own (banner + the road line)
     if (this.tutorial === "exit") this._onFtueCaveExit();
   },
@@ -263,6 +273,9 @@ export const dungeonFlowMethods = {
     if (this.remote && this.remote.area === "dungeon" && !this.remote.dead) return;
     if (this.net.isGuest) return this.net.send({ t: "depositReq" });
     const n = this.inventory.length;
+    // remember what was banked so the walk into the shop can play the loot
+    // whooshing from the backpack over to the storeroom (see _exitCave)
+    this._pendingStoreFly = this.inventory.map((id) => itemIcon(ITEMS[id]?.icon || "box"));
     this.stash.push(...this.inventory);
     this.inventory = [];
     this.hud.toast(`${icon("box")} ${n} item${n > 1 ? "s" : ""} moved to the storeroom`);
@@ -382,6 +395,33 @@ export const dungeonFlowMethods = {
       boss_floor: bossFloor,
       coop: this.net.connected,
     });
+  },
+
+  // Standing on the up-stairs: leaving ends the run and banks whatever the bag
+  // holds, so confirm before climbing out rather than bouncing straight home
+  // off a stray tap. In co-op the sim keeps ticking so a partner isn't stranded.
+  _returnHomePrompt() {
+    if (this.hud.sheetOpen) return;
+    // the guided first delve stays friction-free — climb straight out
+    if (this.tutorial) return this._returnHome();
+    this.paused = !this.net.connected;
+    const el = this.hud.showSheet(`
+      <div class="sheet-title"><span class="big-emoji">${icon("home")}</span>
+        <div><b>Leave the dungeon?</b><br/><small>Climb back to the surface — your run ends and the bag empties into the storeroom.</small></div></div>
+      <div class="sheet-btns">
+        <button class="btn deny" id="up-stay">${icon("arrowDown")} Keep delving</button>
+        <button class="btn deal" id="up-leave">${icon("home")} Go up</button>
+      </div>
+    `, "sheet-card");
+    el.querySelector("#up-stay").onclick = () => {
+      this.paused = false;
+      this.hud.hideSheet();
+    };
+    el.querySelector("#up-leave").onclick = () => {
+      this.paused = false;
+      this.hud.hideSheet();
+      this._returnHome();
+    };
   },
 
   // "Go up" from a dungeon: climb back out into the cave beside the mouth you

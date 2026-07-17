@@ -30,9 +30,8 @@ door, permanently. Its deepest point holds the descent into the cellar lobby
 portrait, so the whole town is turned to match: the rocky cave mouth caps the
 TOP of the road (its maw facing the camera), the shop sits just below it with
 its door on the up-street side and a roof that fades away while you're
-inside, the buyable back rooms hang off the shop's far side (never eating
-road frontage), and the village runs down the screen with the ruined row
-along the far side. Pit → till is a few steps, and every trip passes the
+inside, and the village runs down the screen with the ruined row along the
+far side. Pit → till is a few steps, and every trip passes the
 ruins. Dungeons generate on a tall grid too (18×32 cells, taller rooms), so
 floors sprawl along the screen's long axis — and "deeper" is always
 up-screen: road → cave → pit all continue the same walking direction.

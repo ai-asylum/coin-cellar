@@ -432,6 +432,60 @@ export class HUD {
     };
   }
 
+  /**
+   * Homecoming juice: the loot you just banked whooshes across the screen from
+   * the backpack button over to the storeroom button. Each item bursts big
+   * mid-arc then shrinks into the storeroom, and both buttons bounce as the
+   * swarm leaves / lands — a button-to-button victory lap. `iconHtmls` is the
+   * list of item icons to send; `onLand(i)` fires as each one arrives (for a
+   * sound tick). No-op unless both buttons are on screen.
+   */
+  flyBagToStore(iconHtmls, onLand = null) {
+    const bag = this.root.querySelector("#bag-btn");
+    const store = this.root.querySelector("#store-btn");
+    if (!bag || !store) return;
+    if (bag.classList.contains("hidden") || store.classList.contains("hidden")) return;
+    if (!iconHtmls || !iconHtmls.length) return;
+    const bagR = bag.getBoundingClientRect();
+    const stoR = store.getBoundingClientRect();
+    if (!bagR.width || !stoR.width) return;
+    const start = { x: bagR.left + bagR.width / 2, y: bagR.top + bagR.height / 2 };
+    const end = { x: stoR.left + stoR.width / 2, y: stoR.top + stoR.height / 2 };
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const items = iconHtmls.slice(0, 12); // cap the swarm so it stays readable
+    items.forEach((html, i) => {
+      const el = document.createElement("div");
+      el.className = "item-fly";
+      el.innerHTML = html;
+      el.style.left = start.x + "px";
+      el.style.top = start.y + "px";
+      this.floatiesEl.appendChild(el);
+      const arc = 60 + Math.random() * 80;               // how high it bows up
+      const sway = (Math.random() - 0.5) * 90;           // fan the swarm out
+      const anim = el.animate(
+        [
+          { transform: "translate(-50%,-50%) scale(0.25) rotate(0deg)", opacity: 0, offset: 0 },
+          { transform: `translate(calc(-50% + ${dx * 0.28 + sway}px), calc(-50% + ${dy * 0.28 - arc}px)) scale(1.7) rotate(-16deg)`, opacity: 1, offset: 0.35 },
+          { transform: `translate(calc(-50% + ${dx * 0.7 + sway * 0.35}px), calc(-50% + ${dy * 0.7 - arc * 0.4}px)) scale(1.25) rotate(12deg)`, opacity: 1, offset: 0.7 },
+          { transform: `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(0.3) rotate(0deg)`, opacity: 0.85, offset: 1 },
+        ],
+        { duration: 660 + Math.random() * 260, delay: 100 + i * 95, easing: "cubic-bezier(.4,.05,.5,1)", fill: "forwards" }
+      );
+      // as each item launches, kick the bag; as it lands, kick the storeroom
+      bag.classList.remove("pop");
+      void bag.offsetWidth;
+      bag.classList.add("pop");
+      anim.onfinish = () => {
+        el.remove();
+        store.classList.remove("pop");
+        void store.offsetWidth;
+        store.classList.add("pop");
+        onLand?.(i);
+      };
+    });
+  }
+
   // -------------------------------------------------- FTUE guide + key hints
   /**
    * Bouncing arrow + text label over a world position (the current tutorial
@@ -500,11 +554,13 @@ export class HUD {
           .join("")}</div>`
       : `<div class="dlg-cta">${cta}</div>`;
     el.innerHTML = `
-      ${portrait ? `<img class="dlg-portrait" src="${portrait}" alt="">` : ""}
-      <div class="dlg-box">
-        ${name ? `<div class="dlg-name">${name}${tag ? `<span class="dlg-tag">${tag}</span>` : ""}</div>` : ""}
-        <div class="dlg-text">${text}</div>
-        ${foot}
+      <div class="dlg-wrap">
+        ${portrait ? `<img class="dlg-portrait" src="${portrait}" alt="">` : ""}
+        <div class="dlg-box">
+          ${name ? `<div class="dlg-name">${name}${tag ? `<span class="dlg-tag">${tag}</span>` : ""}</div>` : ""}
+          <div class="dlg-text">${text}</div>
+          ${foot}
+        </div>
       </div>`;
     this.speakOpen = true;
     if (choices && choices.length) {
@@ -854,6 +910,13 @@ export class HUD {
   // overlap the point if that's what fits on screen.
   anchorSheetAbove(worldPos) {
     if (this.sheetEl.classList.contains("hidden")) return;
+    // On a phone held upright the tables sit high in the frame, so anchoring the
+    // menu above the slot pushes it out of thumb's reach. Leave it pinned to the
+    // bottom of the screen (the sheet's default CSS position) instead.
+    if (matchMedia("(pointer: coarse)").matches && viewport.h > viewport.w) {
+      this._clearSheetAnchor();
+      return;
+    }
     const p = this._project(worldPos);
     const el = this.sheetEl;
     const w = el.offsetWidth, h = el.offsetHeight;

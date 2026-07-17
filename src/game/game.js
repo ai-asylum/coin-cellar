@@ -134,9 +134,6 @@ export class Game {
     // pre-bossBeaten save with earned shortcuts implies a fallen boss).
     // Persisted (see _save/_load).
     this.bossBeaten = false;
-    // which flanking rooms the player has bought their way into (left, right).
-    // Persisted; re-applied to the shop right after it's built (see below).
-    this.expansionsBought = [false, false];
     // which of the street's restoration lots the player has rebuilt with the
     // Mayor's fund (one flag per lot; sized to the shop's lots once it's built).
     // townResidents mirrors the archetype each restored house brings, weighting
@@ -155,6 +152,10 @@ export class Game {
     // id — surfaced (once) as their opening line the next time you chat with
     // them (see recordNpcReflection / _talkToNpc). In-memory flavour only.
     this._npcMemory = new Map();
+    // townsfolk you've already been introduced to — the very first chat with
+    // each gets a one-off "oh, you're new in town" hello (see _talkToNpc).
+    // Filled from the save in _load; persisted so intros never repeat.
+    this._npcMet = new Set();
     // the FTUE's scripted opening cinematic (see _updateCaveIntro)
     this._cine = null;
 
@@ -172,8 +173,6 @@ export class Game {
 
     // --- world
     this.shop = new Shop(this);
-    // re-open any flanking rooms bought in a previous session
-    this.expansionsBought.forEach((bought, i) => { if (bought) this.shop.unlockExpansion(i, true); });
     // size the flag array to however many lots the shop built (padding a shorter
     // saved array with fresh, un-restored lots), then rebuild any restored
     // street lots (and re-seat their residents) from the save
@@ -301,7 +300,9 @@ export class Game {
     const zone = outdoors ? this.shop.zoneCenter(p) : null;
     const street = outdoors && !zone ? this.shop.streetCenter(p) : null;
     const camTarget = inBoss ? this.dungeon.bossCenter
-      : inDungeon || inCave ? p
+      // delving, look a little up the floor (−z reads as "ahead" on screen) so
+      // the player sits lower in frame and you can see more of what's coming
+      : inDungeon || inCave ? _dungeonFocus.set(p.x, 0, p.z - DUNGEON_LOOKAHEAD)
       : zone ? _townCenter.set(zone.cx, 0, zone.cz)
       : street ? _townCenter.set(street.cx, 0, street.cz)
       : p;
@@ -403,10 +404,12 @@ export class Game {
     // dash / attack — grabbed before movement so it can override it. Underground
     // (dungeon or the FTUE cave) the primary on-screen button IS the attack, so
     // a press of it (actionEdge) triggers the dash too; keys (J/Shift) and the
-    // right mouse button dash in every area via dodgeEdge.
+    // right mouse button dash in every area via dodgeEdge. In touch landscape
+    // there's no attack button — a quick tap on the screen is the attack.
     const underground = this.playerArea === "dungeon" || this.playerArea === "cave";
     const attackPress = this.input.dodgeEdge ||
-      (underground && this.input.actionEdge);
+      (underground && this.input.actionEdge) ||
+      (underground && this.input.tapAttack && this.input.tapEdge);
     if (attackPress && !sheetBlocked) this._dodge();
 
     // wound up on a locked foe: rooted while the shoulders coil back, then the
@@ -497,6 +500,33 @@ export class Game {
       }
     }
 
+    // the same floor-loot magnet works out on the meadow: forage smashed off the
+    // fields (blossoms, berries, nuts, mushrooms) is pulled in and pocketed.
+    if (this.playerArea === "shop" && this.shop.drops &&
+        performance.now() >= (this._pickupSuppressT || 0)) {
+      const bagFull = this.inventory.length >= this.invCap;
+      for (const drop of [...this.shop.drops]) {
+        if (drop.fly) continue;
+        const dp = drop.mesh.position;
+        const dx = c.position.x - dp.x;
+        const dz = c.position.z - dp.z;
+        const d2 = dx * dx + dz * dz;
+        if (d2 <= PICKUP_COLLECT_R * PICKUP_COLLECT_R) {
+          this._pickupForage(drop);
+          continue;
+        }
+        if (!bagFull && d2 <= PICKUP_MAGNET_R * PICKUP_MAGNET_R) {
+          const d = Math.sqrt(d2) || 1e-4;
+          drop.pull = Math.min(PICKUP_PULL_MAX, (drop.pull || PICKUP_PULL_MIN) + PICKUP_PULL_ACCEL * dt);
+          const step = Math.min(drop.pull * dt, d);
+          dp.x += (dx / d) * step;
+          dp.z += (dz / d) * step;
+        } else if (drop.pull) {
+          drop.pull = 0;
+        }
+      }
+    }
+
     // context action. Combat is dash-only now, so the action button is purely a
     // context / interact button: it appears for portals / stairs / gates / chests
     // and the shop's deals, and hides when there's nothing to do. `act.label`
@@ -510,8 +540,18 @@ export class Game {
       // when something's in reach, so the two never fight over one press.
       this.input.setActionLabel("swords", false);
       this.input.setInteract(act.label, hasInteract);
+      this._fieldDashBtn = false;
     } else {
-      this.input.setActionLabel(act.label);
+      // above ground the primary button is the context button when something's
+      // in reach; out in the open fields (nothing to interact with, not indoors)
+      // it becomes a dash button so touch players can forage the meadow too.
+      this._fieldDashBtn = !hasInteract && this.playerArea === "shop" && !this.shop.inBuilding;
+      // portrait touch interacts by tapping the fixture directly (see _shopPick),
+      // so the context button is just clutter — drop it and keep only the
+      // field/forage dash button out in the open meadow.
+      const portraitTouch = this.input.isTouch && !this.input.isLandscape;
+      const ctxLabel = portraitTouch ? null : act.label;
+      this.input.setActionLabel(this._fieldDashBtn ? "swords" : ctxLabel);
       this.input.setInteract(null, false);
     }
     // hovering a shop fixture with the mouse previews the same ring + hint you'd
@@ -553,7 +593,15 @@ export class Game {
       if (this.input.interactEdge && hasInteract && act.fn) act.fn();
       // primary button / Space / click acts only above ground — while delving it
       // attacks instead (handled up top via attackPress), so skip it in-dungeon
-      if (this.input.actionEdge && !inDungeon && act.fn) act.fn();
+      if (this.input.actionEdge && !inDungeon) {
+        if (act.fn) act.fn();
+        // out in the fields with nothing to interact with, the touch button
+        // fires the forage dash (desktop dashes with right-click / J / Shift)
+        else if (this._fieldDashBtn && this.input.isTouch) this._dodge();
+      }
+      // touch landscape has no attack button: a tap that didn't land on a shop
+      // fixture fires the forage dash out in the open field
+      if (this.input.tapAttack && this.input.tapEdge && this._fieldDashBtn) this._dodge();
     }
 
     // Serve the whole line in one go: after the player opens the first deal we
@@ -681,24 +729,6 @@ export class Game {
           return { label: "moneyfly", hint: "Buy", fn: () => this._buyFrom(head), focus, color: 0x8fe0ff };
         }
       }
-      // the sealed side rooms: step up to a locked door to buy the extension.
-      // Once bought the door swings open for good and there's nothing to prompt.
-      // Locked out until the FTUE's done so a new player isn't pulled off the loop.
-      if (!this.tutorial && this.shop.expansions) {
-        for (let i = 0; i < this.shop.expansions.length; i++) {
-          const ex = this.shop.expansions[i];
-          if (ex.unlocked || p.distanceTo(ex.interactPos) >= 1.6) continue;
-          const focus = _focus.copy(ex.interactPos).setY(0.06).clone();
-          const broke = this.gold < ex.cost;
-          return {
-            label: broke ? "warning" : "coin",
-            hint: `Extend ${ex.cost}g`,
-            fn: () => this._extendShop(i),
-            focus,
-            color: broke ? 0x9aa0aa : 0x66ff9e,
-          };
-        }
-      }
       // the street's restoration lots: step up to a ruin/empty plot to pay the
       // Mayor's fund and rebuild it into a home. Hidden during the FTUE.
       if (!this.tutorial && this.shop.lots) {
@@ -790,7 +820,7 @@ export class Game {
       // "out" is straight home; everywhere else too — the bag deposits itself.
       if (!this.dungeon.stairsHidden) {
         _v.copy(this.dungeon.upStairsPos).add(DUNGEON_ORIGIN);
-        if (_v.distanceTo(p) < 1.5) return { label: "home", hint: "Go up", fn: () => this._returnHome(), focus: _v.clone().setY(0.06), color: 0x8fd0ff };
+        if (_v.distanceTo(p) < 1.5) return { label: "home", hint: "Go up", fn: () => this._returnHomePrompt(), focus: _v.clone().setY(0.06), color: 0x8fd0ff };
       }
       // the down-stairs press on (absent on boss floors — the way deeper there
       // is the stairs the boss leaves behind)
@@ -890,6 +920,12 @@ export class Game {
     for (const pb of shop.passersby) if (talkable(pb)) pairs.push([pb.creature, { type: "npc", obj: pb }]);
     for (const table of shop.tables) pairs.push([table.group, { type: "table", table }]);
     for (const slot of shop.slots) if (slot.mesh) pairs.push([slot.mesh, { type: "slot", slot }]);
+    // restoration lots: tap the run-down ruin/plot to rebuild it (the same
+    // action the proximity button used to run — held back during the FTUE)
+    if (!this.tutorial && shop.lots)
+      shop.lots.forEach((lot, i) => {
+        if (!lot.restored && lot.before) pairs.push([lot.before, { type: "lot", idx: i }]);
+      });
 
     const objs = pairs.map((p) => p[0]);
     const hits = this._ray.intersectObjects(objs, true);
@@ -932,6 +968,11 @@ export class Game {
       const focus = _focus.copy(target.obj.creature.position).setY(0.06).clone();
       return { hint: "Talk", focus, color: 0x9ad0ff };
     }
+    if (target.type === "lot") {
+      const lot = this.shop.lots[target.idx];
+      const broke = this.gold < lot.cost;
+      return { hint: `Restore ${lot.cost}g`, focus: _focus.copy(lot.interactPos).setY(0.06).clone(), color: broke ? 0x9aa0aa : 0x66ff9e };
+    }
     if (target.type === "slot") {
       const slot = target.slot;
       const table = slot.table;
@@ -964,6 +1005,10 @@ export class Game {
     }
     if (target.type === "npc") {
       this._talkToNpc(target.obj);
+      return;
+    }
+    if (target.type === "lot") {
+      if (!this.tutorial) this._restoreLot(target.idx);
       return;
     }
     if (target.type === "slot") {
@@ -1019,7 +1064,8 @@ export class Game {
     this.shop._litInit = false;
     const area = this.playerArea;
     if (area === "dungeon" || area === "cave") {
-      this.engine.camTarget.copy(this.player.position);
+      const p = this.player.position;
+      this.engine.camTarget.set(p.x, 0, p.z - DUNGEON_LOOKAHEAD);
       this.engine.camOffset.copy(_camDungeon);
     } else {
       const zone = this.shop.zoneCenter(this.player.position);
@@ -1095,36 +1141,21 @@ export class Game {
     sync();
   }
 
-  // ------------------------------------------------------------ landscape lock
-  // On touch the game only plays in landscape, and we never ask the player to
-  // tilt: we just render landscape directly. First choice is the real Screen
-  // Orientation lock (Android/Chrome, once fullscreen) — the browser rotates and
-  // all coordinate math stays native. Where that isn't available (notably iOS
-  // Safari) we fall back to CSS-rotating #app / #hud 90°, flipping `viewport`
-  // into its swapped-dimension mode so the renderer, HUD projection and joystick
-  // all follow the rotated layout. Desktop (mouse) is never touched.
+  // ------------------------------------------------------------ orientation
+  // The game plays in whatever orientation the device is held — both portrait
+  // and landscape are supported. We never lock the screen or CSS-rotate; we
+  // just keep the renderer sized to the live viewport on every rotation. The
+  // coordinate math reads native window dimensions (`viewport.rotated` stays
+  // false), so nothing needs swapping.
   _initLandscapeLock() {
     if (!this.input.isTouch) return;
-    const so = screen.orientation;
-    const tryLock = () => {
-      if (so && so.lock) so.lock("landscape").catch(() => {});
-    };
-    // A native lock only takes once we're fullscreen, so retry on entry too.
-    document.addEventListener("fullscreenchange", tryLock);
-    document.addEventListener("webkitfullscreenchange", tryLock);
-    tryLock();
-
+    viewport.rotated = false;
+    document.documentElement.classList.remove("force-landscape");
+    const sync = () => this.engine.resize();
     const mq = matchMedia("(orientation: portrait)");
-    const sync = () => {
-      const portrait = mq.matches; // still portrait ⇒ the lock didn't take
-      document.documentElement.classList.toggle("force-landscape", portrait);
-      viewport.rotated = portrait;
-      this.engine.resize();
-    };
-    // matchMedia change fires on rotation; the extras catch mobile browsers that
-    // only settle the viewport a beat after the orientation event lands.
     if (mq.addEventListener) mq.addEventListener("change", sync);
     else mq.addListener(sync);
+    // Some mobile browsers only settle the viewport a beat after the event.
     window.addEventListener("orientationchange", () => setTimeout(sync, 120));
     window.addEventListener("resize", sync);
     sync();
@@ -1383,7 +1414,15 @@ function fitShopCamera(aspect, shop) {
   const scale = Math.max(1, shop.camShopFitAspect / Math.max(0.01, aspect));
   return _camShopFit.copy(shop.camShopOffset).multiplyScalar(scale);
 }
-const _camDungeon = new THREE.Vector3(0, 8.4, 8.2);
+// Pulled back to sit the same distance from the hero as the overworld street
+// cam (~15.7 units — see CAMERA_STREET_OFFSET), so delving isn't more zoomed-in
+// than town. Keeps the dungeon's own (slightly lower, more forward) tilt.
+const _camDungeon = new THREE.Vector3(0, 11.25, 10.98);
+// how far up the floor the delving camera looks past the hero (world units):
+// biases the focus toward the top of the screen so more of the path ahead shows
+const DUNGEON_LOOKAHEAD = 3;
+// scratch focus point for the delving camera's look-ahead bias
+const _dungeonFocus = new THREE.Vector3();
 // pulled back + higher so the whole boss arena stays framed while the cam is fixed
 const _camBoss = new THREE.Vector3(0, 13.5, 10);
 // scratch target for the bounded indoor camera focus

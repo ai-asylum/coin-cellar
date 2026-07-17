@@ -411,9 +411,12 @@ export class Dungeon {
     const nChests = gen.chestBase + Math.floor(r() * gen.chestRand);
     for (let i = 0; i < nChests; i++) {
       const room = rooms[Math.floor(r() * rooms.length)];
-      const p = cellPos(room.x + Math.floor(r() * room.w), room.y + Math.floor(r() * room.h));
-      if (p.distanceTo(this.entrancePos) < 2.5) continue;
-      const chest = makeChest();
+        const p = cellPos(room.x + Math.floor(r() * room.w), room.y + Math.floor(r() * room.h));
+        if (p.distanceTo(this.entrancePos) < 2.5) continue;
+        // keep the way up and the way down clear so a chest never blocks stairs
+        if (p.distanceTo(this.upStairsPos) < 2.5) continue;
+        if (this.hasDownStairs && p.distanceTo(this.stairsPos) < 2.5) continue;
+        const chest = makeChest();
       chest.position.copy(p);
       chest.rotation.y = r() * Math.PI * 2;
       this.colliders.push(modelCollider(chest, DUNGEON_ORIGIN));

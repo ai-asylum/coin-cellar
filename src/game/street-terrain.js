@@ -126,16 +126,18 @@ function meshFor(parts, { outline = 0 } = {}) {
 // `backZ/paveFar/roadFar/backLimit` mirror the street bands laid out in
 // Shop._build; `cave` is the mouth's centre from _buildCaveMouth. All
 // pre-rotation coords.
-export function buildStreetTerrain(group, { streetW, backZ, paveFar, roadFar, backLimit, cave }) {
+export function buildStreetTerrain(group, { streetW, backZ, paveFar, roadFar, backLimit, cave, bounds }) {
   const g = new THREE.Group();
   const r = rng(0x7E44A1);
   const halfW = streetW / 2;
 
   // -- meadow: one big grass plane under the whole town, sunk a hair below
-  // the road/pavement/plaza planes so they read as built on top of it
+  // the road/pavement/plaza planes so they read as built on top of it. Sized
+  // to run well past the walkable bounds so it always underlies the horizon
+  // hill belt (no grass edge / void ever peeks out from behind the hills).
   const meadowY = -0.05;
   const meadow = new THREE.Mesh(
-    new THREE.PlaneGeometry(130, 74).rotateX(-Math.PI / 2),
+    new THREE.PlaneGeometry(150, 110).rotateX(-Math.PI / 2),
     makeToonMaterial({ color: GRASS, rim: 0 })
   );
   meadow.position.set(0, meadowY, -5);
@@ -155,7 +157,7 @@ export function buildStreetTerrain(group, { streetW, backZ, paveFar, roadFar, ba
   };
 
   // -- turf patches freckling the meadow (skipping the built-up strip: the
-  // shop + back rooms footprint and the road corridor get no grass)
+  // shop footprint and the road corridor get no grass)
   for (let i = 0; i < 70; i++) {
     const x = (r() - 0.5) * 110;
     const z = -36 + r() * 62;
@@ -263,9 +265,17 @@ export function buildStreetTerrain(group, { streetW, backZ, paveFar, roadFar, ba
 
   // -- hills: big low-poly spheres buried past their equator, ringing the
   // town — a wooded ridge behind the lot row, a hillside the cave mouth digs
-  // into, and rolling ground closing off both street ends and the shop's back
+  // into, and rolling ground closing off both street ends and the shop's back.
+  // `footprints` records each hill's ground-level silhouette radius so the town
+  // can drop a matching collider under it and fence the walkable meadow at the
+  // foot of the slopes (see Shop._build), rather than let the player clip in.
+  const footprints = [];
   const hill = (x, z, radius, color, sink = 0.5) => {
     hills.push({ geo: bake(new THREE.SphereGeometry(radius, 12, 9), x, meadowY - radius * sink, z), color });
+    // the sphere's cross-section where it breaks the ground plane (y = 0)
+    const cy = meadowY - radius * sink; // buried centre height
+    const rGround = Math.sqrt(Math.max(0, radius * radius - cy * cy));
+    if (rGround > 0.6) footprints.push({ x, z, r: rGround });
   };
   // ridge behind the restoration lots (behind the sprite treeline; the spread
   // keeps every slope's toe just shy of the houses' rear walls)
@@ -280,17 +290,41 @@ export function buildStreetTerrain(group, { streetW, backZ, paveFar, roadFar, ba
   // held clear of both the dark maw and the top-of-street restoration lot
   hill(cave.x - 8.4, cave.z + 1.5, 8, HILL_DIRT, 0.62);
   hill(cave.x - 4, cave.z + 5.5, 5, HILL_B, 0.6);
-  // the village end of the street, and the ground behind the shop's back rooms
+  // the village end of the street, and the ground behind the shop
   hill(halfW + 6, roadMid, 7, HILL_A, 0.6);
   hill(halfW + 4, backZ + 4, 5, HILL_B, 0.62);
   hill(-6, 19, 7, HILL_B, 0.6);
   hill(6, 20, 6, HILL_A, 0.62);
   hill(-14, 17, 5, HILL_A, 0.62);
 
+  // -- horizon belt: a continuous wrap of hills ringing the whole walkable
+  // meadow (the `bounds` rectangle the player can roam). Whichever way the
+  // player faces, rolling ground closes off the view, so the flat meadow rim
+  // and the void beyond the play area are never seen. The toe of each hill
+  // sits just past the bounds edge, layering behind the closer detail hills
+  // above. (Their colliders, added town-side, turn the belt into the solid
+  // fence at the field's edge.)
+  if (bounds) {
+    const { minX, maxX, minZ, maxZ } = bounds;
+    const OUT = 4; // push each hill's toe this far past the walkable edge
+    const ringHill = (x, z) => {
+      const radius = 5.5 + r() * 3.5;
+      hill(x + (r() - 0.5) * 1.6, z + (r() - 0.5) * 1.6, radius, r() < 0.5 ? HILL_A : HILL_B, 0.56 + r() * 0.12);
+    };
+    for (let x = minX - OUT; x <= maxX + OUT; x += 4.5 + r() * 3) {
+      ringHill(x, minZ - OUT - r() * 3); // far edge (up-street)
+      ringHill(x, maxZ + OUT + r() * 3); // near edge (behind the shop)
+    }
+    for (let z = minZ - OUT; z <= maxZ + OUT; z += 4.5 + r() * 3) {
+      ringHill(minX - OUT - r() * 3, z); // west flank
+      ringHill(maxX + OUT + r() * 3, z); // east flank (village end)
+    }
+  }
+
   g.add(meshFor(cover));
   g.add(meshFor(tufts));
   g.add(meshFor(rocks, { outline: 0.014 }));
   g.add(meshFor(hills));
   group.add(g);
-  return g;
+  return { group: g, hills: footprints };
 }
