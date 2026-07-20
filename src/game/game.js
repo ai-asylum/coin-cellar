@@ -111,6 +111,9 @@ export class Game {
     // coils past the foe's bearing, then whips through it as the lunge launches
     this._dashWindT = -1;
     this._dashWindFoe = null;
+    // "Auto strike" telegraph: counts down once a foe is strikeable, so the
+    // swing doesn't fire the instant a foe steps into range (see update())
+    this._autoStrikeWindT = 0;
     this._dashHitIds = null; // foes / chests struck by the current dash (dedupe)
     this._dashDmg = 0;
     this._dashCrit = false;
@@ -128,6 +131,7 @@ export class Game {
     this._pendingLead = null; // { n, seed, hole } — where to catch up to
     this.godMode = false;
     this.debugHour = null; // admin time-of-day override (0–24); null = real clock
+    this.debugOccasion = null; // admin calendar-occasion override (id); null = real date
     this._adminOpen = false;
     this.npcDebug = false; // admin toggle: float state/stuck cards over townsfolk
     this.paused = false;
@@ -140,6 +144,9 @@ export class Game {
     // pre-bossBeaten save with earned shortcuts implies a fallen boss).
     // Persisted (see _save/_load).
     this.bossBeaten = false;
+    // the deepest dungeon floor ever reached — used to detect a genuinely new
+    // depth milestone the townsfolk react to (see _enterDungeon). Persisted.
+    this.deepestEver = 0;
     // which of the street's restoration lots the player has rebuilt with the
     // Mayor's fund (one flag per lot; sized to the shop's lots once it's built).
     // townResidents mirrors the archetype each restored house brings, weighting
@@ -158,6 +165,10 @@ export class Game {
     // id — surfaced (once) as their opening line the next time you chat with
     // them (see recordNpcReflection / _talkToNpc). In-memory flavour only.
     this._npcMemory = new Map();
+    // the latest notable player deed the town is gossiping about (boss felled,
+    // new depth reached), surfaced as the next chat's opening line — one
+    // reaction per resident (see recordPlayerDeed / _takeNpcDeed).
+    this._recentDeed = null;
     // townsfolk you've already been introduced to — the very first chat with
     // each gets a one-off "oh, you're new in town" hello (see _talkToNpc).
     // Filled from the save in _load; persisted so intros never repeat.
@@ -198,6 +209,9 @@ export class Game {
     this.tablesRepaired.length = this.shop.tables.length;
     this.tablesRepaired[0] = true;
     this.tablesRepaired.forEach((done, i) => { if (done) this.shop.repairTable(i, true); });
+    // now the tables exist and any bought repairs are replayed, put the saved
+    // shelf stock back out on display (see _load / _restoreStock)
+    this._restoreStock();
     this.dungeon = new Dungeon(this);
     // the cave at the end of the road — the dungeon's permanent front door and
     // shared lobby (its trapdoor mouths are the way down; see _updateCaveTravel
@@ -210,7 +224,8 @@ export class Game {
     this._lobbyAvatars = new Map(); // lobby player id -> {creature, wasAtk}
 
     // --- player
-    this.player = new BlockyCreature("a", { height: 1.3, turnRate: PLAYER_TURN_RATE });
+    this.player = new BlockyCreature("a", { height: 1.5, turnRate: PLAYER_TURN_RATE });
+    this.player.setTorchLit(false); // the hero's own lantern shouldn't wash out their model
     this.player.position.copy(this.shop.playerSpawn);
     this._heldWeaponId = this.equipment.weapon;
     this.player.holdItem(weaponMesh(this.equipment.weapon));
@@ -285,11 +300,9 @@ export class Game {
     this._titleNpcWander = { tx: cx, tz: czTitle, pause: 0, speed: 1.3, curSpeed: 0 };
     this._pickTitleTarget(this._titleNpcWander);
 
-    // the hero mills about too, as ambient life (not the camera's focus)
-    this.player.position.set(cx + 1.6, 0, czTitle + 1.0);
-    this.player.animator.prevPos.copy(this.player.position);
-    this._titlePlayerWander = { tx: cx, tz: czTitle, pause: 0, speed: 1.5, curSpeed: 0 };
-    this._pickTitleTarget(this._titlePlayerWander);
+    // keep the hero out of the title screen entirely — the menu shot is just
+    // the focal NPC roaming the town, with the player revealed on Play.
+    this.player.mesh.visible = false;
 
     // frame the NPC straight away so the camera doesn't sail in from the origin
     const street = this.shop.streetCenter(npc.position);
@@ -311,13 +324,21 @@ export class Game {
   _titleWanderStep(c, w, dt, elapsed) {
     if (w.pause > 0) {
       w.pause -= dt;
+      // stood still: idly turn to look about every couple of seconds
+      w.lookT = (w.lookT ?? 0) - dt;
+      if (w.lookT <= 0) {
+        w.lookBase = (w.lookBase ?? c.heading) + (0.5 + Math.random() * 1.0) * (Math.random() < 0.5 ? -1 : 1);
+        c.heading = w.lookBase;
+        w.lookT = 0.9 + Math.random() * 1.7;
+      }
       w.curSpeed += (0 - w.curSpeed) * Math.min(1, dt * 5.5);
     } else {
       const dx = w.tx - c.position.x, dz = w.tz - c.position.z;
       const d = Math.hypot(dx, dz);
       if (d < 0.4) {
         this._pickTitleTarget(w);
-        w.pause = Math.random() < 0.5 ? 0.6 + Math.random() * 1.8 : 0;
+        if (Math.random() < 0.65) { w.pause = 1.2 + Math.random() * 2.4; w.lookBase = c.heading; w.lookT = 0.4 + Math.random() * 0.7; }
+        else w.pause = 0;
         w.curSpeed += (0 - w.curSpeed) * Math.min(1, dt * 5.5);
       } else {
         w.curSpeed += (w.speed - w.curSpeed) * Math.min(1, dt * 5.5);
@@ -334,7 +355,6 @@ export class Game {
 
   _updateTitleAttract(dt, elapsed) {
     this._titleWanderStep(this._titleNpc, this._titleNpcWander, dt, elapsed);
-    this._titleWanderStep(this.player, this._titlePlayerWander, dt, elapsed);
 
     this.shop.update(dt, elapsed);
     this.particles.update(dt);
@@ -351,8 +371,8 @@ export class Game {
     if (!this._titleAttract) return;
     this._titleAttract = false;
     this._titleNpcWander = null;
-    this._titlePlayerWander = null;
     if (this._titleNpc) { this._titleNpc.dispose(); this._titleNpc = null; }
+    this.player.mesh.visible = true;
     this.player.position.copy(this.shop.playerSpawn);
     this.player.animator.prevPos.copy(this.player.position);
     if (this.playerName) this.net.goOnline(this.playerName);
@@ -370,6 +390,7 @@ export class Game {
   update(dt, elapsed) {
     this.input.update();
     if (this._titleAttract) {
+      this.audio.setMood("menu"); // calm title-screen theme behind the menu
       this._updateTitleAttract(dt, elapsed);
       return;
     }
@@ -433,13 +454,29 @@ export class Game {
     const shopOffset = zone ? fitShopCamera(this.engine.camera.aspect, this.shop) : null;
     const camOffset = inDungeon || inCave ? _camDungeon
       : shopOffset || this.shop.camStreetOffset;
-    this.engine.camTarget.lerp(camTarget, 1 - Math.pow(0.001, dt));
-    this.engine.camOffset.lerp(camOffset, 1 - Math.pow(0.1, dt));
-    this.audio.setMood(this.gameOver ? null : inDungeon || inCave ? "dungeon" : "shop");
+    // a live conversation pulls the camera down to eye level (chatting with a
+    // townsperson, or reading the note); otherwise the usual overview framing
+    if (this._dialogueCamTarget()) {
+      this.engine.camTarget.lerp(_dialogueTarget, 1 - Math.pow(0.02, dt));
+      this.engine.camOffset.lerp(_dialogueOffset, 1 - Math.pow(0.02, dt));
+    } else {
+      this.engine.camTarget.lerp(camTarget, 1 - Math.pow(0.001, dt));
+      this.engine.camOffset.lerp(camOffset, 1 - Math.pow(0.1, dt));
+    }
+    // music mood: boss theme once the keeper's fight is live, dungeon while
+    // delving, shop while standing in a shop zone, town out on the street
+    const boss = this.dungeon.boss;
+    const bossFight = inDungeon && boss && boss.deadT < 0 && this.dungeon.gateOpen;
+    this.audio.setMood(
+      this.gameOver ? null
+      : bossFight ? "boss"
+      : inDungeon || inCave ? "dungeon"
+      : zone ? "shop"
+      : "town"
+    );
 
     // boss health bar: only once the gate's been breached and the fight is on —
     // the keeper waits dormant behind the bars before that, so no bar yet
-    const boss = this.dungeon.boss;
     if (inDungeon && boss && boss.deadT < 0 && this.dungeon.gateOpen) {
       const bossName = boss.def?.name ?? "Ogre King of the Cellar";
       this.hud.showBossBar(boss.enraged ? `${bossName} — Enraged` : bossName, boss.enraged);
@@ -553,9 +590,13 @@ export class Game {
       // below in the context block. Attack always wins the button when a foe's
       // near: the on-screen button OR a tap anywhere fires the strike here.
       // a chest is a strike target too, so it lights the attack button like a foe
+      // the button now fires a plant-and-strike (not a lunge), so it should only
+      // light within the strike's actual reach — otherwise there's a dead zone
+      // where the button reads "attack" but the swing can't land
+      const joyRange = combat.strikeInPlace.range || 2.2;
       joyFoe = underground && !sheetBlocked
-        ? (this._nearestEnemyWithin(combat.joystickButton.range || 3.2, 0, 0, -2)
-          || this._nearestChestWithin(combat.joystickButton.range || 3.2, 0, 0, -2)) : null;
+        ? (this._nearestEnemyWithin(joyRange, 0, 0, -2)
+          || this._nearestChestWithin(joyRange, 0, 0, -2)) : null;
       if (joyFoe && (this.input.joyDashEdge || this.input.tapEdge)) attackPress = true;
     } else {
       this.input.setJoyDash(false);
@@ -565,8 +606,27 @@ export class Game {
         this._nearestEnemyWithin(combat.autodash.range || 2.4, 0, 0, -2)) {
       attackPress = true; // no button — a foe in range triggers the strike
     }
+    // "Auto strike": like autodash (no button, foe-in-range triggers) but it
+    // plants and swings in place instead of lunging. Its own strike cooldown
+    // (set in _strikeInPlace) gates re-triggering via the _dodgeCd <= 0 check.
+    // A short wind-up telegraph delays the swing after a foe becomes strikeable
+    // so it doesn't fire the instant one steps into range; it re-arms after each
+    // swing (and whenever no foe is reachable) so every strike waits the beat.
+    const strikeRange = combat.strikeInPlace.range || 2.2;
+    if (mode === "strikeInPlace" && underground && !sheetBlocked &&
+        this._dashT < 0 && this._dashWindT < 0 && this._dodgeCd <= 0 &&
+        (this._nearestEnemyWithin(strikeRange, 0, 0, -2) ||
+         this._nearestChestWithin(strikeRange, 0, 0, -2))) {
+      this._autoStrikeWindT -= dt;
+      if (this._autoStrikeWindT <= 0) {
+        attackPress = true;
+        this._autoStrikeWindT = combat.strikeInPlace.windup ?? 0.5;
+      }
+    } else {
+      this._autoStrikeWindT = combat.strikeInPlace.windup ?? 0.5;
+    }
     if (attackPress && !sheetBlocked) {
-      if (mode === "strikeInPlace" && underground) this._strikeInPlace();
+      if ((mode === "strikeInPlace" || mode === "joystickButton") && underground) this._strikeInPlace();
       else this._dodge(swipeDir);
       // autodash holds off re-triggering for its configured beat (never shorter
       // than the dash's own recovery, which _dodge already set)
@@ -914,6 +974,7 @@ export class Game {
     if (label === "swords" || label === "skull") return "danger";
     if (label === "warning") return "muted"; // locked / can't afford
     if (label === "coin" || label === "box") return "build"; // repair / stock / swap
+    if (label === "tools") return "build"; // hire the builder to raise a house
     if (label === "home" && color === 0x66ff9e) return "build"; // restore a lot
     return "primary"; // talk, haggle, buy, dive, descend, go up/home…
   }
@@ -950,23 +1011,16 @@ export class Game {
           return { label: "moneyfly", hint: "Buy", fn: () => this._buyFrom(head), focus, color: 0x8fe0ff };
         }
       }
-      // the street's restoration lots: step up to a ruin/empty plot to pay the
-      // Mayor's fund and rebuild it into a home. Hidden during the FTUE.
-      if (!this.tutorial && this.shop.lots) {
-        for (let i = 0; i < this.shop.lots.length; i++) {
-          const lot = this.shop.lots[i];
-          if (lot.restored || p.distanceTo(lot.interactPos) >= 1.8) continue;
-          // only surface the restore prompt once it's actually affordable —
-          // no greyed "can't afford" teaser (skip so other actions still show)
-          if (this.gold < lot.cost) continue;
-          const focus = _focus.copy(lot.interactPos).setY(0.06).clone();
-          return {
-            label: "home",
-            hint: `Restore ${lot.cost}g`,
-            fn: () => this._restoreLot(i),
-            focus,
-            color: 0x66ff9e,
-          };
+      // the town builder: step up to the foreman waiting by the ruined row to
+      // hire him to raise the next house (cheapest first). Unlike the old direct
+      // restore, the offer shows even when short on gold (the choice sheet spells
+      // out the price, like the boss gate). Hidden during the FTUE.
+      const builder = this.shop.builder;
+      if (!this.tutorial && builder?.creature && builder.state === "idle") {
+        const hasWork = this.shop.lots?.some((lot, i) => !lot.restored && !this.townRestored[i]);
+        if (hasWork && p.distanceTo(builder.creature.position) < 1.9) {
+          const focus = _focus.copy(builder.creature.position).setY(0.06).clone();
+          return { label: "tools", hint: "Hire builder", fn: () => this._builderPrompt(), focus, color: 0x66ff9e };
         }
       }
       // display tables: walk up to a slot to stock it. A stocked slot offers a
@@ -981,10 +1035,12 @@ export class Game {
           // shouldn't be nudged to fix shelves before they've closed their first
           // sale. Until then a broken table just reads as scenery (no prompt,
           // no glow). Returning players (tutorial null) see it as usual.
-          // only surface the repair prompt (and the table glow) once it's
-          // affordable — no greyed "can't afford" teaser while short on gold
-          if (!this.tutorial && this.gold >= table.cost) {
+          // The prompt always spells out the price — even when short on gold
+          // (like the builder / boss gate) so the player knows what to save for;
+          // _repairTable toasts "Not enough gold" if they try before they can.
+          if (!this.tutorial) {
             const i = this.shop.tables.indexOf(table);
+            const afford = this.gold >= table.cost;
             return {
               label: "coin",
               hint: `Repair ${table.cost}g`,
@@ -992,7 +1048,7 @@ export class Game {
               // no ground ring for tables — the whole table glows white instead
               // (see Shop.highlightTable); the hint text floats above the top.
               focus: _focus.copy(table.group.position).setY(1.35).clone(),
-              color: 0x66ff9e,
+              color: afford ? 0x66ff9e : 0xff9d5c,
               glowTable: table,
             };
           }
@@ -1009,7 +1065,7 @@ export class Game {
       // counter) to strike up a chat.
       const talk = this._nearestTalkNpc();
       if (talk) {
-        const focus = _focus.copy(talk.creature.position).setY(0.06).clone();
+        const focus = talk.creature.getWorldPosition(_focus).setY(0.06).clone();
         return { label: "speak", hint: "Talk", fn: () => this._talkToNpc(talk), focus, color: 0x9ad0ff };
       }
       return { label: null };
@@ -1084,7 +1140,10 @@ export class Game {
     let best = null, bd = 1.7;
     const consider = (obj) => {
       if (!obj || obj === head || !obj.npc || !obj.creature) return;
-      const d = _v.copy(obj.creature.position).setY(0).distanceTo(p);
+      // world position: most townsfolk live directly in shop.group (local ==
+      // world), but the dojo master is nested in the positioned dojo group, so
+      // his local .position is dojo-relative — getWorldPosition reconciles both
+      const d = obj.creature.getWorldPosition(_v2).setY(0).distanceTo(p);
       if (d < bd) { bd = d; best = obj; }
     };
     for (const c of this.shop.customers) {
@@ -1107,7 +1166,8 @@ export class Game {
     const npc = a.target?.creature;
     if (!npc) { this._talkApproach = null; return; }
     a.t += dt;
-    _v.set(npc.position.x - c.position.x, 0, npc.position.z - c.position.z);
+    npc.getWorldPosition(_v2); // dojo master lives in a positioned group (see _nearestTalkNpc)
+    _v.set(_v2.x - c.position.x, 0, _v2.z - c.position.z);
     const d = _v.length();
     if (d > 1e-3) c.heading = Math.atan2(_v.x, _v.z); // square up to them
     if (d <= a.stopDist || a.t > 2.5) { this._talkApproach = null; return; }
@@ -1142,6 +1202,9 @@ export class Game {
       else if (talkable(cust)) pairs.push([cust.creature, { type: "npc", obj: cust }]);
     }
     for (const pb of shop.passersby) if (talkable(pb)) pairs.push([pb.creature, { type: "npc", obj: pb }]);
+    if (talkable(shop.dojo?.master)) pairs.push([shop.dojo.master.creature, { type: "npc", obj: shop.dojo.master }]);
+    // the town builder: click him (or a ruined lot below) to open his repair offer
+    if (!this.tutorial && shop.builder?.creature) pairs.push([shop.builder.creature, { type: "builder" }]);
     for (const table of shop.tables) pairs.push([table.group, { type: "table", table }]);
     for (const slot of shop.slots) if (slot.mesh) pairs.push([slot.mesh, { type: "slot", slot }]);
     // restoration lots: tap the run-down ruin/plot to rebuild it (the same
@@ -1189,24 +1252,30 @@ export class Game {
       return { hint: "Buy", focus, color: 0x8fe0ff };
     }
     if (target.type === "npc") {
-      const focus = _focus.copy(target.obj.creature.position).setY(0.06).clone();
+      const focus = target.obj.creature.getWorldPosition(_focus).setY(0.06).clone();
       return { hint: "Talk", focus, color: 0x9ad0ff };
     }
+    if (target.type === "builder") {
+      const b = this.shop.builder;
+      const hasWork = this.shop.lots?.some((lot, i) => !lot.restored && !this.townRestored[i]);
+      if (!hasWork || b.state !== "idle") return null;
+      return { hint: "Hire builder", focus: _focus.copy(b.creature.position).setY(0.06).clone(), color: 0x66ff9e };
+    }
     if (target.type === "lot") {
-      const lot = this.shop.lots[target.idx];
-      if (this.gold < lot.cost) return null; // hide the restore preview until affordable
-      return { hint: `Restore ${lot.cost}g`, focus: _focus.copy(lot.interactPos).setY(0.06).clone(), color: 0x66ff9e };
+      const b = this.shop.builder;
+      if (!b || b.state !== "idle") return null; // he's already busy on a house
+      return { hint: "Hire builder", focus: _focus.copy(this.shop.lots[target.idx].interactPos).setY(0.06).clone(), color: 0x66ff9e };
     }
     if (target.type === "slot") {
       const slot = target.slot;
       const table = slot.table;
       if (table && !table.repaired) {
         if (this.tutorial) return null; // repair UI stays hidden during the FTUE
-        if (this.gold < table.cost) return null; // hide the repair preview until affordable
+        // preview the price whether or not it's affordable (amber when short)
         return {
           hint: `Repair ${table.cost}g`,
           focus: _focus.copy(table.group.position).setY(1.35).clone(),
-          color: 0x66ff9e,
+          color: this.gold >= table.cost ? 0x66ff9e : 0xff9d5c,
           glowTable: table,
         };
       }
@@ -1232,8 +1301,13 @@ export class Game {
       this._talkToNpc(target.obj);
       return;
     }
+    if (target.type === "builder") {
+      this._builderPrompt();
+      return;
+    }
     if (target.type === "lot") {
-      if (!this.tutorial) this._restoreLot(target.idx);
+      // clicking a ruined lot goes through the builder (he does the actual work)
+      if (!this.tutorial) this._builderPrompt();
       return;
     }
     if (target.type === "slot") {
@@ -1312,10 +1386,35 @@ export class Game {
   // the previous area's camera happened to sit.
   _introCamera() {
     const p = this.player.position;
-    const faceY = p.y + (this.player.height ?? 1.3) * 0.9;
+    const faceY = p.y + (this.player.height ?? 1.5) * 0.9;
     // pull straight back along the camera's viewing axis (it looks from +z),
     // keeping a pure dolly-out with no lateral swing
     this.engine.camera.position.set(p.x, faceY, p.z + 2.4);
+  }
+
+  // While a conversation is on stage — chatting with a townsperson, or the hero
+  // reading the uncle's note — the camera leaves its high overview and glides
+  // down to an intimate eye-level two-shot, framed between the speakers and
+  // looking at head height from the world's usual +z vantage. Populates the
+  // module scratch framing and returns true when a dialogue is live; the main
+  // loop lerps toward it and, once the chat closes, drifts back on its own.
+  _dialogueCamTarget() {
+    let a = null, b = null;
+    const chat = this._npcChat?.target?.creature;
+    if (chat) {
+      a = this.player.position;
+      b = chat.getWorldPosition(_dialogueB);
+    } else if (this._noteCam || this._selfCam) {
+      a = b = this.player.position; // the hero, alone with the note or their thoughts
+    } else return false;
+    // focus on the midpoint of the two speakers, raised so the look point
+    // (camTarget + 0.6, see Engine._updateCamera) lands around their faces
+    _dialogueTarget.set((a.x + b.x) / 2, 0.9, (a.z + b.z) / 2);
+    // sit low and close, straight back along +z (the authored viewing axis),
+    // pulling back on narrow portrait viewports so both speakers still fit
+    const pull = Math.max(1, 0.6 / Math.max(0.01, this.engine.camera.aspect));
+    _dialogueOffset.set(0, 0.15, 3.1 * pull);
+    return true;
   }
 
   // ================================================================ reset
@@ -1334,6 +1433,7 @@ export class Game {
     };
     document.getElementById("bag-btn").onclick = () => this._toggleBag();
     document.getElementById("store-btn").onclick = () => this._toggleStore();
+    this.hud.miniUpBtn.onclick = () => this._returnHomePrompt();
     this.hud.showBag(true); // the bag is reachable everywhere
     this.hud.showStore(this.playerArea === "shop" && !this.tutorial); // storeroom is shop-only
     this.hud.showGold(true);
@@ -1342,7 +1442,6 @@ export class Game {
     document.getElementById("pause-btn").onclick = () => this._toggleEscMenu();
     // set the mute button to match saved preference
     document.getElementById("mute-btn").innerHTML = icon(this.audio.muted ? "soundOff" : "soundOn");
-    this._initCombatBar();
   }
 
   // --------------------------------------------------------- fullscreen gate
@@ -1403,8 +1502,12 @@ export class Game {
         <button class="btn" id="esc-coop">${icon("people")} Friends</button>
         <button class="btn deny" id="esc-restart">${icon("recycle")} New shop</button>
       </div>
-      <div class="esc-hint"><b>WASD</b> move · <b>click/Space</b> attack · <b>E</b> interact · <b>Shift</b> roll · <b>B</b> bag · <b>J/K</b> menus · <b>Enter/Esc</b> pick · <b>\`</b> admin</div>
-    `, "sheet-card");
+      <div id="esc-combat" class="esc-combat">${this._escCombatHtml()}</div>
+    `, "sheet-card esc-sheet");
+    el.querySelector("#esc-combat").addEventListener("click", (e) => {
+      const btn = e.target.closest("button[data-cmode]");
+      if (btn) this._setAttackMode(btn.dataset.cmode);
+    });
     el.querySelector("#esc-x").onclick = () => this._closeEscMenu();
     el.querySelector("#esc-resume").onclick = () => this._closeEscMenu();
     el.querySelector("#esc-sound").onclick = (e) => {
@@ -1651,3 +1754,7 @@ const DUNGEON_LOOKAHEAD = 3;
 const _dungeonFocus = new THREE.Vector3();
 // scratch target for the bounded indoor camera focus
 const _townCenter = new THREE.Vector3();
+// scratch framing for the eye-level dialogue camera (see _dialogueCamTarget)
+const _dialogueTarget = new THREE.Vector3();
+const _dialogueOffset = new THREE.Vector3();
+const _dialogueB = new THREE.Vector3();

@@ -242,10 +242,14 @@ export const combatMethods = {
     const cfg = combat.strikeInPlace;
     const range = cfg.range || 2.2;
     this._dodgeCd = (cfg.cooldown || 0.4) * (this.stats.dodgeCdMul || 1);
-    // aim: square off with the nearest foe in reach, else follow the steer
+    // aim: square off with the nearest foe in reach, else the nearest chest,
+    // else follow the steer
     const foe = this._nearestEnemyWithin(range, 0, 0, -2);
+    const chest = foe ? null : this._nearestChestWithin(range, 0, 0, -2);
     if (foe) {
       this.player.heading = Math.atan2(foe.dx, foe.dz);
+    } else if (chest) {
+      this.player.heading = Math.atan2(chest.dx, chest.dz);
     } else {
       const mv = this.input.move;
       if (mv.x || mv.y) this.player.heading = Math.atan2(mv.x, mv.y);
@@ -344,7 +348,8 @@ export const combatMethods = {
     const held = this.player.heldItem;
     const turnRate = this.player.turnRate;
     this.player.dispose();
-    this.player = new BlockyCreature("a", { height: 1.3, turnRate });
+    this.player = new BlockyCreature("a", { height: 1.5, turnRate });
+    this.player.setTorchLit(false); // the hero's own lantern shouldn't wash out their model
     this.player.position.copy(this.shop.playerSpawn);
     this._heldWeaponId = this.equipment.weapon;
     this.player.holdItem(weaponMesh(this.equipment.weapon));

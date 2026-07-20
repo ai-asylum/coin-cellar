@@ -12,29 +12,19 @@ import saved from "./combat-settings.json";
 // label/desc feed the admin panel's mode picker. Order = display order.
 export const ATTACK_MODES = [
   {
-    id: "dash",
-    label: "Dash strike",
-    desc: "The classic lunge — button, tap, or 2nd finger drives an auto-aiming dash that damages what it sweeps through.",
-  },
-  {
     id: "autodash",
-    label: "Auto-dash in range",
+    label: "Auto lunge",
     desc: "No button. The hero auto-lunges at any foe that steps inside range (cooldown-gated).",
   },
   {
     id: "joystickButton",
-    label: "Joystick dash button",
-    desc: "While a foe is in range, the middle of the move joystick becomes a tap-to-dash button (2nd finger).",
+    label: "Tap to strike",
+    desc: "While a foe is in range, the middle of the move joystick becomes a tap-to-strike button (2nd finger) — the hero plants and strikes in place, no lunge.",
   },
   {
     id: "strikeInPlace",
-    label: "Strike in place",
-    desc: "No lunge — the hero plants and strikes every foe within reach where they stand.",
-  },
-  {
-    id: "swipe",
-    label: "Swipe to strike",
-    desc: "Flick the move joystick and the hero dashes/strikes in the flicked direction.",
+    label: "Auto strike",
+    desc: "No button, no lunge — when a foe steps into range the hero plants and swings in place (same strike as Tap to strike).",
   },
 ];
 
@@ -46,12 +36,13 @@ export const COMBAT_SLIDERS = {
     { key: "range", label: "Trigger range", min: 1, max: 5, step: 0.1 },
     { key: "cooldown", label: "Cooldown (s)", min: 0.2, max: 1.5, step: 0.05 },
   ],
-  joystickButton: [
-    { key: "range", label: "Button appears within", min: 1, max: 5, step: 0.1 },
-  ],
+  // joystickButton has no knobs of its own: it fires the strike-in-place attack,
+  // and both the button-appears reach and the swing reach are governed by the
+  // strikeInPlace.range slider below (kept in one place so they never diverge).
   strikeInPlace: [
     { key: "range", label: "Strike reach", min: 1, max: 4, step: 0.1 },
-    { key: "cooldown", label: "Cooldown (s)", min: 0.15, max: 1.2, step: 0.05 },
+    { key: "cooldown", label: "Cooldown (s)", min: 0.15, max: 2, step: 0.05 },
+    { key: "windup", label: "Wind-up (s)", min: 0, max: 1.5, step: 0.05 },
   ],
   swipe: [
     { key: "flick", label: "Flick speed", min: 0.4, max: 2.5, step: 0.05 },
@@ -62,10 +53,10 @@ export const COMBAT_SLIDERS = {
 // Code-defined baseline — the saved JSON is folded over this at load, so a
 // partial/older file still boots with every knob present.
 const DEFAULTS = {
-  attackMode: "dash",
+  attackMode: "strikeInPlace",
   autodash: { range: 2.4, cooldown: 0.6 },
   joystickButton: { range: 3.2 },
-  strikeInPlace: { range: 2.2, cooldown: 0.4 },
+  strikeInPlace: { range: 2.2, cooldown: 0.7, windup: 0.5 },
   swipe: { flick: 1.1, range: 3.2 },
 };
 
