@@ -38,11 +38,43 @@
     "yaw": 0,
     "cost": 1000
   },
+  "buildings": {
+    "shop": {
+      "x": 0,
+      "z": 0
+    },
+    "cave": {
+      "x": 3,
+      "z": -18
+    },
+    "dojo": {
+      "x": 2,
+      "z": -33,
+      "dummies": [
+        {
+          "x": -2.6,
+          "z": 0.4
+        },
+        {
+          "x": 0,
+          "z": 0.4
+        },
+        {
+          "x": 2.6,
+          "z": 0.4
+        }
+      ],
+      "master": {
+        "x": -2.2,
+        "z": -2.5
+      }
+    }
+  },
   "lots": [
     {
-      "x": -4.8,
-      "z": -14.9,
-      "yaw": 0,
+      "x": 3.29,
+      "z": -41.9,
+      "yaw": 1.5708,
       "kind": "plot",
       "cost": 100,
       "resident": 1,
@@ -320,9 +352,9 @@
       ]
     },
     {
-      "x": 4.8,
-      "z": -14.9,
-      "yaw": 0,
+      "x": 3,
+      "z": -25.01,
+      "yaw": 1.5708,
       "kind": "plot",
       "cost": 700,
       "resident": 1,
@@ -629,9 +661,9 @@
       ]
     },
     {
-      "x": -9.6,
-      "z": -14.9,
-      "yaw": 0,
+      "x": 2.73,
+      "z": -9.48,
+      "yaw": 1.5708,
       "kind": "plot",
       "cost": 1200,
       "resident": 2,
@@ -937,9 +969,9 @@
       ]
     },
     {
-      "x": 9.6,
-      "z": -14.9,
-      "yaw": 0,
+      "x": 16.23,
+      "z": -25.21,
+      "yaw": 1.5708,
       "kind": "plot",
       "cost": 1800,
       "resident": 2,
@@ -1233,9 +1265,9 @@
       ]
     },
     {
-      "x": -14.4,
-      "z": -14.9,
-      "yaw": 0,
+      "x": 15.1,
+      "z": -10.82,
+      "yaw": 1.5708,
       "kind": "ruin",
       "cost": 3000,
       "resident": 2,
@@ -1504,9 +1536,9 @@
       ]
     },
     {
-      "x": 14.4,
-      "z": -14.9,
-      "yaw": 0,
+      "x": 8.45,
+      "z": -45.75,
+      "yaw": 1.5708,
       "kind": "ruin",
       "cost": 4500,
       "resident": 3,
@@ -1790,9 +1822,9 @@
       ]
     },
     {
-      "x": -19.2,
-      "z": -14.9,
-      "yaw": 0,
+      "x": 12.64,
+      "z": 5.33,
+      "yaw": 1.5708,
       "kind": "ruin",
       "cost": 7000,
       "resident": 3,
@@ -2091,9 +2123,9 @@
       ]
     },
     {
-      "x": 19.34,
-      "z": -14.92,
-      "yaw": 0,
+      "x": 13.06,
+      "z": -45.56,
+      "yaw": 1.5708,
       "kind": "ruin",
       "cost": 9500,
       "resident": 3,
@@ -2391,302 +2423,7 @@
       ]
     }
   ],
-  "decor": [
-    {
-      "cat": "trees",
-      "path": "decor/trees/Tree_Yellow_07.png",
-      "x": -21.287,
-      "z": -16.733,
-      "height": 4.804
-    },
-    {
-      "cat": "trees",
-      "path": "decor/trees/Tree_Yellow_07.png",
-      "x": -3.62,
-      "z": -18.98,
-      "height": 4.055
-    },
-    {
-      "cat": "trees",
-      "path": "decor/trees/Tree_Pink_05.png",
-      "x": -19.29,
-      "z": -20.17,
-      "height": 4.942
-    },
-    {
-      "cat": "trees",
-      "path": "decor/trees/Tree_Green_10.png",
-      "x": -9.67,
-      "z": -19.81,
-      "height": 4.783
-    },
-    {
-      "cat": "trees",
-      "path": "decor/trees/Tree_Pink_05.png",
-      "x": -25.4,
-      "z": -0.44,
-      "height": 4.167
-    },
-    {
-      "cat": "trees",
-      "path": "decor/trees/Tree_Green_10.png",
-      "x": -11.87,
-      "z": -16.732,
-      "height": 3.904
-    },
-    {
-      "cat": "trees",
-      "path": "decor/trees/Tree_Pink_12.png",
-      "x": 13.11,
-      "z": 2.38,
-      "height": 3.907
-    },
-    {
-      "cat": "trees",
-      "path": "decor/trees/Tree_Pink_12.png",
-      "x": -5.85,
-      "z": -18.3,
-      "height": 3.446
-    },
-    {
-      "cat": "trees",
-      "path": "decor/trees/Tree_Green_14.png",
-      "x": 21.88,
-      "z": 0.59,
-      "height": 4.458
-    },
-    {
-      "cat": "trees",
-      "path": "decor/trees/Tree_Yellow_15.png",
-      "x": 0.07,
-      "z": -15.76,
-      "height": 4.741
-    },
-    {
-      "cat": "trees",
-      "path": "decor/trees/Tree_Orange_04.png",
-      "x": -16.13,
-      "z": 3.68,
-      "height": 5.077
-    },
-    {
-      "cat": "trees",
-      "path": "decor/trees/Tree_Green_03.png",
-      "x": -10.53,
-      "z": -21.32,
-      "height": 4.199
-    },
-    {
-      "cat": "trees",
-      "path": "decor/trees/Tree_Pink_05.png",
-      "x": 3.14,
-      "z": -18.56,
-      "height": 3.875
-    },
-    {
-      "cat": "trees",
-      "path": "decor/trees/Birch_Green_01.png",
-      "x": 11.31,
-      "z": -20.15,
-      "height": 4.211
-    },
-    {
-      "cat": "trees",
-      "path": "decor/trees/Tree_Green_14.png",
-      "x": 6.72,
-      "z": -18.59,
-      "height": 4.324
-    },
-    {
-      "cat": "trees",
-      "path": "decor/trees/Tree_Orange_04.png",
-      "x": 3.95,
-      "z": -20.88,
-      "height": 4.947
-    },
-    {
-      "cat": "trees",
-      "path": "decor/trees/Birch_Green_01.png",
-      "x": 19.94,
-      "z": -2.98,
-      "height": 4.801
-    },
-    {
-      "cat": "trees",
-      "path": "decor/trees/Birch_Green_01.png",
-      "x": 10.21,
-      "z": -20.05,
-      "height": 5.041
-    },
-    {
-      "cat": "trees",
-      "path": "decor/trees/Tree_Yellow_15.png",
-      "x": 17.59,
-      "z": 1.04,
-      "height": 3.466
-    },
-    {
-      "cat": "trees",
-      "path": "decor/trees/Tree_Green_10.png",
-      "x": 10.36,
-      "z": -0.3,
-      "height": 5.002
-    },
-    {
-      "cat": "trees",
-      "path": "decor/trees/Tree_Green_14.png",
-      "x": 15.13,
-      "z": -17.99,
-      "height": 4.771
-    },
-    {
-      "cat": "trees",
-      "path": "decor/trees/Tree_Orange_09.png",
-      "x": 19.8,
-      "z": -18.26,
-      "height": 3.43
-    },
-    {
-      "cat": "trees",
-      "path": "decor/trees/Tree_Yellow_15.png",
-      "x": -10.79,
-      "z": 0.72,
-      "height": 4.473
-    },
-    {
-      "cat": "smallTrees",
-      "path": "decor/trees/Small_Tree_Green_02.png",
-      "x": -20.468,
-      "z": -11.434,
-      "height": 1.322
-    },
-    {
-      "cat": "trees",
-      "path": "decor/trees/Tree_Green_14.png",
-      "x": 13.74,
-      "z": -1.57,
-      "height": 3.9
-    },
-    {
-      "cat": "bushes",
-      "path": "decor/bushes/Bush_Green_02.png",
-      "x": 20.238,
-      "z": -11.477,
-      "height": 1.609
-    },
-    {
-      "cat": "trees",
-      "path": "decor/trees/Tree_Pink_05.png",
-      "x": -9.84,
-      "z": -2.44,
-      "height": 3.684
-    },
-    {
-      "cat": "smallTrees",
-      "path": "decor/trees/Small_Tree_Green_01.png",
-      "x": -11.19,
-      "z": -18.21,
-      "height": 2.143
-    },
-    {
-      "cat": "trees",
-      "path": "decor/trees/Tree_Pink_12.png",
-      "x": 10.94,
-      "z": -5.36,
-      "height": 3.702
-    },
-    {
-      "cat": "smallTrees",
-      "path": "decor/trees/Small_Tree_Green_02.png",
-      "x": 7.962,
-      "z": -9.649,
-      "height": 1.724
-    },
-    {
-      "cat": "bushes",
-      "path": "decor/bushes/Bush_Green_02.png",
-      "x": -5.7,
-      "z": -5.502,
-      "height": 0.917
-    },
-    {
-      "cat": "flowers",
-      "path": "decor/flowers/Autumn_Flower_02.png",
-      "x": -0.203,
-      "z": -5.511,
-      "height": 0.375
-    },
-    {
-      "cat": "flowers",
-      "path": "decor/flowers/DeepForest_Flower_01.png",
-      "x": 1.111,
-      "z": -5.493,
-      "height": 0.373
-    },
-    {
-      "cat": "flowers",
-      "path": "decor/flowers/Forest_Flower_02.png",
-      "x": 2.294,
-      "z": -5.076,
-      "height": 0.467
-    },
-    {
-      "cat": "flowers",
-      "path": "decor/flowers/DeepForest_Flower_01.png",
-      "x": 4.072,
-      "z": -5.428,
-      "height": 0.407
-    },
-    {
-      "cat": "flowers",
-      "path": "decor/flowers/Autumn_Flower_02.png",
-      "x": 5.028,
-      "z": -5.34,
-      "height": 0.408
-    },
-    {
-      "cat": "flowers",
-      "path": "decor/flowers/Forest_Flower_01.png",
-      "x": -5.976,
-      "z": -5.763,
-      "height": 0.374
-    },
-    {
-      "cat": "flowers",
-      "path": "decor/flowers/Autumn_Flower_02.png",
-      "x": -6.738,
-      "z": -5.846,
-      "height": 0.349
-    },
-    {
-      "cat": "flowers",
-      "path": "decor/flowers/Forest_Flower_01.png",
-      "x": -6.747,
-      "z": -6.041,
-      "height": 0.317
-    },
-    {
-      "cat": "flowers",
-      "path": "decor/flowers/Autumn_Flower_01.png",
-      "x": 5.983,
-      "z": -6.131,
-      "height": 0.38
-    },
-    {
-      "cat": "flowers",
-      "path": "decor/flowers/Autumn_Flower_01.png",
-      "x": 6.267,
-      "z": -5.266,
-      "height": 0.427
-    },
-    {
-      "cat": "flowers",
-      "path": "decor/flowers/Forest_Flower_02.png",
-      "x": 6.87,
-      "z": -6.186,
-      "height": 0.358
-    }
-  ],
+  "decor": [],
   "cave": {
     "exit": {
       "gx": 5,
@@ -2757,10 +2494,10 @@
       }
     ],
     "bounds": {
-      "minX": -31.2,
-      "maxX": 35,
-      "minZ": -34,
-      "maxZ": 34
+      "minX": -12,
+      "maxX": 54,
+      "minZ": -14,
+      "maxZ": 32
     },
     "shopOffset": [
       0,

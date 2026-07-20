@@ -20,6 +20,7 @@ import { Engine } from "../core/engine.js";
 import { Shop } from "../game/shop.js";
 import { setLayout } from "../game/layout-store.js";
 import { DECOR, decorSprite } from "../game/decor.js";
+import { loadCharacters } from "../chargen/assets.js";
 import { el, row, numInput } from "./ui.js";
 import { DungeonPreview } from "./dungeon-preview.js";
 import { CavePreview } from "./cave-preview.js";
@@ -65,8 +66,12 @@ const stubGame = {
 
 // ---------- editor state ----------
 let tab = "overworld"; // 'overworld' | 'cave' | 'dungeon' — which editor mode is active
+// which layer clicks grab: "contents" picks the movable objects (shelves,
+// vitrine, house parts, decor, dojo dummies/master); "buildings" picks whole
+// buildings (shop, cave, dojo) so you can slide the structure around as a unit.
+let editScope = "contents";
 let shop = null;
-let selection = null; // { type: 'table'|'fancy'|'lot'|'part'|'decor', index, state?, partIndex? }
+let selection = null; // { type: 'table'|'fancy'|'lot'|'part'|'decor'|'building'|'dojoDummy'|'dojoMaster', index, key?, state?, partIndex? }
 let selBox = null; // THREE.BoxHelper tracking the selected object
 let mode = "idle"; // 'idle' | 'grab' | 'place'
 let grabbed = null; // { obj, planeY, restore: {pos, rotY} } while mode === 'grab'
@@ -89,6 +94,10 @@ const GRID = 0.5;
 const snapHeld = () => !!(editorInput.keys.ControlLeft || editorInput.keys.ControlRight);
 const maybeSnap = (v) => (snapHeld() ? Math.round(v / GRID) * GRID : v);
 const BAKED_YAW = -Math.PI / 2; // _rotateTown's quarter-turn on top-level groups
+// selections whose grab works in PARENT-LOCAL space (they live inside a
+// positioned group): house parts, and the dojo's dummies / master
+const isLocalSel = (sel) => sel && (sel.type === "part" || sel.type === "dojoDummy" || sel.type === "dojoMaster");
+const isBuildingSel = (sel) => sel && sel.type === "building";
 
 // ---------- build / rebuild the town from the live layout ----------
 function disposeShop() {
@@ -122,6 +131,30 @@ function tagEditables() {
   });
   shop.lots.forEach((lot, i) => { lot.group.userData.edit = { type: "lot", index: i }; });
   shop.decorSprites.forEach((s, i) => { s.userData.edit = { type: "decor", index: i }; });
+  // whole buildings (grabbed in Buildings mode): the shop shell + interior, the
+  // cave mouth, and the dojo — each a group the game builds from layout.json's
+  // `buildings` block
+  if (shop.shopGroup) shop.shopGroup.userData.edit = { type: "building", key: "shop" };
+  if (shop._caveMouthGroup) shop._caveMouthGroup.userData.edit = { type: "building", key: "cave" };
+  if (shop._dojoGroup) shop._dojoGroup.userData.edit = { type: "building", key: "dojo" };
+  // the dojo's contents (grabbed in Contents mode): the training dummies and
+  // the resident master, authored in dojo-local coords
+  if (shop.dojo) {
+    shop.dojo.dummies.forEach((d, i) => { d.group.userData.edit = { type: "dojoDummy", index: i }; });
+    if (shop.dojo.master?.creature) shop.dojo.master.creature.userData.edit = { type: "dojoMaster" };
+  }
+}
+
+// Seed layout.buildings from the code defaults so the first edit has a record
+// to mutate (matches the shape shop-build / dojo read back).
+function ensureBuildings() {
+  const b = layout.buildings || (layout.buildings = {});
+  if (!b.shop) b.shop = { x: 0, z: 0 };
+  if (!b.cave) b.cave = { x: 3, z: -18 };
+  if (!b.dojo) b.dojo = { x: 2, z: -33 };
+  if (!b.dojo.dummies) b.dojo.dummies = [{ x: -2.6, z: 0.4 }, { x: 0, z: 0.4 }, { x: 2.6, z: 0.4 }];
+  if (!b.dojo.master) b.dojo.master = { x: -2.2, z: -2.5 };
+  return b;
 }
 
 function selectionValid(sel) {
@@ -134,6 +167,9 @@ function selectionValid(sel) {
     return !!lot && sel.state === lotView && sel.partIndex < lot[sel.state].length;
   }
   if (sel.type === "decor") return sel.index < layout.decor.length;
+  if (sel.type === "building") return sel.key === "shop" || sel.key === "cave" || sel.key === "dojo";
+  if (sel.type === "dojoDummy") return sel.index < (layout.buildings?.dojo?.dummies?.length ?? 0);
+  if (sel.type === "dojoMaster") return true;
   return false;
 }
 
@@ -159,6 +195,11 @@ function selectedObject(sel = selection) {
   if (sel.type === "lot") return shop.lots[sel.index]?.group ?? null;
   if (sel.type === "part") return shop.lots[sel.index]?.[sel.state]?.children[sel.partIndex] ?? null;
   if (sel.type === "decor") return shop.decorSprites[sel.index] ?? null;
+  if (sel.type === "building") {
+    return (sel.key === "shop" ? shop.shopGroup : sel.key === "dojo" ? shop._dojoGroup : shop._caveMouthGroup) ?? null;
+  }
+  if (sel.type === "dojoDummy") return shop.dojo?.dummies[sel.index]?.group ?? null;
+  if (sel.type === "dojoMaster") return shop.dojo?.master?.creature ?? null;
   return null;
 }
 
@@ -169,6 +210,9 @@ function selectedRecord(sel = selection) {
   if (sel.type === "lot") return layout.lots[sel.index];
   if (sel.type === "part") return layout.lots[sel.index]?.[sel.state]?.[sel.partIndex];
   if (sel.type === "decor") return layout.decor[sel.index];
+  if (sel.type === "building") return ensureBuildings()[sel.key];
+  if (sel.type === "dojoDummy") return ensureBuildings().dojo.dummies[sel.index];
+  if (sel.type === "dojoMaster") return ensureBuildings().dojo.master;
   return null;
 }
 
@@ -182,6 +226,9 @@ function selLabel(sel = selection) {
     return `lot ${sel.index + 1} · ${sel.state} part ${sel.partIndex + 1} (${p?.shape})`;
   }
   if (sel.type === "decor") return `decor ${sel.index + 1} (${layout.decor[sel.index]?.cat})`;
+  if (sel.type === "building") return sel.key === "shop" ? "shop building" : sel.key === "dojo" ? "dojo building" : "cave mouth";
+  if (sel.type === "dojoDummy") return `dojo dummy ${sel.index + 1}`;
+  if (sel.type === "dojoMaster") return "dojo master";
   return "";
 }
 
@@ -230,14 +277,23 @@ function resolveHit(hit) {
   let o = hit.object;
   let partIndex = null;
   let prev = null;
+  const chain = []; // every tagged ancestor, nearest (deepest) first
   while (o) {
     if (o.visible === false) return null;
     if (o.userData.partIndex != null && partIndex == null) partIndex = o.userData.partIndex;
-    if (o.userData.edit) return { edit: o.userData.edit, partIndex, stateGroup: prev };
+    if (o.userData.edit) chain.push({ edit: o.userData.edit, stateGroup: prev });
     prev = o;
     o = o.parent;
   }
-  return null;
+  if (!chain.length) return null;
+  if (editScope === "buildings") {
+    // grab the whole building regardless of what fixture was clicked
+    const b = chain.find((c) => c.edit.type === "building");
+    return b ? { edit: b.edit, partIndex: null, stateGroup: null } : null;
+  }
+  // contents: the nearest non-building fixture (skip the building shell)
+  const c = chain.find((c) => c.edit.type !== "building");
+  return c ? { edit: c.edit, partIndex, stateGroup: c.stateGroup } : null;
 }
 
 function pick() {
@@ -342,7 +398,7 @@ function beginGrab() {
   pushUndo();
   grabbed = {
     obj,
-    planeY: selection.type === "part" ? obj.getWorldPosition(new THREE.Vector3()).y : 0,
+    planeY: isLocalSel(selection) ? obj.getWorldPosition(new THREE.Vector3()).y : 0,
     restore: { pos: obj.position.clone(), rotY: obj.rotation.y },
   };
   mode = "grab";
@@ -353,7 +409,7 @@ function updateGrab() {
   if (!grabbed) return;
   const pt = groundPointAt(grabbed.planeY);
   if (!pt) return;
-  if (selection.type === "part") {
+  if (isLocalSel(selection)) {
     const local = grabbed.obj.parent.worldToLocal(pt.clone());
     grabbed.obj.position.x = maybeSnap(local.x);
     grabbed.obj.position.z = maybeSnap(local.z);
@@ -369,6 +425,10 @@ function commitGrab() {
   if (selection.type === "part") {
     rec.pos[0] = round2(obj.position.x);
     rec.pos[2] = round2(obj.position.z);
+  } else if (selection.type === "dojoDummy" || selection.type === "dojoMaster") {
+    // stored in dojo-local coords (the group is positioned at the hall centre)
+    rec.x = round2(obj.position.x);
+    rec.z = round2(obj.position.z);
   } else {
     const a = authFromWorld(obj.position.x, obj.position.z);
     rec.x = a.x;
@@ -398,6 +458,8 @@ function rotateSelected(delta) {
   const obj = selectedObject();
   if (!rec || !obj) { setStatus("select something to rotate"); return; }
   if (selection.type === "decor") { setStatus("billboards always face the camera — no yaw"); return; }
+  if (selection.type === "building") { setStatus("buildings keep their built orientation — position only"); return; }
+  if (selection.type === "dojoDummy" || selection.type === "dojoMaster") { setStatus("dojo pieces are position-only"); return; }
   pushUndo(`rot:${JSON.stringify(selection)}`);
   rec.yaw = round2((rec.yaw || 0) + delta);
   obj.rotation.y = selection.type === "part" ? rec.yaw : BAKED_YAW + rec.yaw;
@@ -410,6 +472,8 @@ function scaleSelected(factor) {
   const rec = selectedRecord();
   const obj = selectedObject();
   if (!rec || !obj) { setStatus("select something to scale"); return; }
+  if (selection.type === "building") { setStatus("buildings keep their built size"); return; }
+  if (selection.type === "dojoDummy" || selection.type === "dojoMaster") { setStatus("dojo pieces keep their built size"); return; }
   const key = `scale:${JSON.stringify(selection)}`;
   if (selection.type === "decor") {
     pushUndo(key);
@@ -448,6 +512,8 @@ function nudgeSelectedY(delta) {
 function duplicateSelected() {
   if (!selection) { setStatus("select something to duplicate"); return; }
   if (selection.type === "fancy") { setStatus("the game expects a single vitrine"); return; }
+  if (selection.type === "building") { setStatus("buildings are one-of-a-kind"); return; }
+  if (selection.type === "dojoDummy" || selection.type === "dojoMaster") { setStatus("dojo pieces can't be duplicated (yet)"); return; }
   pushUndo();
   if (selection.type === "table") {
     const rec = layout.tables[selection.index];
@@ -479,6 +545,8 @@ function duplicateSelected() {
 function deleteSelected() {
   if (!selection) { setStatus("select something to delete"); return; }
   if (selection.type === "fancy") { setStatus("the game expects the vitrine — can't delete it"); return; }
+  if (selection.type === "building") { setStatus("the game needs its buildings — can't delete"); return; }
+  if (selection.type === "dojoDummy" || selection.type === "dojoMaster") { setStatus("dojo pieces can't be deleted (yet)"); return; }
   if (selection.type === "table" && layout.tables.length <= 1) {
     setStatus("the game needs at least one table (the starter shelf)");
     return;
@@ -528,6 +596,22 @@ function toggleRoof() {
   showRoof = !showRoof;
   shop.roof.visible = showRoof;
   renderPanel();
+}
+
+// Flip between grabbing whole buildings and grabbing the objects inside them.
+// Switching drops a now-unreachable selection so the panel/box stay honest.
+function setEditScope(scope) {
+  if (scope === editScope) return;
+  editScope = scope;
+  cancelGrab(false);
+  if (scope === "buildings" && !isBuildingSel(selection)) selection = null;
+  else if (scope === "contents" && isBuildingSel(selection)) selection = null;
+  refreshSelBox();
+  renderPanel();
+  renderHint();
+  setStatus(scope === "buildings"
+    ? "Buildings mode — click a building to move the whole thing"
+    : "Contents mode — click fixtures, house parts, decor or dojo pieces");
 }
 
 // ---------- camera limits & framing ----------
@@ -637,14 +721,21 @@ function applyCamPreview(kind) {
 // has a full block to mutate — same shape shop-build._applyCameraLayout reads.
 function ensureCameraLayout() {
   if (layout.camera) return layout.camera;
+  // the shop's indoor zone (index 0) is authored in DEFAULT-shop space — pull
+  // out any live shop offset so _applyShopOffset/_applyCameraLayout re-add it
+  // exactly once (keeps the zone tracking the shop without drifting).
+  const o = shop.shopOrigin ?? { x: 0, z: 0 };
   layout.camera = {
     zonePad: round2(shop.cameraZonePad),
     edgePad: round2(shop.cameraEdgePad),
-    zones: shop.zones.map((z) => ({
-      minX: round2(z.minX), maxX: round2(z.maxX),
-      minZ: round2(z.minZ), maxZ: round2(z.maxZ),
-      cx: round2(z.cx), cz: round2(z.cz),
-    })),
+    zones: shop.zones.map((z, i) => {
+      const ox = i === 0 ? o.x : 0, oz = i === 0 ? o.z : 0;
+      return {
+        minX: round2(z.minX - ox), maxX: round2(z.maxX - ox),
+        minZ: round2(z.minZ - oz), maxZ: round2(z.maxZ - oz),
+        cx: round2(z.cx - ox), cz: round2(z.cz - oz),
+      };
+    }),
     bounds: {
       minX: round2(shop.bounds.minX), maxX: round2(shop.bounds.maxX),
       minZ: round2(shop.bounds.minZ), maxZ: round2(shop.bounds.maxZ),
@@ -782,6 +873,13 @@ function renderPanel() {
     ),
   );
 
+  // move scope: whole buildings vs the objects inside them (M toggles)
+  panelEl.append(el("h3", { textContent: "Move (M)" }));
+  const cMode = el("button", { textContent: "Contents", onclick: () => setEditScope("contents") });
+  const bMode = el("button", { textContent: "Buildings", onclick: () => setEditScope("buildings") });
+  (editScope === "buildings" ? bMode : cMode).className = "primary";
+  panelEl.append(el("div", { className: "row" }, el("label", { textContent: "grab" }), cMode, bMode));
+
   // view toggles
   panelEl.append(el("h3", { textContent: "View" }));
   const roofChk = el("input", { type: "checkbox", checked: showRoof, onchange: toggleRoof });
@@ -795,7 +893,9 @@ function renderPanel() {
   panelEl.append(el("h3", { textContent: "Selection" }));
   const rec = selectedRecord();
   if (!rec) {
-    panelEl.append(el("div", { className: "muted", textContent: "Click a shelf, house or decor sprite. Enter opens the decor palette." }));
+    panelEl.append(el("div", { className: "muted", textContent: editScope === "buildings"
+      ? "Buildings mode (M): click the shop, cave or dojo, then G to drag the whole thing."
+      : "Contents mode (M): click a shelf, house part, decor sprite, or a dojo dummy/master. Enter opens the decor palette." }));
   } else {
     panelEl.append(el("div", { className: "muted", textContent: selLabel() }));
     const sel = selection;
@@ -806,6 +906,22 @@ function renderPanel() {
         row("z", numInput(rec.z, (v) => editRec(() => { rec.z = v; }))),
         row("yaw °", numInput(Math.round(((rec.yaw || 0) * 180) / Math.PI), (v) => editRec(() => { rec.yaw = round2((v * Math.PI) / 180); }), 5)),
         row("cost g", numInput(rec.cost ?? 0, (v) => editRec(() => { rec.cost = Math.round(v); }), 50)),
+      );
+    }
+
+    if (sel.type === "building") {
+      panelEl.append(
+        row("x", numInput(rec.x, (v) => editRec(() => { rec.x = v; }))),
+        row("z", numInput(rec.z, (v) => editRec(() => { rec.z = v; }))),
+        el("div", { className: "muted", textContent: "press G to grab and drag the whole building around" }),
+      );
+    }
+
+    if (sel.type === "dojoDummy" || sel.type === "dojoMaster") {
+      panelEl.append(
+        row("x", numInput(rec.x, (v) => editRec(() => { rec.x = v; }))),
+        row("z", numInput(rec.z, (v) => editRec(() => { rec.z = v; }))),
+        el("div", { className: "muted", textContent: "local to the dojo — press G to drag it on the mats" }),
       );
     }
 
@@ -870,14 +986,18 @@ function renderPanel() {
     panelEl.append(el("div", { className: "muted", textContent: "amber = room extent · blue = street walkable · green = focus travel · cones = camera spots" }));
 
     shop.zones.forEach((z, i) => {
+      // the shop zone (0) is stored in default-shop space; the panel shows the
+      // live world value but writes back with the shop offset removed so the
+      // saved override stays offset-free (see _applyCameraLayout).
+      const o = i === 0 ? (shop.shopOrigin ?? { x: 0, z: 0 }) : { x: 0, z: 0 };
       panelEl.append(el("h4", { textContent: i === 0 ? "zone · shop" : `zone · ${i}` }));
       panelEl.append(
-        row("min x", numInput(round2(z.minX), (v) => editCam((c) => { c.zones[i].minX = v; }))),
-        row("max x", numInput(round2(z.maxX), (v) => editCam((c) => { c.zones[i].maxX = v; }))),
-        row("min z", numInput(round2(z.minZ), (v) => editCam((c) => { c.zones[i].minZ = v; }))),
-        row("max z", numInput(round2(z.maxZ), (v) => editCam((c) => { c.zones[i].maxZ = v; }))),
-        row("focus cx", numInput(round2(z.cx), (v) => editCam((c) => { c.zones[i].cx = v; }))),
-        row("focus cz", numInput(round2(z.cz), (v) => editCam((c) => { c.zones[i].cz = v; }))),
+        row("min x", numInput(round2(z.minX), (v) => editCam((c) => { c.zones[i].minX = v - o.x; }))),
+        row("max x", numInput(round2(z.maxX), (v) => editCam((c) => { c.zones[i].maxX = v - o.x; }))),
+        row("min z", numInput(round2(z.minZ), (v) => editCam((c) => { c.zones[i].minZ = v - o.z; }))),
+        row("max z", numInput(round2(z.maxZ), (v) => editCam((c) => { c.zones[i].maxZ = v - o.z; }))),
+        row("focus cx", numInput(round2(z.cx), (v) => editCam((c) => { c.zones[i].cx = v - o.x; }))),
+        row("focus cz", numInput(round2(z.cz), (v) => editCam((c) => { c.zones[i].cz = v - o.z; }))),
       );
     });
 
@@ -984,8 +1104,9 @@ const HINTS = {
     <strong>Overworld editor</strong>
     <span><kbd>WASD</kbd> + <kbd>Space</kbd>/<kbd>C</kbd> fly · <kbd>Shift</kbd> sprint</span>
     <span><kbd>RMB</kbd> drag look · <kbd>Wheel</kbd> fly speed</span>
-    <span><kbd>Click</kbd> select · click again: house part</span>
-    <span><kbd>G</kbd> grab · click to drop · <kbd>Ctrl</kbd> snaps</span>
+    <span><kbd>M</kbd> Contents ⇄ Buildings mode</span>
+    <span><kbd>Click</kbd> select · <kbd>G</kbd> grab · click to drop</span>
+    <span><kbd>Ctrl</kbd> snaps to grid</span>
     <span><kbd>R</kbd>/<kbd>Shift+R</kbd> rotate 15°</span>
     <span><kbd>[</kbd>/<kbd>]</kbd> or <kbd>Alt</kbd>+<kbd>Wheel</kbd> scale</span>
     <span><kbd>Q</kbd>/<kbd>E</kbd> lower/raise part</span>
@@ -1016,7 +1137,14 @@ const HINTS = {
     <span>palette, monsters &amp; params in the panel →</span>
     <span><kbd>Ctrl</kbd>+<kbd>S</kbd> save tuning</span>`,
 };
-function renderHint() { hintEl.innerHTML = HINTS[tab]; }
+function renderHint() {
+  let html = HINTS[tab];
+  if (tab === "overworld") {
+    const mode = editScope === "buildings" ? "BUILDINGS" : "CONTENTS";
+    html = html.replace("<strong>Overworld editor</strong>", `<strong>Overworld — ${mode} mode</strong>`);
+  }
+  hintEl.innerHTML = html;
+}
 
 async function setTab(next) {
   if (next === tab || !shop) return;
@@ -1193,6 +1321,7 @@ window.addEventListener("keydown", (e) => {
     case "KeyQ": nudgeSelectedY(-0.1); break;
     case "KeyE": nudgeSelectedY(0.1); break;
     case "KeyB": setLotView(lotView === "before" ? "after" : "before"); break;
+    case "KeyM": setEditScope(editScope === "buildings" ? "contents" : "buildings"); break;
     case "KeyH": toggleRoof(); break;
     case "Delete":
     case "Backspace": deleteSelected(); break;
@@ -1210,7 +1339,9 @@ window.addEventListener("blur", () => { editorInput.keys = Object.create(null); 
 window.addEventListener("beforeunload", (e) => { if (dirty) e.preventDefault(); });
 
 // ---------- go ----------
-fetchInitialLayout().then(() => {
+// the town now includes the dojo, whose resident master is a BlockyCreature —
+// the character GLBs must be preloaded before the first synchronous Shop build
+Promise.all([fetchInitialLayout(), loadCharacters()]).then(() => {
   rebuild(false);
   renderPanel();
   renderHint();
@@ -1233,6 +1364,8 @@ fetchInitialLayout().then(() => {
     save,
     rebuild,
     setLotView,
+    setScope: setEditScope,
+    get editScope() { return editScope; },
   };
 }).catch((err) => {
   console.error(err);
