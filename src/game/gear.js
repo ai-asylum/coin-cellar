@@ -34,11 +34,19 @@ export function equipInfo(id) {
   return (id && ITEMS[id]?.equip) || null;
 }
 
-// Fresh loadout for a new game: a plain Pine Sword equipped, every other slot
-// bare. The starter sword lives only in the slot (not in the storeroom); swap it
-// out and it drops back into the storeroom like any other piece.
+// Whether a piece can actually be slotted right now. For now only swords are
+// equippable — bows, staves and the armour/ring/shield/boots slots are held
+// back until they're properly balanced — so the picker and the bag's one-tap
+// Equip button both gate on this.
+export function canEquip(id) {
+  const eq = equipInfo(id);
+  return !!eq && eq.type === "sword";
+}
+
+// Fresh loadout for a new game: every slot bare — the heir starts unarmed,
+// fighting with their fists until they find or stock a proper weapon.
 export function starterEquipment() {
-  return { weapon: "wsword", chest: null, shield: null, ring: null, boots: null };
+  return { weapon: null, chest: null, shield: null, ring: null, boots: null };
 }
 
 // Roll every equipped piece's modifiers into one flat bundle the game applies to

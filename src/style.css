@@ -105,7 +105,27 @@ button { font-family: inherit; cursor: pointer; }
   /* lift the card off the moving scene for legibility */
   padding: 22px 30px 26px; border-radius: 22px;
   background: radial-gradient(ellipse at center, rgba(26, 16, 8, 0.62) 0%, rgba(26, 16, 8, 0) 72%);
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
 }
+.start-new { font-size: 16px; padding: 10px 26px; }
+
+/* ---- new-game confirmation ---- */
+#new-game-modal {
+  position: fixed; inset: 0; z-index: 40; pointer-events: auto;
+  display: grid; place-items: center; padding: 24px;
+  background: rgba(10, 6, 3, 0.6);
+  animation: recapfade 0.25s;
+}
+.ng-card {
+  max-width: 360px; text-align: center; color: var(--ink);
+  background: linear-gradient(#f3dfb0, #e2c286);
+  border: 2px solid var(--wood); border-radius: 20px;
+  padding: 22px 24px; box-shadow: 0 6px 0 var(--wood-dark), inset 0 1px 0 #fff7e4;
+}
+.ng-title { font-size: 20px; font-weight: 900; margin-bottom: 8px; }
+.ng-body { font-size: 15px; font-weight: 700; margin-bottom: 18px; }
+.ng-btns { display: flex; gap: 12px; justify-content: center; }
+.ng-btns .btn { flex: 1; }
 .start-logo-img {
   position: absolute; top: calc(env(safe-area-inset-top) + 24px); left: 50%;
   transform: translateX(-50%);
@@ -172,22 +192,54 @@ button { font-family: inherit; cursor: pointer; }
 .icon-btn:active { transform: scale(0.92); }
 
 /* ============================================================ dungeon minimap */
-#minimap {
+#minimap-wrap {
   position: absolute;
   left: calc(env(safe-area-inset-left) + 12px);
   top: calc(env(safe-area-inset-top) + 52px);
   transform: scale(1.6);
   transform-origin: top left;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+#minimap {
+  display: block;
   pointer-events: none;
   opacity: 0.95;
 }
+/* Go-back-up button tucked just under the minimap. Scales with the map wrapper
+   so it stays proportional on any screen. */
+#mini-up-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 3px 6px;
+  border: 1.5px solid var(--wood-dark);
+  border-radius: 6px;
+  background: rgba(28, 20, 12, 0.82);
+  color: var(--parch-hi);
+  font: inherit;
+  font-size: 8px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  pointer-events: auto;
+  white-space: nowrap;
+}
+#mini-up-btn .ic { width: 1.4em; height: 1.4em; }
+#mini-up-btn:hover { background: rgba(48, 34, 20, 0.92); }
+#mini-up-btn:active { transform: translateY(1px); }
 /* On touch the map is oversized — tuck it into the upper-left corner and
    shrink it so it stops eating the play area. */
 @media (pointer: coarse) {
-  #minimap {
+  #minimap-wrap {
     top: calc(env(safe-area-inset-top) + 44px);
     transform: scale(0.9);
   }
+  #mini-up-btn { font-size: 11px; padding: 5px 8px; }
 }
 
 /* ============================================================ banner / toast */
@@ -262,6 +314,28 @@ button { font-family: inherit; cursor: pointer; }
 .floaty.gold { color: #ffd34d; }
 .floaty.loot { color: #a8e6b0; font-size: 15px; }
 .floaty.emote { font-size: 26px; animation: emotebob 1s infinite; }
+/* Townsfolk speech bubble (e.g. shoppers muttering on their way to the shop) —
+   a small rounded caption with a little downward tail, floating over the head. */
+.floaty.speech {
+  font-size: 12px; font-weight: 700; line-height: 1.2;
+  color: #3a2410; text-shadow: none;
+  background: linear-gradient(rgba(255, 250, 238, 0.98), rgba(240, 224, 190, 0.98));
+  border: 1.5px solid var(--wood-dark, #6b4a2a);
+  border-radius: 12px; padding: 5px 10px;
+  max-width: 190px; white-space: normal; text-align: center;
+  box-shadow: 0 3px 0 var(--wood-dark, #6b4a2a), inset 0 1px 0 #fff7e4;
+  animation: speechpop 0.22s ease-out forwards;
+}
+.floaty.speech::after {
+  content: ""; position: absolute; left: 50%; bottom: -7px;
+  transform: translateX(-50%);
+  border-left: 6px solid transparent; border-right: 6px solid transparent;
+  border-top: 7px solid var(--wood-dark, #6b4a2a);
+}
+@keyframes speechpop {
+  0% { opacity: 0; transform: translate(-50%, -90%) scale(0.7); }
+  100% { opacity: 1; transform: translate(-50%, -100%) scale(1); }
+}
 /* NPC debug cards (admin "NPC debug" toggle) — pinned above each townsperson */
 #npc-debug { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 6; }
 .npc-dbg {
@@ -584,6 +658,19 @@ button { font-family: inherit; cursor: pointer; }
   pointer-events: auto;
   z-index: 19;
 }
+/* the sealed-door prompt sits above the on-screen action/joystick controls so
+   the modal doesn't cover the buttons while the choice is up */
+#sheet.gate-sheet { bottom: calc(120px + env(safe-area-inset-bottom)); }
+/* the leave-the-dungeon prompt lifts clear of the backpack button (66px tall,
+   parked on the bottom edge) so the modal sits above it rather than over it */
+#sheet.leave-sheet { bottom: calc(90px + env(safe-area-inset-bottom)); }
+/* the pause menu must sit above everything else in play — the touch controls
+   (z 20), dialog (z 40) and chat bar (z 45) all render over a normal sheet, so
+   lift the pause sheet and its click-away backdrop clear above them (still
+   under the fullscreen gate at z 90). */
+#sheet.esc-sheet { z-index: 89; }
+#hud:has(#sheet.esc-sheet:not(.hidden)) #sheet-backdrop { z-index: 88; }
+
 .sheet-card {
   background: linear-gradient(#fbeecb, #eed6a6);
   border: 3px solid var(--wood); border-radius: 22px;
@@ -653,13 +740,17 @@ button { font-family: inherit; cursor: pointer; }
 .hg-speech.pop { animation: chipbounce 0.3s; }
 
 /* ---- in-world dialogue (the Mayor & co.) ---- */
-/* full-screen overlay so a click/tap anywhere advances the line; the speech
- * block itself floats in the lower-middle (~3/4 down the screen), with the
- * character bust rising up from behind its top edge. */
+/* full-screen overlay so a click/tap anywhere advances the line. The box is
+ * anchored from the TOP (not the bottom) so its top edge — and therefore the
+ * bust's head — stays put regardless of how tall the box grows (reply choices,
+ * long text). --dlg-rise is the fixed gap between the bust's head and the box
+ * top; the box top sits that far below the quarter-screen mark, so the head
+ * lands exactly a quarter of the way down and the gap is always the same. */
 #dialog {
   position: fixed; inset: 0; z-index: 40;
-  display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
-  padding: 0 14px 22vh;
+  --dlg-rise: clamp(120px, 17vh, 320px);
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+  padding: calc(12vh + var(--dlg-rise)) 14px 22vh;
   pointer-events: auto; cursor: pointer;
 }
 #dialog.hidden { display: none; }
@@ -690,8 +781,8 @@ button { font-family: inherit; cursor: pointer; }
      of swallowing it. object-fit keeps the character's proportions and pins the
      head up top as the frame stretches down. */
   position: absolute; left: 26px; z-index: 1;
-  top: calc(-1 * clamp(120px, 24vmin, 260px)); /* how far the head rises above the box */
-  bottom: 0;                                    /* stretch down to the box's base */
+  top: calc(-1 * var(--dlg-rise)); /* fixed gap above the box; head lands a quarter down the screen */
+  bottom: 0;                       /* stretch down to the box's base */
   width: clamp(160px, 32vmin, 320px);
   object-fit: cover; object-position: center top;
   filter: drop-shadow(0 6px 14px rgba(30, 16, 4, 0.45));
@@ -772,6 +863,14 @@ button { font-family: inherit; cursor: pointer; }
 .sheet-btns.esc-col { flex-direction: column; }
 .esc-hint { margin-top: 12px; font-size: 11px; line-height: 1.6; color: var(--ink-soft); text-align: center; }
 .esc-hint b { color: var(--gold); }
+/* attack-type picker in the pause menu */
+.esc-combat { margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(90, 56, 20, 0.25); }
+.esc-combat-label { font-size: 13px; font-weight: 800; color: var(--ink); margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+.esc-combat .cmode-picker { justify-content: center; }
+/* the pause-menu picker labels its modes, so let the buttons size to the text */
+.cmode-btn-named { width: auto; min-width: 36px; padding: 0 16px; font-size: 13px; }
+.esc-combat-desc { margin-top: 8px; font-size: 11px; line-height: 1.5; color: var(--ink-soft); text-align: center; }
+.esc-combat-desc b { color: var(--gold); }
 #co-code {
   pointer-events: auto; width: 90px; text-align: center; font-size: 20px; font-weight: 900;
   border-radius: 12px; border: 2px solid var(--wood); background: #fff6e0; color: var(--ink);
@@ -1112,14 +1211,11 @@ button { font-family: inherit; cursor: pointer; }
   box-shadow: 0 10px 40px rgba(30, 16, 4, 0.55), inset 0 0 0 2px #fff6e0;
   animation: sheetup 0.18s;
 }
-/* always-on combat-input picker — small square numbered buttons, top-centre */
-#combat-modes {
-  position: absolute; top: calc(6px + env(safe-area-inset-top)); left: 50%;
-  transform: translateX(-50%);
-  display: flex; gap: 6px; z-index: 21; pointer-events: none;
+/* combat-input mode picker — small square numbered buttons, in the ` panel */
+.cmode-picker {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;
 }
 .cmode-btn {
-  pointer-events: auto;
   width: 36px; height: 36px; padding: 0;
   display: flex; align-items: center; justify-content: center;
   background: linear-gradient(#f3dfb0, #e2c286); color: var(--ink);

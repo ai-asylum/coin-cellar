@@ -4,9 +4,10 @@ import * as THREE from "three";
 import { pick } from "../core/engine.js";
 import { icon, itemIcon } from "../core/icons.js";
 import { ITEMS } from "./items.js";
-import { SLOTS, SLOT_META, equipInfo } from "./gear.js";
+import { SLOTS, SLOT_META, equipInfo, canEquip } from "./gear.js";
 import { MAX_DEPTH, DUNGEON_ORIGIN } from "./dungeon.js";
 import { dayClockStops } from "./shop.js";
+import { OCCASIONS, activeOccasion } from "./npc-data.js";
 import { godraysEnabled, setGodraysEnabled } from "../core/godrays.js";
 import { esc } from "./game-util.js";
 import { NAME_KEY } from "./game-persistence.js";
@@ -21,6 +22,12 @@ const _fmtHour = (h) => {
   const hh = Math.floor(h) % 24;
   const mm = Math.floor((h - Math.floor(h)) * 60);
   return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+};
+
+// The real-date occasion in parentheses for the "Live" option, e.g. " (Easter)"
+const _liveOccasionLabel = () => {
+  const o = activeOccasion();
+  return o ? ` (${o.label})` : "";
 };
 
 export const uiMethods = {
@@ -73,7 +80,7 @@ export const uiMethods = {
     const pool = source === "inv" ? this.inventory : this.stash;
     for (const id of pool) {
       const eq = equipInfo(id);
-      if (eq && eq.slot === slot) return true;
+      if (eq && eq.slot === slot && canEquip(id)) return true;
     }
     return !!this.equipment[slot];
   },
@@ -132,7 +139,7 @@ export const uiMethods = {
     const seen = new Map(); // id -> { i, count } collapse duplicates to one row
     pool.forEach((id, i) => {
       const eq = equipInfo(id);
-      if (!eq || eq.slot !== slot) return;
+      if (!eq || eq.slot !== slot || !canEquip(id)) return; // only swords are equippable for now
       if (seen.has(id)) seen.get(id).count++;
       else seen.set(id, { i, count: 1 });
     });
@@ -140,13 +147,14 @@ export const uiMethods = {
     const rows = [];
     if (wornId) {
       // any slot can be stripped bare now — taking off the weapon just leaves
-      // you fighting bare-handed
+      // you fighting bare-handed. Show what the worn piece does (its blurb),
+      // same as the candidates below; the Remove button carries the tap action.
       const it = ITEMS[wornId];
       const noRoom = inDungeon && this.inventory.length >= this.invCap;
-      const takeOffHint = slot === "weapon" ? "equipped — tap to fight bare-handed" : "equipped — tap to remove";
+      const sub = noRoom ? "bag is full — no room to stow it" : (it.equip?.blurb || "");
       rows.push(`<button class="gear-opt equipped ti-${it.tier}" data-act="unequip"${noRoom ? " disabled" : ""}>
         <span class="gear-opt-ic">${itemIcon(it.icon)}</span>
-        <div class="gear-opt-txt"><b>${it.name}</b><small>${noRoom ? "bag is full — no room to stow it" : takeOffHint}</small></div>
+        <div class="gear-opt-txt"><b>${it.name}</b><small>${sub}</small></div>
         <span class="gear-opt-act off">${icon("undo")} Remove</span>
       </button>`);
     }
@@ -189,7 +197,7 @@ export const uiMethods = {
     const pool = source === "inv" ? this.inventory : this.stash;
     const id = pool[idx];
     const eq = equipInfo(id);
-    if (!eq || eq.slot !== slot) return;
+    if (!eq || eq.slot !== slot || !canEquip(id)) return; // only swords are equippable for now
     const prev = this.equipment[slot];
     pool.splice(idx, 1);
     if (prev) pool.push(prev);
@@ -223,6 +231,18 @@ export const uiMethods = {
     this._openBagSheet();
   },
 
+  // Re-render the backpack in place, but only if it's the sheet actually on
+  // screen (not the gear picker or any other sheet layered over it). Called
+  // whenever the inventory changes passively while the bag is open — loot
+  // magneted off the floor, forage pocketed, or a co-op partner's grab echoing
+  // in — so the list never silently falls out of sync with what you carry.
+  _refreshBagIfOpen() {
+    // `bag-split` is unique to the backpack list — the in-dungeon gear picker
+    // also carries `bag-sheet`, so match the split class to avoid clobbering it.
+    if (this.hud.sheetOpen && this.hud.sheetEl.classList.contains("bag-split"))
+      this._openBagSheet();
+  },
+
   _openBagSheet() {
     // Reopening while the bag is already up (after a use/drop) is a refresh, not
     // a fresh open — skip the pop-out entrance so the panels don't re-scale.
@@ -253,9 +273,9 @@ export const uiMethods = {
         // Gear (anything with an `equip` block) gets a one-tap Equip button so
         // you can slot it straight from the bag without opening the paper-doll;
         // in the shop it keeps its Store button too, so gear can still be stocked.
-        const eq = equipInfo(id);
+        const canEq = canEquip(id); // only swords are equippable for now
         const useBtn = ftue ? ""
-          : eq
+          : canEq
             ? `<button class="bag-act equip" data-equip="${i}">${icon("sword")} Equip</button>`
               + (inShop ? `<button class="bag-act store" data-store="${i}">${icon("box")} Store</button>` : "")
             : inShop
@@ -596,6 +616,13 @@ export const uiMethods = {
         <input type="range" id="admin-clock" min="0" max="24" step="0.25" value="${this.debugHour == null ? _realHour() : this.debugHour}">
         <button data-a="clocklive">Live</button>
       </div>
+      <div class="admin-head"><b>${icon("speak")} Occasion</b><span>townsfolk greeting</span></div>
+      <div class="admin-slider">
+        <select id="admin-occasion">
+          <option value=""${this.debugOccasion == null ? " selected" : ""}>Live${_liveOccasionLabel()}</option>
+          ${OCCASIONS.map((o) => `<option value="${o.id}"${this.debugOccasion === o.id ? " selected" : ""}>${esc(o.label)}</option>`).join("")}
+        </select>
+      </div>
       <div class="admin-head"><b>${icon("crown")} FTUE jump</b><span>load a tutorial step</span></div>
       <div class="admin-grid">
         <button data-a="tut:cave">${icon("swords")} 1 · Cave</button>
@@ -622,6 +649,12 @@ export const uiMethods = {
       const mark = this.adminEl?.querySelector("#admin-clock-mark");
       if (mark) mark.style.left = `${(this.debugHour / 24) * 100}%`;
     });
+    // pin the townsfolk's occasion greeting to preview a holiday's chatter, or
+    // "" to hand it back to the real calendar date
+    el.querySelector("#admin-occasion").addEventListener("change", (e) => {
+      this.debugOccasion = e.target.value || null;
+      this.hud.toast(`${icon("speak")} Occasion: ${this.debugOccasion ?? "live"}`);
+    });
     // combat sliders: live-update the setting as you drag (reflected in the
     // label), and persist to the JSON file on release
     el.addEventListener("input", (e) => {
@@ -639,9 +672,9 @@ export const uiMethods = {
   },
 
   // The combat-input section's inner markup: the tuning sliders for the
-  // currently selected mode (the mode picker itself lives in the always-on
-  // #combat-modes HUD bar, see _initCombatBar). Rebuilt in place on a mode
-  // switch (see _setAttackMode) so the knobs always match the active mode.
+  // currently selected mode (the mode picker itself lives in the pause menu,
+  // see _escCombatHtml). Rebuilt in place on a mode switch (see _setAttackMode)
+  // so the knobs always match the active mode.
   _combatPanelHtml() {
     const mode = attackMode();
     const active = ATTACK_MODES.find((m) => m.id === mode);
@@ -658,44 +691,34 @@ export const uiMethods = {
     `;
   },
 
-  // Redraw just the combat section (keeps the rest of the panel steady).
+  // Redraw just the admin combat section (keeps the rest of the panel steady).
   _renderCombatPanel() {
     const box = this.adminEl?.querySelector("#admin-combat");
     if (box) box.innerHTML = this._combatPanelHtml();
   },
 
-  // Build the always-on-screen combat-input bar: one small square button per
-  // attack mode, numbered 1..N, pinned to the top of the screen. Tapping one
-  // switches the live attack mode. Called once from _wireHud.
-  _initCombatBar() {
-    const bar = document.getElementById("combat-modes");
-    if (!bar) return;
-    bar.innerHTML = ATTACK_MODES.map((m, i) =>
-      `<button class="cmode-btn" data-cmode="${m.id}" title="${esc(m.label)}" aria-label="${esc(m.label)}">${i + 1}</button>`
-    ).join("");
-    bar.addEventListener("click", (e) => {
-      const btn = e.target.closest("button[data-cmode]");
-      if (btn) this._setAttackMode(btn.dataset.cmode);
-    });
-    this._syncCombatBar();
-  },
-
-  // Reflect the live attack mode on the always-on bar (highlight the active).
-  _syncCombatBar() {
-    const bar = document.getElementById("combat-modes");
-    if (!bar) return;
+  // The attack-mode picker shown in the pause menu: one numbered button per
+  // mode plus a one-line description of the active mode. Wired in _toggleEscMenu.
+  _escCombatHtml() {
     const mode = attackMode();
-    bar.querySelectorAll("button[data-cmode]").forEach((b) => {
-      b.classList.toggle("on", b.dataset.cmode === mode);
-    });
+    const active = ATTACK_MODES.find((m) => m.id === mode);
+    const picker = ATTACK_MODES.map((m) =>
+      `<button class="cmode-btn cmode-btn-named${m.id === mode ? " on" : ""}" data-cmode="${m.id}" title="${esc(m.desc)}" aria-label="${esc(m.label)}">${esc(m.label)}</button>`
+    ).join("");
+    return `
+      <div class="esc-combat-label">${icon("swords")} Attack type</div>
+      <div class="cmode-picker">${picker}</div>
+      <div class="esc-combat-desc"><b>${active ? esc(active.label) : ""}</b> — ${active ? esc(active.desc) : ""}</div>
+    `;
   },
 
-  // Switch attack mode, refresh the on-screen bar + admin sliders, and persist.
+  // Switch attack mode, refresh any open picker/sliders, and persist.
   _setAttackMode(id) {
     if (!ATTACK_MODES.some((m) => m.id === id)) return;
     setCombatSettings({ attackMode: id });
-    this._syncCombatBar();
     this._renderCombatPanel();
+    const escBox = document.getElementById("esc-combat");
+    if (escBox) escBox.innerHTML = this._escCombatHtml();
     this._saveCombat();
     const label = ATTACK_MODES.find((m) => m.id === id)?.label || id;
     this.hud.toast(`${icon("swords")} Combat: ${label}`);
