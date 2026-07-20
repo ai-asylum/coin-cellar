@@ -152,31 +152,39 @@ export const economyMethods = {
   // The bag's "Store" action: drop one carried item into the storeroom, from
   // where it can be stocked onto the tables. Shop-only; refreshes the open
   // backpack so the row vanishes in place.
-  _storeItem(idx) {
+  _storeItem(idx, srcBtn = null) {
     if (this.playerArea !== "shop") return;
     const id = this.inventory[idx];
     if (id == null) return;
+    // grab the tapped row's icon before the sheet rebuilds, then fly it over to
+    // the storeroom button so the hand-off is visible
+    const srcEl = srcBtn?.closest(".bag-row")?.querySelector(".bag-face") || srcBtn;
     this.inventory.splice(idx, 1);
     this.stash.push(id);
     this.audio.pickup();
     if (this.net.isGuest) this.net.send({ t: "storeReq", idx });
     else { this._syncInv(); this._save(); }
+    this.hud.flyItem(srcEl, "#store-btn", itemIcon(ITEMS[id].icon));
     if (this.hud.sheetOpen) this._openBagSheet();
   },
 
   // The storeroom's "Take" action: pull one item back out of the storeroom and
   // into the bag (to gear up or carry a supply down), refusing when the bag is
   // full. Refreshes the open storeroom sheet in place.
-  _takeFromStore(idx) {
+  _takeFromStore(idx, srcBtn = null) {
     if (this.playerArea !== "shop") return;
     const id = this.stash[idx];
     if (id == null) return;
     if (this.inventory.length >= this.invCap) return this.hud.bagFull();
+    // grab the tapped row's icon before the sheet rebuilds, then fly it over to
+    // the backpack button so the hand-off is visible
+    const srcEl = srcBtn?.closest(".bag-row")?.querySelector(".bag-face") || srcBtn;
     this.stash.splice(idx, 1);
     this.inventory.push(id);
     this.audio.pickup();
     if (this.net.isGuest) this.net.send({ t: "takeReq", idx });
     else { this._syncInv(); this._save(); }
+    this.hud.flyItem(srcEl, "#bag-btn", itemIcon(ITEMS[id].icon));
     if (this.hud.sheetOpen) this._openStoreSheet();
   },
 

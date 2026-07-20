@@ -357,6 +357,13 @@ export class Game {
     this.player.animator.prevPos.copy(this.player.position);
     if (this.playerName) this.net.goOnline(this.playerName);
     this._beginShop(true);
+    // the title attract dimmed the bag/store buttons for its clean menu shot;
+    // a returning player boots straight onto the shop floor, so bring the
+    // overground HUD back (the FTUE drives its own cave HUD from _tutStart)
+    if (!this.tutorial) {
+      this.hud.showBag(true);
+      this.hud.showStore(this.playerArea === "shop");
+    }
   }
 
   // ================================================================ loop
@@ -714,10 +721,16 @@ export class Game {
         this.input.setJoyDash(true, "swords", "danger");
       } else if (hasInteract) {
         this.input.setJoyDash(true, act.label, this._actionTier(act.label, act.color));
-        // feed the button / tap into the shared interact path below (which
-        // guards on sheets / dashes and runs act.fn), and swallow the tap so
-        // the shop pick-to-interact underneath can't fire on top of it.
-        if (joyTap) { this.input.interactEdge = true; this.input.tapEdge = false; }
+        // A tap that landed directly on a shop fixture acts on THAT fixture (via
+        // the pick-to-interact path below), so tapping an object does what you
+        // tapped — not merely what's nearest to the centre button. Only when the
+        // tap missed every fixture (empty ground) or came from the centre button
+        // itself do we route it to the proximity action; swallow it then so the
+        // pick underneath can't fire on top.
+        const tapOnFixture = this.playerArea === "shop" && this.input.tapEdge &&
+          this.input.tap && this._dashT < 0 &&
+          !!this._shopPick(this.input.tap.x, this.input.tap.y);
+        if (joyTap && !tapOnFixture) { this.input.interactEdge = true; this.input.tapEdge = false; }
       } else if (fieldDash) {
         this.input.setJoyDash(true, "swords", "danger");
         if (joyTap && this._dashT < 0) { this._dodge(); this.input.tapEdge = false; }
@@ -943,14 +956,16 @@ export class Game {
         for (let i = 0; i < this.shop.lots.length; i++) {
           const lot = this.shop.lots[i];
           if (lot.restored || p.distanceTo(lot.interactPos) >= 1.8) continue;
+          // only surface the restore prompt once it's actually affordable —
+          // no greyed "can't afford" teaser (skip so other actions still show)
+          if (this.gold < lot.cost) continue;
           const focus = _focus.copy(lot.interactPos).setY(0.06).clone();
-          const broke = this.gold < lot.cost;
           return {
-            label: broke ? "warning" : "home",
+            label: "home",
             hint: `Restore ${lot.cost}g`,
             fn: () => this._restoreLot(i),
             focus,
-            color: broke ? 0x9aa0aa : 0x66ff9e,
+            color: 0x66ff9e,
           };
         }
       }
@@ -966,17 +981,18 @@ export class Game {
           // shouldn't be nudged to fix shelves before they've closed their first
           // sale. Until then a broken table just reads as scenery (no prompt,
           // no glow). Returning players (tutorial null) see it as usual.
-          if (!this.tutorial) {
+          // only surface the repair prompt (and the table glow) once it's
+          // affordable — no greyed "can't afford" teaser while short on gold
+          if (!this.tutorial && this.gold >= table.cost) {
             const i = this.shop.tables.indexOf(table);
-            const broke = this.gold < table.cost;
             return {
-              label: broke ? "warning" : "coin",
+              label: "coin",
               hint: `Repair ${table.cost}g`,
               fn: () => this._repairTable(i),
               // no ground ring for tables — the whole table glows white instead
               // (see Shop.highlightTable); the hint text floats above the top.
               focus: _focus.copy(table.group.position).setY(1.35).clone(),
-              color: broke ? 0x9aa0aa : 0x66ff9e,
+              color: 0x66ff9e,
               glowTable: table,
             };
           }
@@ -1178,19 +1194,19 @@ export class Game {
     }
     if (target.type === "lot") {
       const lot = this.shop.lots[target.idx];
-      const broke = this.gold < lot.cost;
-      return { hint: `Restore ${lot.cost}g`, focus: _focus.copy(lot.interactPos).setY(0.06).clone(), color: broke ? 0x9aa0aa : 0x66ff9e };
+      if (this.gold < lot.cost) return null; // hide the restore preview until affordable
+      return { hint: `Restore ${lot.cost}g`, focus: _focus.copy(lot.interactPos).setY(0.06).clone(), color: 0x66ff9e };
     }
     if (target.type === "slot") {
       const slot = target.slot;
       const table = slot.table;
       if (table && !table.repaired) {
         if (this.tutorial) return null; // repair UI stays hidden during the FTUE
-        const broke = this.gold < table.cost;
+        if (this.gold < table.cost) return null; // hide the repair preview until affordable
         return {
           hint: `Repair ${table.cost}g`,
           focus: _focus.copy(table.group.position).setY(1.35).clone(),
-          color: broke ? 0x9aa0aa : 0x66ff9e,
+          color: 0x66ff9e,
           glowTable: table,
         };
       }

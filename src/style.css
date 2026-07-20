@@ -531,6 +531,11 @@ button { font-family: inherit; cursor: pointer; }
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(6px); }
 }
+/* the button stays on screen while its panel is open (it's the panel's anchor),
+   but the FTUE "open me" pulse + arrow would then sit on top of the open card —
+   so drop them while any bag panel is up. They return the instant it closes. */
+#hud:has(#sheet.bag-sheet:not(.hidden)) #bag-btn.attn { animation: none; }
+#hud:has(#sheet.bag-sheet:not(.hidden)) #bag-btn .bag-attn { display: none; }
 /* the quest action inside the bag (Use the key / Read the note) pulses on
    the same beat, so the eye lands on the one button that advances the FTUE */
 .bag-act[data-q] { animation: bagattn 0.85s ease-in-out infinite; }

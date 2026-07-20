@@ -290,7 +290,7 @@ export const uiMethods = {
       btn.onclick = () => this._dropItem(Number(btn.dataset.i));
     });
     el.querySelectorAll(".bag-act.store").forEach((btn) => {
-      btn.onclick = () => this._storeItem(Number(btn.dataset.store));
+      btn.onclick = () => this._storeItem(Number(btn.dataset.store), btn);
     });
     el.querySelectorAll(".bag-act.equip").forEach((btn) => {
       btn.onclick = () => {
@@ -343,7 +343,7 @@ export const uiMethods = {
     `, `store-sheet bag-sheet sheet-card${refresh ? " bag-refresh" : ""}`, { onBackdrop: () => this.hud.hideSheet() });
     el.querySelector("#store-close").onclick = () => this.hud.hideSheet();
     el.querySelectorAll(".bag-act.take").forEach((btn) => {
-      btn.onclick = () => this._takeFromStore(Number(btn.dataset.take));
+      btn.onclick = () => this._takeFromStore(Number(btn.dataset.take), btn);
     });
   },
 

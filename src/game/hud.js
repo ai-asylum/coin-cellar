@@ -184,15 +184,17 @@ export class HUD {
     this._applyBagBtn();
   }
 
-  // Hide both HUD buttons while any bag-family panel (backpack, storeroom,
-  // equip picker) is up — they'd sit right on top of the card — otherwise
-  // honour each button's wanted state.
+  // The backpack / storeroom buttons stay on screen while their panel is open —
+  // each sheet is parked just above its button and grows out of it, so the
+  // button reads as the panel's anchor (and is the landing pad for the
+  // store/take fly animation). Visibility just follows each button's wanted
+  // state; only the joystick / action / interact buttons are hidden under an
+  // open bag panel (see the CSS sibling rule in style.css).
   _applyBagBtn() {
-    const panelOpen = this.sheetEl.classList.contains("bag-sheet");
     const bag = this.root.querySelector("#bag-btn");
-    if (bag) bag.classList.toggle("hidden", !this._bagWanted || panelOpen);
+    if (bag) bag.classList.toggle("hidden", !this._bagWanted);
     const store = this.root.querySelector("#store-btn");
-    if (store) store.classList.toggle("hidden", !this._storeWanted || panelOpen);
+    if (store) store.classList.toggle("hidden", !this._storeWanted);
   }
 
   banner(main, sub = "", dur = 2.2) {
@@ -456,6 +458,49 @@ export class HUD {
         onLand?.(i);
       };
     });
+  }
+
+  /**
+   * A single item icon hops from a source element (the tapped backpack /
+   * storeroom row) across to a destination HUD button (the storeroom or
+   * backpack), which pops on arrival — so shuttling an item between the two
+   * reads as a physical hand-off. `srcEl` is read synchronously, so the caller
+   * can rebuild the sheet right after. No-op if either endpoint is missing or
+   * off screen.
+   */
+  flyItem(srcEl, destSel, iconHtml, onLand = null) {
+    const dest = this.root.querySelector(destSel);
+    if (!srcEl || !dest || dest.classList.contains("hidden")) return;
+    const sR = srcEl.getBoundingClientRect();
+    const dR = dest.getBoundingClientRect();
+    if (!sR.width || !dR.width) return;
+    const start = { x: sR.left + sR.width / 2, y: sR.top + sR.height / 2 };
+    const end = { x: dR.left + dR.width / 2, y: dR.top + dR.height / 2 };
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const el = document.createElement("div");
+    el.className = "item-fly";
+    el.innerHTML = iconHtml;
+    el.style.left = start.x + "px";
+    el.style.top = start.y + "px";
+    this.floatiesEl.appendChild(el);
+    const arc = 55 + Math.random() * 45; // bow the hop up so it arcs, not slides
+    const anim = el.animate(
+      [
+        { transform: "translate(-50%,-50%) scale(1) rotate(0deg)", opacity: 1, offset: 0 },
+        { transform: `translate(calc(-50% + ${dx * 0.3}px), calc(-50% + ${dy * 0.3 - arc}px)) scale(1.35) rotate(-12deg)`, opacity: 1, offset: 0.35 },
+        { transform: `translate(calc(-50% + ${dx * 0.7}px), calc(-50% + ${dy * 0.7 - arc * 0.45}px)) scale(1.1) rotate(10deg)`, opacity: 1, offset: 0.7 },
+        { transform: `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(0.35) rotate(0deg)`, opacity: 0.85, offset: 1 },
+      ],
+      { duration: 540, easing: "cubic-bezier(.4,.05,.5,1)", fill: "forwards" }
+    );
+    anim.onfinish = () => {
+      el.remove();
+      dest.classList.remove("pop");
+      void dest.offsetWidth;
+      dest.classList.add("pop");
+      onLand?.();
+    };
   }
 
   // -------------------------------------------------- FTUE guide + key hints
