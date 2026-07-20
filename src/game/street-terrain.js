@@ -123,24 +123,29 @@ function meshFor(parts, { outline = 0 } = {}) {
 }
 
 // ---- the terrain -----------------------------------------------------------
-// `backZ/paveFar/roadFar/backLimit` mirror the street bands laid out in
-// Shop._build; `cave` is the mouth's centre from _buildCaveMouth. All
-// pre-rotation coords.
-export function buildStreetTerrain(group, { streetW, backZ, paveFar, roadFar, backLimit, cave, bounds }) {
+// `road` is the pre-rotation road rect from Shop._build (x = on-screen vertical,
+// z = on-screen horizontal); `cave` is the mouth's pre-rotation centre. All
+// coords here are pre-rotation — _rotateTown quarter-turns the whole group.
+export function buildStreetTerrain(group, { road, cave, bounds, hills: hillOverride, buildings = [], editable = false }) {
   const g = new THREE.Group();
   const r = rng(0x7E44A1);
-  const halfW = streetW / 2;
+  // road corridor (pre): x_pre ∈ [rx0, rx1] is the on-screen thickness; z_pre ∈
+  // [rz0, rz1] is the on-screen length. The pavement strip sits just above it.
+  const rx0 = road.roadNearX, rx1 = road.roadFarX;
+  const rz0 = road.streetRightZ, rz1 = road.streetLeftZ; // rz0 < rz1
+  const paveX0 = rx0 - 3.0, paveX1 = rx0; // light pavement band above the road
+  const townCX = (rx0 + rx1) / 2;
+  const townCZ = (rz0 + rz1) / 2;
 
-  // -- meadow: one big grass plane under the whole town, sunk a hair below
-  // the road/pavement/plaza planes so they read as built on top of it. Sized
-  // to run well past the walkable bounds so it always underlies the horizon
-  // hill belt (no grass edge / void ever peeks out from behind the hills).
+  // -- meadow: one big grass plane under the whole town, sunk a hair below the
+  // road planes so they read as built on top of it. Sized to run well past the
+  // walkable bounds so it always underlies the horizon hill belt.
   const meadowY = -0.05;
   const meadow = new THREE.Mesh(
-    new THREE.PlaneGeometry(150, 110).rotateX(-Math.PI / 2),
+    new THREE.PlaneGeometry(170, 150).rotateX(-Math.PI / 2),
     makeToonMaterial({ color: GRASS, rim: 0 })
   );
-  meadow.position.set(0, meadowY, -5);
+  meadow.position.set(townCX, meadowY, townCZ);
   g.add(meadow);
 
   const cover = []; // flat ground cover: turf patches, flagstones, cobbles, dirt
@@ -155,63 +160,60 @@ export function buildStreetTerrain(group, { streetW, backZ, paveFar, roadFar, ba
       color,
     });
   };
+  // is (x,z) on the built-up strip (road + pavement) — kept clear of grass
+  const onStreet = (x, z) => x > paveX0 - 0.5 && x < rx1 + 0.5 && z > rz0 - 0.5 && z < rz1 + 0.5;
+  // is (x,z) inside any building/lot footprint (pre-rotation)? Kept clear so
+  // path slabs, cobbles, dirt blotches and boulders never surface through a
+  // floor. `buildings` carries each footprint's pre-rotation centre + half
+  // extents (shop, cave, dojo, lots); a small margin swallows the eaves.
+  const onBuilding = (x, z, m = 0.6) =>
+    buildings.some((b) => Math.abs(x - b.x) < b.hw + m && Math.abs(z - b.z) < b.hd + m);
 
-  // -- turf patches freckling the meadow (skipping the built-up strip: the
-  // shop footprint and the road corridor get no grass)
-  for (let i = 0; i < 70; i++) {
-    const x = (r() - 0.5) * 110;
-    const z = -36 + r() * 62;
-    if (x > -8.5 && x < 8.5 && z > backZ - 0.5) continue; // building + side seals
-    if (z < backZ + 0.5 && z > backLimit - 0.5 && Math.abs(x) < halfW + 1) continue; // street bands
+  // -- turf patches freckling the meadow (skipping the built-up strip)
+  for (let i = 0; i < 90; i++) {
+    const x = townCX + (r() - 0.5) * 130;
+    const z = townCZ + (r() - 0.5) * 120;
+    if (onStreet(x, z) || onBuilding(x, z)) continue;
     patch(x, z, 0.6 + r() * 1.3, r() < 0.5 ? GRASS_LIGHT : GRASS_DARK, meadowY);
   }
 
-  // -- flagstones paving the strip by the shopfront: dense, big, squashed
-  for (let x = -halfW + 1; x < halfW - 0.6; x += 0.95 + r() * 0.5) {
-    const z = (backZ + paveFar) / 2 + (r() - 0.5) * 1.1;
+  // -- flagstones paving the pavement strip along the buildings' side
+  for (let z = rz0 + 1; z < rz1 - 0.6; z += 0.95 + r() * 0.5) {
+    const x = (paveX0 + paveX1) / 2 + (r() - 0.5) * 1.1;
+    if (onBuilding(x, z)) continue;
     cover.push({
       geo: bake(slab(0.5 + r() * 0.3, 0.055, 0.12, r() * 10, 0.72), x, 0.028, z, r() * Math.PI),
       color: r() < 0.5 ? PAVE_LIGHT : PAVE_DARK,
     });
   }
 
-  // -- cobbles strewn down the dirt road, thinning toward the edges; the
-  // patch where the road peters out onto the cave's dirt apron stays bare
-  const roadMid = (paveFar + roadFar) / 2;
-  const roadHalf = (paveFar - roadFar) / 2 - 0.5;
-  const inApron = (x, z) => x > cave.x - 2 && x < cave.x + 5.2 && Math.abs(z - cave.z) < 3.6;
-  for (let x = -halfW + 0.8; x < halfW - 0.8; x += 0.62) {
+  // -- cobbles strewn down the dirt road, thinning toward the edges; the patch
+  // where the road meets the cave's dirt apron stays bare
+  const roadMid = (rx0 + rx1) / 2;
+  const roadHalf = (rx1 - rx0) / 2 - 0.5;
+  const inApron = (x, z) => z > cave.z - 2 && z < cave.z + 5.2 && Math.abs(x - cave.x) < 3.6;
+  for (let z = rz0 + 0.8; z < rz1 - 0.8; z += 0.62) {
     const n = r() < 0.6 ? 1 : 2;
     for (let k = 0; k < n; k++) {
-      const z = roadMid + (r() - 0.5) * 2 * roadHalf * (0.4 + r() * 0.6);
-      if (inApron(x, z)) continue;
+      const x = roadMid + (r() - 0.5) * 2 * roadHalf * (0.4 + r() * 0.6);
+      if (inApron(x, z) || onBuilding(x, z)) continue;
       cover.push({
-        geo: bake(slab(0.32 + r() * 0.22, 0.05, 0.2, r() * 10, 0.8), x + (r() - 0.5) * 0.4, 0.025, z, r() * Math.PI),
+        geo: bake(slab(0.32 + r() * 0.22, 0.05, 0.2, r() * 10, 0.8), x, 0.025, z + (r() - 0.5) * 0.4, r() * Math.PI),
         color: r() < 0.5 ? COBBLE_LIGHT : COBBLE_DARK,
       });
     }
     // the odd dirt blotch breaking up the cobbles
-    const bz = roadMid + (r() - 0.5) * roadHalf;
-    if (r() < 0.08 && !inApron(x, bz)) patch(x, bz, 0.5 + r() * 0.5, r() < 0.5 ? DIRT : DIRT_DARK);
+    const bx = roadMid + (r() - 0.5) * roadHalf;
+    if (r() < 0.08 && !inApron(bx, z) && !onBuilding(bx, z)) patch(bx, z, 0.5 + r() * 0.5, r() < 0.5 ? DIRT : DIRT_DARK);
   }
 
-  // -- turf breaking through along both road shoulders, so the green reads
-  // inside the portrait frame instead of living only out on the meadow
-  for (let x = -halfW + 1.2; x < halfW - 1.2; x += 2.2 + r() * 1.6) {
-    if (!inApron(x, roadFar + 0.6)) {
-      patch(x + (r() - 0.5), roadFar + 0.3 + r() * 0.9, 0.4 + r() * 0.55, r() < 0.5 ? GRASS_LIGHT : GRASS_DARK, 0.012);
+  // -- turf breaking through along both road shoulders
+  for (let z = rz0 + 1.2; z < rz1 - 1.2; z += 2.2 + r() * 1.6) {
+    if (!inApron(rx1 - 0.6, z) && !onBuilding(rx1 - 0.6, z)) {
+      patch(rx1 - 0.3 - r() * 0.9, z + (r() - 0.5), 0.4 + r() * 0.55, r() < 0.5 ? GRASS_LIGHT : GRASS_DARK, 0.012);
     }
-    if (r() < 0.55 && !inApron(x, paveFar)) {
-      patch(x + (r() - 0.5), paveFar + (r() - 0.5) * 0.8, 0.35 + r() * 0.4, r() < 0.5 ? GRASS_LIGHT : GRASS_DARK, 0.012);
-    }
-  }
-
-  // -- dirt feathering where the road peters out at both ends of the street
-  for (const side of [-1, 1]) {
-    for (let i = 0; i < 8; i++) {
-      const x = side * (halfW - 1.5 + r() * 5);
-      const z = backZ - 1 - r() * (backZ - roadFar - 1);
-      patch(x, z, 0.7 + r() * 0.9, r() < 0.5 ? DIRT : DIRT_DARK, 0.01);
+    if (r() < 0.55 && !inApron(paveX0, z) && !onBuilding(paveX0, z)) {
+      patch(paveX0 + (r() - 0.5) * 0.8, z + (r() - 0.5), 0.35 + r() * 0.4, r() < 0.5 ? GRASS_LIGHT : GRASS_DARK, 0.012);
     }
   }
 
@@ -226,76 +228,71 @@ export function buildStreetTerrain(group, { streetW, backZ, paveFar, roadFar, ba
       tufts.push({ geo, color: k % 2 ? TUFT_DARK : TUFT });
     }
   };
-  // along the road's far shoulder, in front of the lot row
-  for (let x = -halfW + 2; x < halfW - 2; x += 1.6 + r() * 1.8) {
-    if (r() < 0.75) tuft(x, roadFar + 0.4 + r() * 0.5);
+  // along the road's far shoulder
+  for (let z = rz0 + 2; z < rz1 - 2; z += 1.6 + r() * 1.8) {
+    if (r() < 0.75 && !onBuilding(rx1 - 0.4, z)) tuft(rx1 - 0.4 - r() * 0.5, z);
   }
   // around the cave mouth's dirt apron
   for (let i = 0; i < 7; i++) {
-    tuft(cave.x + 1 + r() * 3.5, cave.z + (r() < 0.5 ? -1 : 1) * (3.4 + r() * 1.2));
+    tuft(cave.x + (r() < 0.5 ? -1 : 1) * (3.4 + r() * 1.2), cave.z + 1 + r() * 3.5);
   }
-  // freckled across the meadow flanks beside the shop
-  for (let i = 0; i < 14; i++) {
-    const side = r() < 0.5 ? -1 : 1;
-    tuft(side * (8.5 + r() * 11), backZ + 1.5 + r() * 10, meadowY);
+  // freckled across the meadow flanks
+  for (let i = 0; i < 16; i++) {
+    tuft(townCX + (r() - 0.5) * 60, townCZ + (r() < 0.5 ? -1 : 1) * (10 + r() * 16), meadowY);
   }
 
-  // -- boulders: flattened dodecahedra, singly and in small piles, kept to
-  // the street's fringes (beyond the walkable fence or against the lot line)
+  // -- boulders: flattened dodecahedra, singly and in small piles
   const rock = (x, z, s, color, baseY = 0) => {
     const geo = new THREE.DodecahedronGeometry(s, 0);
     geo.scale(1, 0.55 + r() * 0.2, 0.8 + r() * 0.35);
     bake(geo, x, baseY + s * 0.34, z, r() * Math.PI);
     rocks.push({ geo, color });
   };
-  // spill of rock shed by the cave mound, framing the road's top end
+  // spill of rock shed by the cave mound
   for (let i = 0; i < 6; i++) {
-    rock(cave.x + r() * 4, cave.z + (r() < 0.5 ? -1 : 1) * (2.9 + r() * 1.6), 0.22 + r() * 0.3, r() < 0.5 ? ROCK : ROCK_DARK);
+    rock(cave.x + (r() < 0.5 ? -1 : 1) * (2.9 + r() * 1.6), cave.z + r() * 4, 0.22 + r() * 0.3, r() < 0.5 ? ROCK : ROCK_DARK);
   }
-  // strays at the village end and out on the meadow
-  for (const side of [-1, 1]) {
-    for (let i = 0; i < 3; i++) {
-      rock(side * (halfW + 0.8 + r() * 4), backZ - 2 - r() * 9, 0.26 + r() * 0.34, r() < 0.5 ? ROCK : ROCK_DARK, meadowY);
-    }
-  }
-  for (let i = 0; i < 6; i++) {
-    const side = r() < 0.5 ? -1 : 1;
-    rock(side * (9 + r() * 12), backZ + 2 + r() * 9, 0.2 + r() * 0.3, r() < 0.5 ? ROCK : ROCK_DARK, meadowY);
+  // strays out on the meadow — skipping the road/pavement and building
+  // footprints so boulders never surface on the path or under the buildings
+  for (let i = 0; i < 10; i++) {
+    const x = townCX + (r() - 0.5) * 70;
+    const z = townCZ + (r() < 0.5 ? -1 : 1) * (12 + r() * 18);
+    if (onStreet(x, z) || onBuilding(x, z)) continue;
+    rock(x, z, 0.24 + r() * 0.34, r() < 0.5 ? ROCK : ROCK_DARK, meadowY);
   }
 
-  // -- hills: big low-poly spheres buried past their equator, ringing the
-  // town — a wooded ridge behind the lot row, a hillside the cave mouth digs
-  // into, and rolling ground closing off both street ends and the shop's back.
+  // -- hills: big low-poly spheres buried past their equator, ringing the town.
   // `footprints` records each hill's ground-level silhouette radius so the town
-  // can drop a matching collider under it and fence the walkable meadow at the
-  // foot of the slopes (see Shop._build), rather than let the player clip in.
+  // can drop a matching collider under it and fence the walkable meadow.
+  //
+  // The near "wall" hills — the wooded ridge behind the buildings and the cave
+  // hillside — are editable: when layout.json carries a `hills` array they come
+  // straight from it (authored / pre-rotation coords), otherwise they're spread
+  // procedurally. The procedural spread is ALWAYS run so the shared RNG stream
+  // (and thus the horizon ring below) stays identical whether or not the near
+  // hills are overridden. In the editor (`editable`) each near hill is built as
+  // its own pickable mesh placed by transform; in game they're merged into the
+  // backdrop mesh like the ring, for the usual handful-of-draw-calls spread.
   const footprints = [];
-  const hill = (x, z, radius, color, sink = 0.5) => {
-    hills.push({ geo: bake(new THREE.SphereGeometry(radius, 12, 9), x, meadowY - radius * sink, z), color });
-    // the sphere's cross-section where it breaks the ground plane (y = 0)
-    const cy = meadowY - radius * sink; // buried centre height
-    const rGround = Math.sqrt(Math.max(0, radius * radius - cy * cy));
-    if (rGround > 0.6) footprints.push({ x, z, r: rGround });
-  };
-  // ridge behind the restoration lots (behind the sprite treeline; the spread
-  // keeps every slope's toe just shy of the houses' rear walls)
-  let hx = -20;
-  let i = 0;
-  while (hx < 22) {
-    hill(hx, backLimit - 8.5 - r() * 4, 5.5 + r() * 5, i % 2 ? HILL_A : HILL_B, 0.55 + r() * 0.15);
-    hx += 6 + r() * 4;
-    i++;
+  const toHex = (c) => (typeof c === "number" ? c : parseInt(String(c).replace("#", ""), 16));
+
+  // procedural near hills (also consumed to keep the RNG stream stable)
+  const proceduralNear = [];
+  // wooded ridge behind the buildings row (pre −X = on-screen top / far side)
+  for (let z = rz0; z < rz1; z += 6 + r() * 4) {
+    proceduralNear.push({ x: rx0 - 11 - r() * 4, z: z + (r() - 0.5) * 3, radius: 5.5 + r() * 5, sink: 0.55 + r() * 0.15, color: r() < 0.5 ? HILL_A : HILL_B });
   }
-  // the hillside the cave tunnels into: earthier, rising behind the mound but
-  // held clear of both the dark maw and the top-of-street restoration lot
-  hill(cave.x - 8.4, cave.z + 1.5, 8, HILL_DIRT, 0.62);
-  hill(cave.x - 4, cave.z + 5.5, 5, HILL_B, 0.6);
-  // the village end of the street, and the ground behind the shop
-  hill(halfW + 6, roadMid, 7, HILL_A, 0.6);
-  hill(halfW + 4, backZ + 4, 5, HILL_B, 0.62);
-  hill(-6, 19, 7, HILL_B, 0.6);
-  hill(6, 20, 6, HILL_A, 0.62);
-  hill(-14, 17, 5, HILL_A, 0.62);
+  // the hillside the cave tunnels into: earthier, rising BEHIND the mound
+  // (pre −X = on-screen top), clear of the road in front of the maw
+  proceduralNear.push({ x: cave.x - 8, z: cave.z, radius: 8, sink: 0.62, color: HILL_DIRT });
+  proceduralNear.push({ x: cave.x - 6, z: cave.z + 3, radius: 5, sink: 0.6, color: HILL_B });
+
+  const nearHills = Array.isArray(hillOverride) && hillOverride.length
+    ? hillOverride.map((h) => ({
+        x: h.x, z: h.z,
+        radius: h.radius ?? 6, sink: h.sink ?? 0.58, color: toHex(h.color ?? HILL_A),
+      }))
+    : proceduralNear;
 
   // -- horizon belt: a continuous wrap of hills ringing the whole walkable
   // meadow (the `bounds` rectangle the player can roam). Whichever way the
@@ -303,13 +300,14 @@ export function buildStreetTerrain(group, { streetW, backZ, paveFar, roadFar, ba
   // and the void beyond the play area are never seen. The toe of each hill
   // sits just past the bounds edge, layering behind the closer detail hills
   // above. (Their colliders, added town-side, turn the belt into the solid
-  // fence at the field's edge.)
+  // fence at the field's edge.) Cosmetic backdrop — not editable.
+  const ringHills = [];
   if (bounds) {
     const { minX, maxX, minZ, maxZ } = bounds;
     const OUT = 4; // push each hill's toe this far past the walkable edge
     const ringHill = (x, z) => {
       const radius = 5.5 + r() * 3.5;
-      hill(x + (r() - 0.5) * 1.6, z + (r() - 0.5) * 1.6, radius, r() < 0.5 ? HILL_A : HILL_B, 0.56 + r() * 0.12);
+      ringHills.push({ x: x + (r() - 0.5) * 1.6, z: z + (r() - 0.5) * 1.6, radius, sink: 0.56 + r() * 0.12, color: r() < 0.5 ? HILL_A : HILL_B });
     };
     for (let x = minX - OUT; x <= maxX + OUT; x += 4.5 + r() * 3) {
       ringHill(x, minZ - OUT - r() * 3); // far edge (up-street)
@@ -321,10 +319,38 @@ export function buildStreetTerrain(group, { streetW, backZ, paveFar, roadFar, ba
     }
   }
 
+  // footprint colliders for every hill (near + ring) fence the walkable meadow
+  const pushFootprint = (h) => {
+    const cy = meadowY - h.radius * h.sink; // buried centre height
+    const rGround = Math.sqrt(Math.max(0, h.radius * h.radius - cy * cy));
+    if (rGround > 0.6) footprints.push({ x: h.x, z: h.z, r: rGround });
+  };
+  for (const h of nearHills) pushFootprint(h);
+  for (const h of ringHills) pushFootprint(h);
+
+  // merge into the shared hills backdrop mesh: always the ring, plus the near
+  // hills too unless the editor asked for them split into pickable meshes
+  const bakeHill = (h) => hills.push({ geo: bake(new THREE.SphereGeometry(h.radius, 12, 9), h.x, meadowY - h.radius * h.sink, h.z), color: h.color });
+  for (const h of ringHills) bakeHill(h);
+  if (!editable) for (const h of nearHills) bakeHill(h);
+
   g.add(meshFor(cover));
   g.add(meshFor(tufts));
   g.add(meshFor(rocks, { outline: 0.014 }));
-  g.add(meshFor(hills));
+  if (hills.length) g.add(meshFor(hills));
+
+  // editor only: each near hill as its own centred, pickable mesh placed by
+  // transform (so it can be grabbed and moved); the game keeps them merged above
+  const hillMeshes = [];
+  if (editable) {
+    for (const h of nearHills) {
+      const m = meshFor([{ geo: new THREE.SphereGeometry(h.radius, 12, 9), color: h.color }]);
+      m.position.set(h.x, meadowY - h.radius * h.sink, h.z);
+      g.add(m);
+      hillMeshes.push(m);
+    }
+  }
+
   group.add(g);
-  return { group: g, hills: footprints };
+  return { group: g, hills: footprints, hillMeshes, hillDescs: nearHills };
 }

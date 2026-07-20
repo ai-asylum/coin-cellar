@@ -7,7 +7,7 @@ import { makeLightShaft } from "../core/godrays.js";
 import { placeStreetDecor, decorSprite, DECOR, DECOR_BURST, FIELD_FORAGE } from "./decor.js";
 import { buildStreetTerrain } from "./street-terrain.js";
 import { buildDojo } from "./dojo.js";
-import { SHOP, MAX_CUSTOMERS } from "./shop-data.js";
+import { SHOP, MAX_CUSTOMERS, BUILDING_LIFT } from "./shop-data.js";
 import { getLayout } from "./layout-store.js";
 import { rng, pick } from "../core/engine.js";
 
@@ -20,6 +20,7 @@ export const buildMethods = {
     // and _applyShopOffset then slides it (and every shop anchor) to the
     // position authored in layout.json's `buildings.shop`.
     const sg = new THREE.Group();
+    sg.position.y = BUILDING_LIFT; // sit just above the road to avoid z-fighting
     g.add(sg);
     this.shopGroup = sg;
     // the enclosing walls use the same see-through cutout as the dungeon, so a
@@ -523,11 +524,31 @@ export const buildMethods = {
     // primitive-built terrain under and around it all: the meadow, cobbles,
     // turf patches, boulders and horizon hills. Fed the pre-rotation road rect
     // so cobbles/flagstones lay along the new horizontal high street.
+    // every building/lot footprint in the terrain's PRE-rotation frame, so the
+    // terrain can keep path slabs, cobbles and boulders from surfacing through a
+    // floor. Authored coords (shop/cave/dojo/lots) already use the pre-rotation
+    // convention, so they map straight in — the shop's authored spot in
+    // particular sits over the cobbled road band once _applyShopOffset moves it.
+    const sb = getLayout().buildings?.shop ?? { x: 0, z: 0 };
+    const dd = getLayout().buildings?.dojo ?? { x: 2, z: -33 };
+    const buildingFootprints = [
+      { x: sb.x, z: sb.z, hw: SHOP.W / 2, hd: SHOP.D / 2 },       // shop
+      { x: this._cavePre.x, z: this._cavePre.z, hw: 2.2, hd: 3.8 }, // cave mound + apron
+      { x: dd.x, z: dd.z, hw: 4.0, hd: 5.0 },                      // dojo hall
+      ...this.lots.map((l) => ({ x: l.collider.x, z: l.collider.z, hw: l.collider.hw, hd: l.collider.hd })),
+    ];
     const terrain = buildStreetTerrain(g, {
       road: this._road,
       cave: this._cavePre, // {x, z} pre-rotation centre, set by _buildCaveMouth
       bounds: this.bounds, // set by _buildTown above; rings the walkable meadow with hills
+      hills: getLayout().hills, // optional authored near "wall" hills (else procedural)
+      buildings: buildingFootprints, // pre-rotation footprints kept clear of terrain slabs
+      editable: !!this.game?.editor, // editor: split the near hills into pickable meshes
     });
+    // editor only: the near "wall" hills as individually-pickable meshes, plus
+    // their descriptors so the editor can seed layout.hills on first edit
+    this._hillMeshes = terrain.hillMeshes || [];
+    this._hillDescs = terrain.hillDescs || [];
     // make the ring of horizon hills solid so the widened meadow reads as a
     // field fenced by rolling ground — the player is stopped at the foot of
     // each slope instead of clipping up into it. Pushed as pre-rotation AABBs
@@ -612,6 +633,9 @@ export const buildMethods = {
     const ox = sb ? -sb.z : 0;
     const oz = sb ? sb.x : 0;
     this.shopOrigin = new THREE.Vector3(ox, 0, oz); // exposed for the editor
+    // where the hero spawns / respawns inside the shop — follows the shop so the
+    // player always lands on the sales floor (see Game.startPlay / _respawn)
+    this.playerSpawn = new THREE.Vector3(0 + ox, 0, 2.5 + oz);
     if (!ox && !oz) return;
     this.shopGroup.position.x += ox;
     this.shopGroup.position.z += oz;
@@ -721,7 +745,7 @@ export const buildMethods = {
     // the rocky mound + dark maw is a self-contained assembly (also shown in
     // the admin catalogue) — build it at the origin and drop it into place
     const mouth = makeCaveMouth();
-    mouth.position.set(cx, 0, cz);
+    mouth.position.set(cx, BUILDING_LIFT, cz); // lift off the road to avoid z-fighting
     this.group.add(mouth);
     this._caveMouthGroup = mouth; // exposed so the editor can select / grab it
     // dirt apron spilling from the mouth down onto the road
@@ -774,7 +798,7 @@ export const buildMethods = {
     for (const def of getLayout().lots) {
       const yaw = def.yaw || 0;
       const lotGroup = new THREE.Group();
-      lotGroup.position.set(def.x, 0, def.z);
+      lotGroup.position.set(def.x, BUILDING_LIFT, def.z); // lift off the road to avoid z-fighting
       lotGroup.rotation.y = yaw;
       this.group.add(lotGroup);
       const before = buildLotParts(def.before);
