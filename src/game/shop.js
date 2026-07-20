@@ -5,7 +5,7 @@
 // The Recettear loop: buy low in the dungeon, pin the price just under each
 // customer's hidden tolerance, chain PERFECT deals.
 import * as THREE from "three";
-import { feedOccluder, makeBlobShadow } from "../core/toon.js";
+import { feedOccluder, clearOccluder, makeBlobShadow } from "../core/toon.js";
 import { variantForSeed } from "../chargen/blocky.js";
 import { ITEMS, itemSprite } from "./items.js";
 import { disposeDecor, FIELD_FORAGE } from "./decor.js";
@@ -14,6 +14,13 @@ import { buildMethods } from "./shop-build.js";
 import { pathMethods } from "./shop-pathfinding.js";
 import { customerMethods } from "./shop-customers.js";
 import { updateDojo, dojoHitDummies } from "./dojo.js";
+import { updateBuilder } from "./builder.js";
+
+// Scratch for the dialogue occluder: the chatting NPC's world position (they
+// ride the rotated shop group, so their local .position isn't world-space) and
+// a lightweight wrapper feedOccluder can read as an extra tracked point.
+const _npcWorld = new THREE.Vector3();
+const _npcOccluder = { position: _npcWorld, height: 1.4 };
 
 // Keep the indoor camera focus away from walls while still allowing it to
 // travel with the player through rooms that do not fit on a phone screen.
@@ -46,6 +53,7 @@ export class Shop {
     this.lampLights = []; // interior lamp point-lights, lit after dusk
     this.streetLampLights = []; // lamppost point-lights out on the street
     this.streetLampGlows = []; // lamppost glow-sphere materials (dim by day)
+    this.streetLamps = []; // lamppost groups (editor picks/moves these)
     this._shaftCol = new THREE.Color(0xffe0a2); // eased tint shared by the shafts
     this._litInit = false; // snap the daylight to the current hour on first tick
     this.colliders = []; // {x, z, hw, hd} AABBs (walls & furniture)
@@ -318,18 +326,39 @@ export class Shop {
     this._updateLighting(dt);
     this._updateForageDrops(dt, elapsed);
     updateDojo(this, this.dojo, dt, elapsed);
+    updateBuilder(this, dt, elapsed);
 
     // throb the floor outline on whichever locked table is the current target
     if (this._glowTable && this._glowTable.outline)
       this._glowTable.outline.material.opacity = 0.55 + Math.sin(elapsed * 6) * 0.35;
 
-    // feed the see-through wall cutout so walls never hide the player
+    // feed the see-through wall cutout so walls never hide the player. When a
+    // conversation is on stage the camera drops to an eye-level two-shot, so we
+    // also track the other speaker (the NPC you're chatting with) and switch the
+    // wooden furniture over to the same dither — nothing stands between the
+    // camera and the two-shot. Reading the note is the hero alone (already the
+    // primary occluder). The furniture is solid again the moment the chat ends.
     const player = this.game.player;
-    if (player) for (const m of this._occludeMats) feedOccluder(m, player, this.game.engine.camera);
+    const cam = this.game.engine.camera;
+    const chatNpc = this.game._npcChat?.target?.creature || null;
+    const dialogue = !!chatNpc || !!this.game._noteCam || !!this.game._selfCam;
+    let extras = null;
+    if (chatNpc) {
+      chatNpc.getWorldPosition(_npcWorld); // customers ride the rotated shop group
+      _npcOccluder.position = _npcWorld;
+      _npcOccluder.height = chatNpc.height ?? 1.4;
+      extras = [_npcOccluder];
+    }
+    if (player) {
+      for (const m of this._occludeMats) feedOccluder(m, player, cam, 0.6, extras);
+      for (const m of this._dialogueOccludeMats) {
+        if (dialogue) feedOccluder(m, player, cam, 0.6, extras);
+        else clearOccluder(m);
+      }
+    }
 
     // shimmer the fancy-table glows: advance their shader clock and keep each
     // billboarded at the camera so the halo always faces the player
-    const cam = this.game.engine.camera;
     for (const slot of this.slots) {
       if (!slot.glow) continue;
       slot.glow.userData.mat.uniforms.uTime.value = elapsed;
@@ -453,6 +482,20 @@ export class Shop {
     eng.hemi.intensity += (hemiI - eng.hemi.intensity) * k;
     eng.sun.color.lerp(_tSun, k);
     eng.sun.intensity += (sunI - eng.sun.intensity) * k;
+
+    // The hero's lantern: bright underground (where the dimmed fill above hands
+    // the lighting over to it), dark on the surface. It rides the player each
+    // frame and flickers like a live flame, so the cave/dungeon light pool
+    // drifts and breathes with the hero instead of sitting as a flat fill.
+    const underground = game.playerArea === "dungeon" || game.playerArea === "cave";
+    const torch = eng.torch;
+    const torchBase = torch.userData.baseI ?? 0;
+    torch.userData.baseI = torchBase + ((underground ? 3.0 : 0) - torchBase) * k;
+    const flick = 0.86 + Math.sin(eng.elapsed * 8.3) * 0.06 + Math.sin(eng.elapsed * 21.7) * 0.04;
+    torch.intensity = torch.userData.baseI * flick;
+    const pp = game.player?.position;
+    if (pp) torch.position.set(pp.x, 1.6, pp.z);
+
     if (eng.scene.background?.isColor) {
       eng.scene.background.lerp(_tBg, k);
       if (eng.scene.fog) eng.scene.fog.color.copy(eng.scene.background);
@@ -684,8 +727,12 @@ function makeGlow(color = 0xffd67a) {
 // moody underground look; the street runs the 24-hour clock below.
 const _col = (hex) => new THREE.Color(hex);
 // pitch-black backdrop underground so anything outside the dungeon itself
-// (the void past the walls, the pit under the descent stairs) reads as solid dark
-const DUNGEON_PAL = { sky: _col(0xb7a1ff), ground: _col(0x160e28), hemiI: 0.6, sun: _col(0xffdca0), sunI: 1.9,  bg: _col(0x000000), shaft: _col(0xffd08a) };
+// (the void past the walls, the pit under the descent stairs) reads as solid dark.
+// The ambient/key fill is kept deliberately low here: below ground the light
+// comes from the hero's lantern and the shaft pools (see engine.torch and the
+// dungeon/cave shaft lights), so the space lights dynamically instead of under
+// one flat wash. hemi/sun stay just high enough that nothing goes pure black.
+const DUNGEON_PAL = { sky: _col(0xb7a1ff), ground: _col(0x160e28), hemiI: 0.34, sun: _col(0xffdca0), sunI: 0.7,  bg: _col(0x000000), shaft: _col(0xffd08a) };
 
 // The street's palette keyed on the real wall-clock hour (0–24). Adjacent keys
 // are lerped by the current hour; `night` (0 = full day → 1 = full dark) drives

@@ -6,6 +6,7 @@ import * as THREE from "three";
 import { icon, itemIcon } from "../core/icons.js";
 import { ITEMS } from "./items.js";
 import { ARCHETYPES } from "./shop.js";
+import { builderGoRepair } from "./builder.js";
 import { track } from "../core/analytics.js";
 
 // per-call scratch vectors (duplicated from game.js — these are transient)
@@ -65,6 +66,7 @@ export const economyMethods = {
     // the loot flies across the screen into the backpack
     this.hud.flyToBag(_v.copy(drop.mesh.position).setY(0.8), itemIcon(it.icon));
     this._tutAdvance("loot");
+    this._refreshBagIfOpen(); // magneted in while the bag's open — keep the list live
     this._save();
   },
 
@@ -88,6 +90,7 @@ export const economyMethods = {
     const it = ITEMS[drop.item];
     this.hud.float(_v.copy(drop.mesh.position).setY(1.2), `${itemIcon(it.icon)} ${it.name}`, "loot");
     this.hud.flyToBag(_v.copy(drop.mesh.position).setY(0.8), itemIcon(it.icon));
+    this._refreshBagIfOpen(); // pocketed while the bag's open — keep the list live
     this._save();
   },
 
@@ -380,6 +383,47 @@ export const economyMethods = {
     this._syncState();
     // rebuilding is the player's own call (no quest for it) — but the town's
     // first family is a moment, so the Mayor drops by with a word of praise
+    if (this.townPop() === 1) this._mayorAfterRestore();
+  },
+
+  // Hire the town builder to raise the house on lot `i`: charge the fee up front
+  // and send the foreman off to work (see builder.js). The gold + save happen
+  // now (so a mid-build reload can't lose the payment — the finished house is
+  // replayed instantly on load via townRestored), but the visible house is held
+  // back until the foreman actually finishes hammering (_finishLotRestore).
+  _dispatchBuilder(i) {
+    if (this.net.isGuest) return this.hud.toast("Only the host runs the town.");
+    const lot = this.shop.lots && this.shop.lots[i];
+    const b = this.shop.builder;
+    if (!lot || lot.restored || this.townRestored[i]) return;
+    if (!b || b.state !== "idle") return this.hud.toast("The builder's already on a job.");
+    if (this.gold < lot.cost) {
+      this.audio.deny();
+      return this.hud.toast(`${icon("coin")} Not enough gold — need ${lot.cost}g`);
+    }
+    this._spendGold(lot.cost, b.creature.position);
+    this.today.spent += lot.cost;
+    this.townRestored[i] = true;      // paid — the next offer skips to the next-cheapest
+    this.townResidents.push(lot.resident);
+    this._save();
+    this._syncState();
+    this.audio.pickup?.();
+    this.hud.toast(`${icon("tools")} The builder heads out to raise it.`);
+    builderGoRepair(this.shop, i);
+  },
+
+  // The foreman just finished a job: reveal the house and welcome the family.
+  // Payment/persistence already happened in _dispatchBuilder, so this is the
+  // purely visible half (and the one-time Mayor cameo on the first home).
+  _finishLotRestore(i) {
+    const lot = this.shop.lots && this.shop.lots[i];
+    if (!lot || lot.restored) return;
+    this.shop.restoreLot(i); // before→after swap + chest sound + shake
+    this.particles.burst(_v.copy(lot.group.position).setY(1.1),
+      { color: 0xffe6a3, n: 18, speed: 3.4, up: 2, gravity: 3, life: 0.7, size: 0.9 });
+    const arch = ARCHETYPES[lot.resident];
+    this.hud.banner(`${icon("home")} A new home!`,
+      `a ${arch ? arch.name : "new"} family moves in`, 2.8);
     if (this.townPop() === 1) this._mayorAfterRestore();
   },
 };

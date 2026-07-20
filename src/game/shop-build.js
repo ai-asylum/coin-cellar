@@ -7,6 +7,7 @@ import { makeLightShaft } from "../core/godrays.js";
 import { placeStreetDecor, decorSprite, DECOR, DECOR_BURST, FIELD_FORAGE } from "./decor.js";
 import { buildStreetTerrain } from "./street-terrain.js";
 import { buildDojo } from "./dojo.js";
+import { buildBuilder } from "./builder.js";
 import { SHOP, MAX_CUSTOMERS, BUILDING_LIFT } from "./shop-data.js";
 import { getLayout } from "./layout-store.js";
 import { rng, pick } from "../core/engine.js";
@@ -29,8 +30,13 @@ export const buildMethods = {
     const wallMat = makeToonMaterial({ color: 0x8a6f9e, rim: 0, occlude: true });
     const wallMat2 = makeToonMaterial({ color: 0x77608c, rim: 0, occlude: true });
     this._occludeMats = [wallMat, wallMat2];
-    const woodMat = makeToonMaterial({ color: 0x8a5a33, rim: 0 });
-    const wood2 = makeToonMaterial({ color: 0x6e4526, rim: 0 });
+    // the wooden fixtures (tables, counter, sill, poles) carry the same
+    // see-through cutout, but it's only switched on while a conversation is
+    // framed at eye level — otherwise they stay solid under the overview cam.
+    // See Shop.update, which feeds/clears these against the on-stage speakers.
+    const woodMat = makeToonMaterial({ color: 0x8a5a33, rim: 0, occlude: true });
+    const wood2 = makeToonMaterial({ color: 0x6e4526, rim: 0, occlude: true });
+    this._dialogueOccludeMats = [woodMat, wood2];
     // an un-built table is no longer shown as a greyed-out ghost mesh: its real
     // fixture stays hidden and a glowing outline on the floor marks the footprint
     // where it'll go once the player pays to build it (see _applyTableState).
@@ -144,9 +150,13 @@ export const buildMethods = {
     // --- the roof: a stepped hip stack over the shop box, with a chimney. It
     // fades away whenever the player is inside the building (see update()) so
     // the room stays readable; from the street it sells "a house you enter".
-    const roofMat = makeToonMaterial({ color: 0x9a4a3a, rim: 0 });
-    const roofTrimMat = makeToonMaterial({ color: 0x7a382c, rim: 0 });
+    // It also carries the same see-through cutout as the walls, so when the
+    // player wanders round the *back* of the shop (outside, roof still up) the
+    // roof dithers a hole around them instead of hiding them from the camera.
+    const roofMat = makeToonMaterial({ color: 0x9a4a3a, rim: 0, occlude: true });
+    const roofTrimMat = makeToonMaterial({ color: 0x7a382c, rim: 0, occlude: true });
     for (const m of [roofMat, roofTrimMat]) m.transparent = true;
+    this._occludeMats.push(roofMat, roofTrimMat);
     const roof = new THREE.Group();
     // flush with the walls' outer faces — no eaves hanging past the footprint
     const r1 = new THREE.Mesh(new THREE.BoxGeometry(W + 0.3, 0.4, D + 0.3), roofMat);
@@ -490,13 +500,17 @@ export const buildMethods = {
       lamp.add(pole, head, glow, light);
       lamp.position.set(x, 0, z);
       g.add(lamp);
+      this.streetLamps.push(lamp);
       this.streetLampLights.push(light);
       this.streetLampGlows.push(glowMat);
     };
-    // lamps spaced down the pavement edge so the whole road stays lit after dark
-    for (const lz of [streetLeftZ - 3, (streetLeftZ + streetMidZ) / 2, streetMidZ, (streetMidZ + streetRightZ) / 2, streetRightZ + 5]) {
-      mkStreetLamp(roadNearX - 0.4, lz);
-    }
+    // lamps line the pavement — authored positions from layout.json when present,
+    // else a default run spaced down the road edge. Both are pre-rotation coords
+    // (_rotateTown quarter-turns them with the rest of the town). The defaults
+    // are stashed as _lampDescs so the editor can seed layout.lamps on first edit.
+    this._lampDescs = [streetLeftZ - 3, (streetLeftZ + streetMidZ) / 2, streetMidZ, (streetMidZ + streetRightZ) / 2, streetRightZ + 5]
+      .map((lz) => ({ x: roadNearX - 0.4, z: lz }));
+    for (const l of (getLayout().lamps ?? this._lampDescs)) mkStreetLamp(l.x, l.z);
 
     // the ambient pedestrians roam the road: kept pre-rotation here, mapped to
     // an explicit post-rotation rect in _rotateTown (along = screen X, across =
@@ -584,6 +598,12 @@ export const buildMethods = {
     // row of straw dummies to whack. Built in post-rotation world space (its
     // colliders join the list here, before forage rejects against them).
     this.dojo = buildDojo(this);
+
+    // the town builder: an always-present foreman who waits by the ruined lots
+    // and, for a fee, walks over and raises a house on the cheapest one. Built
+    // after the lots + rotation so his home spot averages their world stand
+    // points (see buildBuilder / updateBuilder).
+    this.builder = buildBuilder(this);
 
     // scatter destructible forage (blossoms, berry bushes, nut saplings,
     // mushrooms) across the walkable meadow — smashable for edible loot, just

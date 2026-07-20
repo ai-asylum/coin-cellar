@@ -134,6 +134,8 @@ function tagEditables() {
   });
   shop.lots.forEach((lot, i) => { lot.group.userData.edit = { type: "lot", index: i }; });
   shop.decorSprites.forEach((s, i) => { s.userData.edit = { type: "decor", index: i }; });
+  // the street lampposts — pickable/movable like decor (authored pre-rotation coords)
+  (shop.streetLamps || []).forEach((l, i) => { l.userData.edit = { type: "lamp", index: i }; });
   // whole buildings (grabbed in Buildings mode): the shop shell + interior, the
   // cave mouth, and the dojo — each a group the game builds from layout.json's
   // `buildings` block
@@ -166,6 +168,16 @@ function ensureHills() {
   return layout.hills;
 }
 
+// Seed layout.lamps from the street lamps the shop just built (authored or the
+// code-default run) so the first edit has a record to mutate — mirrors
+// ensureHills. Positions are the pre-rotation authored coords the shop reads back.
+function ensureLamps() {
+  if (!Array.isArray(layout.lamps) || !layout.lamps.length) {
+    layout.lamps = (shop?._lampDescs || []).map((l) => ({ x: round2(l.x), z: round2(l.z) }));
+  }
+  return layout.lamps;
+}
+
 // Seed layout.buildings from the code defaults so the first edit has a record
 // to mutate (matches the shape shop-build / dojo read back).
 function ensureBuildings() {
@@ -188,6 +200,7 @@ function selectionValid(sel) {
     return !!lot && sel.state === lotView && sel.partIndex < lot[sel.state].length;
   }
   if (sel.type === "decor") return sel.index < layout.decor.length;
+  if (sel.type === "lamp") return !!shop && sel.index < (shop.streetLamps?.length ?? 0);
   if (sel.type === "building") return sel.key === "shop" || sel.key === "cave" || sel.key === "dojo";
   if (sel.type === "dojoDummy") return sel.index < (layout.buildings?.dojo?.dummies?.length ?? 0);
   if (sel.type === "dojoMaster") return true;
@@ -217,6 +230,7 @@ function selectedObject(sel = selection) {
   if (sel.type === "lot") return shop.lots[sel.index]?.group ?? null;
   if (sel.type === "part") return shop.lots[sel.index]?.[sel.state]?.children[sel.partIndex] ?? null;
   if (sel.type === "decor") return shop.decorSprites[sel.index] ?? null;
+  if (sel.type === "lamp") return shop.streetLamps[sel.index] ?? null;
   if (sel.type === "building") {
     return (sel.key === "shop" ? shop.shopGroup : sel.key === "dojo" ? shop._dojoGroup : shop._caveMouthGroup) ?? null;
   }
@@ -233,6 +247,7 @@ function selectedRecord(sel = selection) {
   if (sel.type === "lot") return layout.lots[sel.index];
   if (sel.type === "part") return layout.lots[sel.index]?.[sel.state]?.[sel.partIndex];
   if (sel.type === "decor") return layout.decor[sel.index];
+  if (sel.type === "lamp") return ensureLamps()[sel.index];
   if (sel.type === "building") return ensureBuildings()[sel.key];
   if (sel.type === "dojoDummy") return ensureBuildings().dojo.dummies[sel.index];
   if (sel.type === "dojoMaster") return ensureBuildings().dojo.master;
@@ -250,6 +265,7 @@ function selLabel(sel = selection) {
     return `lot ${sel.index + 1} · ${sel.state} part ${sel.partIndex + 1} (${p?.shape})`;
   }
   if (sel.type === "decor") return `decor ${sel.index + 1} (${layout.decor[sel.index]?.cat})`;
+  if (sel.type === "lamp") return `lamppost ${sel.index + 1}`;
   if (sel.type === "building") return sel.key === "shop" ? "shop building" : sel.key === "dojo" ? "dojo building" : "cave mouth";
   if (sel.type === "dojoDummy") return `dojo dummy ${sel.index + 1}`;
   if (sel.type === "dojoMaster") return "dojo master";
@@ -488,6 +504,7 @@ function rotateSelected(delta) {
   if (selection.type === "decor") { setStatus("billboards always face the camera — no yaw"); return; }
   if (selection.type === "building") { setStatus("buildings keep their built orientation — position only"); return; }
   if (selection.type === "dojoDummy" || selection.type === "dojoMaster") { setStatus("dojo pieces are position-only"); return; }
+  if (selection.type === "lamp") { setStatus("lampposts are square — position only"); return; }
   if (selection.type === "hill") { setStatus("hills are round — no yaw (use [ ] to resize)"); return; }
   pushUndo(`rot:${JSON.stringify(selection)}`);
   rec.yaw = round2((rec.yaw || 0) + delta);
@@ -503,6 +520,7 @@ function scaleSelected(factor) {
   if (!rec || !obj) { setStatus("select something to scale"); return; }
   if (selection.type === "building") { setStatus("buildings keep their built size"); return; }
   if (selection.type === "dojoDummy" || selection.type === "dojoMaster") { setStatus("dojo pieces keep their built size"); return; }
+  if (selection.type === "lamp") { setStatus("lampposts keep their built size"); return; }
   const key = `scale:${JSON.stringify(selection)}`;
   if (selection.type === "decor") {
     pushUndo(key);
@@ -581,6 +599,12 @@ function duplicateSelected() {
     list.push({ ...rec, x: round2(rec.x + 3), z: round2(rec.z + 3) });
     rebuild();
     setSelection({ type: "hill", index: list.length - 1 });
+  } else if (selection.type === "lamp") {
+    const list = ensureLamps();
+    const rec = list[selection.index];
+    list.push({ ...rec, x: round2(rec.x + 2), z: round2(rec.z + 2) });
+    rebuild();
+    setSelection({ type: "lamp", index: list.length - 1 });
   }
   setStatus(`duplicated → ${selLabel()}`, "ok");
 }
@@ -600,6 +624,7 @@ function deleteSelected() {
   else if (selection.type === "lot") layout.lots.splice(selection.index, 1);
   else if (selection.type === "part") layout.lots[selection.index][selection.state].splice(selection.partIndex, 1);
   else if (selection.type === "decor") layout.decor.splice(selection.index, 1);
+  else if (selection.type === "lamp") ensureLamps().splice(selection.index, 1);
   else if (selection.type === "hill") ensureHills().splice(selection.index, 1);
   const wasPart = selection.type === "part" ? { type: "lot", index: selection.index } : null;
   selection = null;
@@ -942,7 +967,7 @@ function renderPanel() {
   if (!rec) {
     panelEl.append(el("div", { className: "muted", textContent: editScope === "buildings"
       ? "Buildings mode (M): click the shop, cave, dojo or a house, then G to drag the whole thing."
-      : "Contents mode (M): click a shelf, house part, decor sprite, dojo dummy/master, or a wall hill. Enter opens the decor palette." }));
+      : "Contents mode (M): click a shelf, house part, decor sprite, lamppost, dojo dummy/master, or a wall hill. Enter opens the decor palette." }));
   } else {
     panelEl.append(el("div", { className: "muted", textContent: selLabel() }));
     const sel = selection;
@@ -1016,6 +1041,14 @@ function renderPanel() {
           textContent: "Replace art…",
           onclick() { paletteMode = "replace"; togglePalette(true); setStatus("pick replacement art in the palette"); },
         })),
+      );
+    }
+
+    if (sel.type === "lamp") {
+      panelEl.append(
+        row("x", numInput(rec.x, (v) => editRec(() => { rec.x = v; }))),
+        row("z", numInput(rec.z, (v) => editRec(() => { rec.z = v; }))),
+        el("div", { className: "muted", textContent: "street lamppost — G to drag, Ctrl snaps to grid" }),
       );
     }
 
@@ -1102,7 +1135,7 @@ function renderPanel() {
   panelEl.append(el("h3", { textContent: "Layout" }));
   panelEl.append(el("div", {
     className: "muted",
-    textContent: `${layout.tables.length} tables + vitrine · ${layout.lots.length} lots · ${layout.decor.length} decor · ${(layout.hills?.length ?? 0) || (shop?._hillMeshes?.length ?? 0)} wall hills`,
+    textContent: `${layout.tables.length} tables + vitrine · ${layout.lots.length} lots · ${layout.decor.length} decor · ${(layout.lamps?.length ?? 0) || (shop?.streetLamps?.length ?? 0)} lamps · ${(layout.hills?.length ?? 0) || (shop?._hillMeshes?.length ?? 0)} wall hills`,
   }));
 }
 
