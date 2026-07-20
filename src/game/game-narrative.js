@@ -17,7 +17,7 @@ import { portraitDataURL } from "../chargen/portrait.js";
 import { icon, itemIcon } from "../core/icons.js";
 import { ITEMS } from "./items.js";
 import { SHOP } from "./shop-data.js";
-import { npcLinesFor, timeOfDay, npcReflectionLine, npcIntroLines } from "./npc-data.js";
+import { npcLinesFor, timeOfDay, npcReflectionLine, npcIntroLines, npcWishLine } from "./npc-data.js";
 import { track } from "../core/analytics.js";
 
 // The Mayor NPC: a fixed character variant (so his walking body matches the
@@ -229,9 +229,12 @@ export const narrativeMethods = {
       case "stock": {
         // first step through the door: the gates swing shut behind the heir,
         // and the uncle's note waits on the first table (the town is rotated a
-        // quarter-turn, so the shop rect is D wide in x and W deep in z)
+        // quarter-turn, so the shop rect is D wide in x and W deep in z).
+        // Measure against the shop's live origin so a relocated shop still trips
+        // the trigger (the whole footprint slides with buildings.shop).
+        const o = this.shop.shopOrigin;
         if (!this._noteSpawned && this.playerArea === "shop" &&
-            Math.abs(p.x) < SHOP.D / 2 && Math.abs(p.z) < SHOP.W / 2) {
+            Math.abs(p.x - o.x) < SHOP.D / 2 && Math.abs(p.z - o.z) < SHOP.W / 2) {
           this._noteSpawned = true;
           this.shop.doorLocked = true; // the doors close behind the player
           this._spawnNoteProp();
@@ -369,7 +372,7 @@ export const narrativeMethods = {
     this._doorScene = true;
     this.audio.deny();
     this._ftueFreeze = true;
-    this._selfSay([PLAYER_DOOR_LINE], () => this.hud.bagAttention("Open the backpack"));
+    this._selfSay([PLAYER_DOOR_LINE], () => this.hud.bagAttention("Open backpack"));
   },
 
   // The bag's "Use" on the shop key: the key turns, the gates swing open and
@@ -595,7 +598,13 @@ export const narrativeMethods = {
     const lines = npcLinesFor(npc, hour);
     if (target._lineTod !== tod) { target._lineTod = tod; target._lineIdx = 0; }
     else target._lineIdx = (target._lineIdx == null ? 0 : target._lineIdx + 1);
-    const line = reflection || lines[target._lineIdx % lines.length];
+    // after a shopping trip they reflect on it, then follow up with a hint at
+    // what tempts them (see npcWishLine) so the player learns what to stock
+    if (reflection) {
+      const wish = npcWishLine(npc);
+      return this._npcSayLines(npc, wish ? [reflection, wish] : [reflection]);
+    }
+    const line = lines[target._lineIdx % lines.length];
     this._npcSayLines(npc, [line]);
   },
 

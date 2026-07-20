@@ -35,6 +35,7 @@ const COLOR = new Set([
   "lantern", "amulet", "swords", "tome", "gem", "fang", "crown",
   "mushroom", "meat", "egg", "key", "bomb", "shield", "bell", "feather",
   "hourglass", "star", "rathide",
+  "flower", "berries", "nuts",
   "bow", "staff", "armor", "boots",
 ]);
 
@@ -116,13 +117,6 @@ const SVG = {
   staff: `<path d="M8 21 16 5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><circle cx="16.6" cy="4" r="2.6" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M16.6 1.2v-.1M19.4 4h.1M16.6 6.6v.1M13.8 4h-.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>`,
   armor: `<path d="M12 3 5 5.5v5c0 4.6 3 7.8 7 9.5 4-1.7 7-4.9 7-9.5v-5z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M12 3v17M8.5 8h7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>`,
   boots: `<path d="M8 3v9l-2 1c-1.3.7-2 1.7-2 3v3h13v-2.5a3 3 0 0 0-1.6-2.6L12 12V3z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M4 17h13" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>`,
-
-  // ---- wild forage (edible loot foraged from the fields around town) ----
-  // Full-colour glyphs so they read as merchandise beside the item PNGs, since
-  // these items ship no PNG art of their own (see game/items.js `proc`).
-  flower: `<path d="M12 21v-7" stroke="#4e6c37" stroke-width="1.7" stroke-linecap="round"/><path d="M12 16q-3 0-4-2" stroke="#4e6c37" stroke-width="1.5" fill="none" stroke-linecap="round"/><g fill="#e86aa8"><circle cx="12" cy="6.4" r="2.7"/><circle cx="7.8" cy="9.2" r="2.7"/><circle cx="16.2" cy="9.2" r="2.7"/><circle cx="9.4" cy="13.4" r="2.7"/><circle cx="14.6" cy="13.4" r="2.7"/></g><circle cx="12" cy="10" r="2.6" fill="#f6c744"/>`,
-  berries: `<path d="M12 3v7" stroke="#4e6c37" stroke-width="1.7" stroke-linecap="round"/><path d="M12 6q3.5-2.5 5.5.2" fill="#57c26f"/><path d="M12 5q-3.5-2.2-5.5.5" fill="#57c26f"/><g fill="#9a3ba8" stroke="#5e2168" stroke-width="0.9"><circle cx="8.8" cy="14.5" r="3.1"/><circle cx="15.2" cy="14.5" r="3.1"/><circle cx="12" cy="18.4" r="3.1"/></g><circle cx="7.9" cy="13.4" r="0.7" fill="#d99ad9"/><circle cx="14.3" cy="13.4" r="0.7" fill="#d99ad9"/>`,
-  nuts: `<path d="M6.6 10.4q3-2.2 5.6 0" fill="none" stroke="#6e4522" stroke-width="2.2" stroke-linecap="round"/><path d="M12 10.6q2.6-2 5.2 0" fill="none" stroke="#6e4522" stroke-width="2" stroke-linecap="round"/><ellipse cx="9.4" cy="15" rx="3.4" ry="4.2" fill="#9c6a38" stroke="#6e4522" stroke-width="1"/><ellipse cx="15" cy="14.4" rx="3" ry="3.8" fill="#8a5a2e" stroke="#6e4522" stroke-width="1"/><path d="M9.4 19.2v1.2M15 18.2v1.1" stroke="#6e4522" stroke-width="1.2" stroke-linecap="round"/>`,
 
   // fallback
   unknown: `<circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9.2 9.5a2.8 2.8 0 0 1 5.4 1c0 1.8-2.6 2.2-2.6 4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="12" cy="17.4" r="1.1" fill="currentColor"/>`,

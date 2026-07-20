@@ -1,0 +1,18 @@
+{
+  "attackMode": "joystickButton",
+  "autodash": {
+    "range": 2.4,
+    "cooldown": 0.6
+  },
+  "joystickButton": {
+    "range": 3.2
+  },
+  "strikeInPlace": {
+    "range": 2.2,
+    "cooldown": 0.4
+  },
+  "swipe": {
+    "flick": 1.1,
+    "range": 3.2
+  }
+}

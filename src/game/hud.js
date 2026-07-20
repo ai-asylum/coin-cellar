@@ -21,6 +21,7 @@ export class HUD {
           <button class="icon-btn" id="pause-btn">${icon("pause")}</button>
         </div>
       </div>
+      <div id="combat-modes"></div>
       <button id="bag-btn" aria-label="Open backpack (B)">
         <span class="bag-btn-ic">${icon("bag")}</span>
         <span class="bag-btn-key">B</span>
@@ -34,13 +35,10 @@ export class HUD {
       <div id="bossbar" class="hidden">
         <div id="bossbar-name"></div>
         <div id="bossbar-track"><div id="bossbar-fill"></div></div>
-        <div id="bossbar-tel" class="hidden">
-          <span id="bossbar-tel-name"></span>
-          <div id="bossbar-tel-track"><div id="bossbar-tel-fill"></div></div>
-        </div>
       </div>
       <div id="toast-wrap"></div>
       <div id="floaties"></div>
+      <div id="npc-debug"></div>
       <div id="tut-guide" class="hidden">
         <div class="tg-text"></div>
         <div class="tg-arrow"><span class="tg-bob"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5 h16 l-8 14 z"/></svg></span></div>
@@ -71,10 +69,6 @@ export class HUD {
     this.bossbarNameEl = root.querySelector("#bossbar-name");
     this.bossbarFillEl = root.querySelector("#bossbar-fill");
     this._bossbarName = null;
-    this.bossTelEl = root.querySelector("#bossbar-tel");
-    this.bossTelNameEl = root.querySelector("#bossbar-tel-name");
-    this.bossTelFillEl = root.querySelector("#bossbar-tel-fill");
-    this._bossTelAtk = null;
     this.sheetEl = root.querySelector("#sheet");
     this.backdropEl = root.querySelector("#sheet-backdrop");
     this._onBackdrop = null;
@@ -88,6 +82,8 @@ export class HUD {
     this.speakOpen = false;
     this._onAdvance = null;
     this.floatiesEl = root.querySelector("#floaties");
+    this.npcDbgEl = root.querySelector("#npc-debug");
+    this._dbgPool = [];
     this.hurtFlashEl = root.querySelector("#hurt-flash");
     this.toastWrap = root.querySelector("#toast-wrap");
     this.guideEl = root.querySelector("#tut-guide");
@@ -229,30 +225,6 @@ export class HUD {
 
   hideBossBar() {
     this.bossbarEl.classList.add("hidden");
-    this.clearBossTelegraph();
-  }
-
-  /** Windup warning under the boss bar: which attack is coming + a fill that
-   * races toward the moment it lands. frac is windup progress, 0 → 1. */
-  setBossTelegraph(atk, frac) {
-    this.bossTelEl.classList.remove("hidden");
-    if (atk !== this._bossTelAtk) {
-      this._bossTelAtk = atk;
-      this.bossTelEl.dataset.atk = atk;
-      this.bossTelNameEl.textContent =
-        atk === "charge" ? "⚠ Charge — sidestep!" :
-        atk === "burst" ? "⚠ Orb Burst — weave the gaps!" :
-        atk === "pounce" ? "⚠ Pounce — off the mark!" :
-        atk === "deluge" ? "⚠ Deluge — clear the circles!" :
-        atk === "blink" ? "⚠ Blink — it's beside you!" :
-        "⚠ Slam — back away!";
-    }
-    this.bossTelFillEl.style.width = (Math.max(0, Math.min(1, frac)) * 100).toFixed(1) + "%";
-  }
-
-  clearBossTelegraph() {
-    this.bossTelEl.classList.add("hidden");
-    this._bossTelAtk = null;
   }
 
   /** Red screen pulse when the player takes a hit. */
@@ -519,7 +491,7 @@ export class HUD {
   }
 
   /** FTUE "your next move is in the bag" cue: the backpack button pulses and
-   * a bouncing arrow hangs above it. `label` is optional ("Open the backpack"
+   * a bouncing arrow hangs above it. `label` is optional ("Open backpack"
    * the first time; the repeat visit gets the arrow alone). The arrow lives
    * inside the button so it follows it across layouts, and vanishes with it
    * while the bag sheet is up. Cleared by clearBagAttention(). */
@@ -626,6 +598,38 @@ export class HUD {
 
   removeEmote(entry) {
     entry.until = 0;
+  }
+
+  /** Debug overlay: a small info card pinned above each NPC while the admin's
+   * "NPC debug" toggle is on. `entries` is an array of
+   * { target: creature, html, stuck } — pooled label elements are reused frame
+   * to frame so the crowd's worth of cards never thrashes the DOM. */
+  renderNpcDebug(entries) {
+    const pool = this._dbgPool;
+    for (let i = 0; i < entries.length; i++) {
+      let el = pool[i];
+      if (!el) {
+        el = document.createElement("div");
+        el.className = "npc-dbg";
+        this.npcDbgEl.appendChild(el);
+        pool[i] = el;
+      }
+      const e = entries[i];
+      _v.setFromMatrixPosition(e.target.matrixWorld);
+      _v.y += (e.target.height ?? 1.6) + 0.55;
+      const p = this._project(_v);
+      if (!p) { el.style.display = "none"; continue; }
+      el.style.display = "block";
+      el.style.left = p.x + "px";
+      el.style.top = p.y + "px";
+      if (el._html !== e.html) { el.innerHTML = e.html; el._html = e.html; }
+      el.classList.toggle("stuck", !!e.stuck);
+    }
+    for (let i = entries.length; i < pool.length; i++) pool[i].style.display = "none";
+  }
+
+  hideNpcDebug() {
+    for (const el of this._dbgPool) el.style.display = "none";
   }
 
   // ------------------------------------------------------------- minimap
@@ -824,6 +828,11 @@ export class HUD {
     this.sheetEl.className = cls;
     this.sheetEl.innerHTML = html;
     this._onBackdrop = opts.onBackdrop || null;
+    // Fires if the sheet is torn down by anything *other* than its own buttons
+    // (opening the bag/store, entering the dungeon, day-end, a net event…). Lets
+    // an in-progress negotiation cancel cleanly instead of stranding the shopper
+    // mid-haggle — see haggle() and shop.startHaggle.
+    this._onSheetClose = opts.onClose || null;
     this.backdropEl.classList.toggle("hidden", !this._onBackdrop);
     this._applyBagBtn();
     this._initSheetNav();
@@ -910,11 +919,17 @@ export class HUD {
   // overlap the point if that's what fits on screen.
   anchorSheetAbove(worldPos) {
     if (this.sheetEl.classList.contains("hidden")) return;
+    // The backpack/storeroom buttons live on the bottom edge (66px tall plus
+    // the safe-area inset), so keep the sheet's bottom clear of that strip
+    // instead of letting it drop all the way down where it'd cover the bag.
+    const bottomReserve = 66 + 26;
     // On a phone held upright the tables sit high in the frame, so anchoring the
-    // menu above the slot pushes it out of thumb's reach. Leave it pinned to the
-    // bottom of the screen (the sheet's default CSS position) instead.
+    // menu above the slot pushes it out of thumb's reach. Keep it pinned near
+    // the bottom, but raise it above the bag/storeroom buttons so they don't
+    // overlap the sheet's controls.
     if (matchMedia("(pointer: coarse)").matches && viewport.h > viewport.w) {
       this._clearSheetAnchor();
+      this.sheetEl.style.bottom = `calc(${bottomReserve}px + env(safe-area-inset-bottom))`;
       return;
     }
     const p = this._project(worldPos);
@@ -928,10 +943,10 @@ export class HUD {
       top = p.y - h - gap; // sit above the point
     } else {
       left = (vw - w) / 2;
-      top = vh - h - gap;
+      top = vh - h - bottomReserve;
     }
     left = Math.max(edge, Math.min(left, vw - w - edge));
-    top = Math.max(edge, Math.min(top, vh - h - edge));
+    top = Math.max(edge, Math.min(top, vh - h - bottomReserve));
     el.style.left = `${left}px`;
     el.style.top = `${top}px`;
     el.style.bottom = "auto";
@@ -939,6 +954,10 @@ export class HUD {
   }
 
   hideSheet() {
+    // Grab and clear the close hook up front so the callback firing (which may
+    // itself close the sheet again) can't recurse back into here.
+    const onClose = this._onSheetClose;
+    this._onSheetClose = null;
     this._clearSheetAnchor();
     this._onBackdrop = null;
     this.backdropEl.classList.add("hidden");
@@ -950,6 +969,7 @@ export class HUD {
     this._navCancel = null;
     this._navIdx = -1;
     this._applyBagBtn();
+    if (onClose) onClose();
   }
 
   get sheetOpen() {
@@ -998,7 +1018,13 @@ export class HUD {
         <button class="btn deny" id="hg-no">${buying ? "Walk away" : "No sale"}</button>
         <button class="btn deal" id="hg-deal">${buying ? "Buy!" : "Offer!"}</button>
       </div>
-    `, "sheet-card hg-card");
+    `, "sheet-card hg-card", {
+      // If the sheet is dismissed out from under the negotiation (the player
+      // pops the bag/store/chat, descends to the cave, the day ends…), treat it
+      // as walking away so the shopper resolves instead of freezing at the
+      // counter forever. A normal deal/no-sale has already cleared this hook.
+      onClose: () => cb.onLeave(),
+    });
     const priceEl = el.querySelector("#hg-price");
     const pctEl = el.querySelector("#hg-pct");
     const moodEl = el.querySelector("#hg-mood");

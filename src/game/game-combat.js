@@ -8,6 +8,8 @@ import * as THREE from "three";
 import { BlockyCreature } from "../chargen/blocky.js";
 import { weaponMesh } from "./gear.js";
 import { icon } from "../core/icons.js";
+import { combat } from "./combat-settings.js";
+import { DUNGEON_ORIGIN } from "./dungeon-data.js";
 
 // per-call scratch vectors (duplicated from game.js — these are transient)
 const _v = new THREE.Vector3();
@@ -67,14 +69,38 @@ export const combatMethods = {
     return best;
   },
 
+  // Nearest unopened chest within `range` sitting inside the dash's aim cone (or
+  // null). Chests are crackable dash targets just like foes: the auto-aim locks
+  // onto one so a tap-strike bursts it open, and the joystick-button mode lights
+  // its attack button when one's in reach. Chest positions are group-local, so
+  // they're offset by DUNGEON_ORIGIN; only the live dungeon has chests.
+  _nearestChestWithin(range, dirX, dirZ, minDot = 0) {
+    if (this.playerArea !== "dungeon" || !this.dungeon.active) return null;
+    const p = this.player.position;
+    let best = null, bestD = range * range;
+    for (const chest of this.dungeon.chests) {
+      if (chest.opened) continue;
+      const dx = chest.mesh.position.x + DUNGEON_ORIGIN.x - p.x;
+      const dz = chest.mesh.position.z + DUNGEON_ORIGIN.z - p.z;
+      const d = dx * dx + dz * dz;
+      if (d >= bestD || d <= 0.0001) continue;
+      const dist = Math.sqrt(d);
+      if ((dx * dirX + dz * dirZ) / dist < minDot) continue;
+      bestD = d; best = { dx, dz, dist, chest };
+    }
+    return best;
+  },
+
   // The dash is the whole of your offence now: a quick lunge with brief i-frames
   // that damages every foe it sweeps through (and cracks chests / smashes props
   // in its path — see Dungeon.dashHit). When a foe is close the dash auto-aims:
   // the hero plants, coils back past the foe's bearing for a beat, then whips
   // around into the lunge — the wind-up is what makes the turn readable.
-  _dodge() {
+  _dodge(dir = null) {
     if (this._dashT >= 0 || this._dashWindT >= 0 || this._dodgeCd > 0 || this._respawnT >= 0 || this.gameOver) return;
-    const mv = this.input.move;
+    // `dir` (a {x,y}) overrides the stick — used by the swipe attack mode, which
+    // dashes in the flicked direction rather than the current steer.
+    const mv = dir || this.input.move;
     let dx, dz;
     if (mv.x || mv.y) {
       const l = Math.hypot(mv.x, mv.y) || 1;
@@ -92,6 +118,16 @@ export const combatMethods = {
     // itself fires from _launchDash once the beat runs out (ticked in game.js).
     const target = this._nearestEnemyWithin(AUTOAIM_RANGE, dx, dz, AUTOAIM_FACE_DOT);
     if (!target) {
+      // no foe in the arc — but a treasure chest is a valid strike target too:
+      // aim the lunge straight at it so a tap cracks it open like hitting a foe
+      const chest = this._nearestChestWithin(AUTOAIM_RANGE, dx, dz, AUTOAIM_FACE_DOT);
+      if (chest) {
+        this._dashFaceT = 0;
+        this._dashDX = chest.dx / chest.dist;
+        this._dashDZ = chest.dz / chest.dist;
+        this._launchDash(false);
+        return;
+      }
       this._dashFaceT = 0;
       this._dashDX = dx;
       this._dashDZ = dz;
@@ -169,21 +205,65 @@ export const combatMethods = {
   // guest sends the hit and lets the host echo it back.
   _dashStrike() {
     if (this._dashT < 0 || !this._dashHitIds) return;
+    this._applyStrike();
+  },
+
+  // Resolve a strike's contact for the current area, damaging foes (and cracking
+  // chests / smashing scenery) within `reach` of the hero. Shared by the moving
+  // dash (default reach: body-to-body) and the stationary strike-in-place mode
+  // (a wider reach, since the hero doesn't travel into the foe). `reach`
+  // undefined lets each area fall back to its own body-to-body default.
+  _applyStrike(reach) {
     if (this.playerArea === "shop") {
-      // above ground the dash forages: it smashes the meadow's flower clumps,
-      // berry bushes and nut saplings for edible loot (no foes to fight here)
-      const reach = this.player.radius + 0.5;
-      this.shop.smashForage(this.player.position, reach);
+      // above ground the strike forages: it smashes the meadow's flower clumps,
+      // berry bushes and nut saplings for edible loot (no foes to fight here),
+      // and knocks the dojo's straw training dummies about
+      const r = reach ?? this.player.radius + 0.5;
+      this.shop.dojoDashHit(this.player.position, r);
+      this.shop.smashForage(this.player.position, r);
       return;
     }
     if (this.playerArea === "cave" && this.cave) {
-      this.cave.dashHit(this.player);
+      this.cave.dashHit(this.player, reach);
       return;
     }
     if (this.playerArea !== "dungeon" || !this.dungeon.active) return;
     this.dungeon.dashHit(this.player, this._dashDmg, this, {
-      crit: this._dashCrit, hitIds: this._dashHitIds,
+      crit: this._dashCrit, hitIds: this._dashHitIds, reach,
     });
+  },
+
+  // Strike-in-place attack mode: no lunge. The hero plants, turns toward the
+  // nearest foe (or the steer, else current facing), and swings once — every
+  // foe within `combat.strikeInPlace.range` takes the hit. Routed from
+  // game.js instead of _dodge when that mode is active.
+  _strikeInPlace() {
+    if (this._dashT >= 0 || this._dashWindT >= 0 || this._dodgeCd > 0 || this._respawnT >= 0 || this.gameOver) return;
+    const cfg = combat.strikeInPlace;
+    const range = cfg.range || 2.2;
+    this._dodgeCd = (cfg.cooldown || 0.4) * (this.stats.dodgeCdMul || 1);
+    // aim: square off with the nearest foe in reach, else follow the steer
+    const foe = this._nearestEnemyWithin(range, 0, 0, -2);
+    if (foe) {
+      this.player.heading = Math.atan2(foe.dx, foe.dz);
+    } else {
+      const mv = this.input.move;
+      if (mv.x || mv.y) this.player.heading = Math.atan2(mv.x, mv.y);
+    }
+    this.player.animator.squash.kick(6);
+    this.audio.dodge();
+    this._invulnT = Math.max(this._invulnT, 0.18); // brief grace on the swing
+    this._dashSolidT = Math.max(this._dashSolidT, 0.24);
+    // slash swoosh + a little burst so the stationary hit still reads as a strike
+    _v.copy(this.player.position).setY(0.62);
+    this.slash.play(_v, this.player.heading, 1.25);
+    _v.copy(this.player.position).setY(0.3);
+    this.particles.burst(_v, { color: 0xffe6a6, n: 12, speed: 3.4, up: 1.0, gravity: 2.5, life: 0.32, size: 0.8 });
+    // damage every foe within reach (one pass, deduped like a dash)
+    this._dashHitIds = new Set();
+    this._dashCrit = Math.random() < this._crit;
+    this._dashDmg = Math.max(1, Math.round(4 * this.stats.dmgMul)) * (this._dashCrit ? 2 : 1);
+    this._applyStrike(range);
   },
 
   enemyHitsPlayer(e, targetEntry) {
@@ -265,7 +345,7 @@ export const combatMethods = {
     const turnRate = this.player.turnRate;
     this.player.dispose();
     this.player = new BlockyCreature("a", { height: 1.3, turnRate });
-    this.player.position.set(0, 0, 2.5);
+    this.player.position.copy(this.shop.playerSpawn);
     this._heldWeaponId = this.equipment.weapon;
     this.player.holdItem(weaponMesh(this.equipment.weapon));
     this.engine.scene.add(this.player);

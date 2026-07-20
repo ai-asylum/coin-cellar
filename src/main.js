@@ -23,21 +23,24 @@ function loadingScreen(text) {
 
 // A quick title screen — wait here until the player hits Play so the game
 // starts on a deliberate tap (also unlocks audio, which browsers gate behind
-// a user gesture).
+// a user gesture). The menu floats over the live attract scene (the hero
+// strolling the town), so it's its own transparent overlay on <body> rather
+// than owning the HUD layer.
 function startMenu() {
   return new Promise((resolve) => {
-    hudRoot.innerHTML = `
-      <div id="start-menu">
-        <div class="start-card">
-          <img class="start-logo-img" src="logo.png" alt="Coin Cellar" />
-          <h1 class="start-title">COIN CELLAR</h1>
-          <button class="btn deal start-play" id="start-play">${icon("play")} Play</button>
-        </div>
+    const el = document.createElement("div");
+    el.id = "start-menu";
+    el.innerHTML = `
+      <img class="start-logo-img" src="logo2.png" alt="Coin Cellar" />
+      <div class="start-card">
+        <button class="btn deal start-play" id="start-play">${icon("play")} Play</button>
       </div>`;
-    document.getElementById("start-play").onclick = () => {
+    document.body.appendChild(el);
+    el.querySelector("#start-play").onclick = () => {
       // First tap: on touch, go fullscreen straight away (must run inside the
       // gesture). Desktop stays windowed.
       if (matchMedia("(pointer: coarse)").matches) requestFullscreen();
+      el.remove();
       resolve();
     };
   });
@@ -53,17 +56,23 @@ async function boot() {
     const sub = document.getElementById("load-sub");
     if (sub) sub.textContent = `Loading dungeon… ${done}/${total}`;
   });
-  await startMenu();
-  track("game_started");
   hudRoot.innerHTML = "";
 
+  // Build the world up front and run it in attract mode: the render loop starts
+  // now so the title screen shows the hero wandering the town behind the menu.
   const engine = new Engine(app);
   const hud = new HUD(hudRoot, engine);
   const input = new Input(hudRoot);
   const audio = new AudioBus();
-  const game = new Game(engine, input, audio, hud);
+  const game = new Game(engine, input, audio, hud, { titleAttract: true });
   engine.start();
   window.__game = game; // debug/testing handle
+
+  hudRoot.classList.add("title-hidden"); // keep the HUD out of the menu shot
+  await startMenu();
+  track("game_started");
+  hudRoot.classList.remove("title-hidden");
+  game.startPlay();
 }
 
 // Register the service worker so the game is installable as a PWA and can

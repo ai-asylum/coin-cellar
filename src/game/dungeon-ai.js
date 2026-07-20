@@ -12,6 +12,10 @@ const LEAP_K = -Math.log(IMP_DECAY);
 const _d = new THREE.Vector3();
 const _v = new THREE.Vector3();
 const _p = new THREE.Vector3();
+// scratch used only by the on-screen frustum test
+const _frustum = new THREE.Frustum();
+const _projScreen = new THREE.Matrix4();
+const _eye = new THREE.Vector3();
 
 // shortest-arc lerp between two headings (radians), so a fleeing creature turns
 // smoothly across the ±π wrap instead of spinning the long way round
@@ -54,6 +58,22 @@ export const aiMethods = {
       if (d < bd) { bd = d; target = p; }
     }
     return target;
+  },
+
+  // Is this enemy currently in view of the local camera? Used to gate attacks
+  // so nothing lands an unfair blow from off-screen — a foe that's scrolled out
+  // of frame holds its telegraph until it's visible again. Tests a point at the
+  // creature's mid-height (feet-only would read as off-screen at the frame edge
+  // while the body is plainly visible). The camera transform is a frame stale
+  // here (this runs before _updateCamera), which is harmless for a soft gate.
+  _isOnScreen(c) {
+    const cam = this.game?.engine?.camera;
+    if (!cam) return true; // no camera (headless/host sim) → never gate
+    _projScreen.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+    _frustum.setFromProjectionMatrix(_projScreen);
+    _eye.copy(c.position);
+    _eye.y += c.height * 0.5;
+    return _frustum.containsPoint(_eye);
   },
 
   _updateEnemy(e, dt, elapsed, players) {
@@ -126,7 +146,16 @@ export const aiMethods = {
     }
 
     // -------- aggro + locomotion --------
-    if (target && bd < def.aggro) e.state = "chase";
+    // a dormant boss holds its ground in its cell, plainly visible through the
+    // bars — it never engages or roams until the gate is breached (see
+    // openGate). Once woken it commits to the hunt regardless of aggro range,
+    // storming out after whoever cracked the seal.
+    if (e.dormant) {
+      e.state = "idle";
+      this._finishFrame(e, dt, elapsed);
+      return;
+    }
+    if (target && (e.woke || bd < def.aggro)) e.state = "chase";
     else if (e.state === "chase") e.state = "idle";
 
     const preX = c.position.x, preZ = c.position.z;
@@ -377,6 +406,11 @@ export const aiMethods = {
   _beginWindup(e, target) {
     const c = e.creature;
     const def = e.def;
+    // never open an attack from off-screen — a foe that's scrolled out of view
+    // stays idle (attackCd untouched, so it winds up the instant it's back in
+    // frame). The boss is exempt: its arena keeps it framed and its telegraphs
+    // must stay in sync across co-op peers.
+    if (e.behavior !== "boss" && !this._isOnScreen(c)) return;
     e.atkState = "windup";
     e.atkT = 0;
     e.windupDur = def.windup;

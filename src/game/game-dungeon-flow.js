@@ -569,17 +569,16 @@ export const dungeonFlowMethods = {
     this.hud.banner(`${icon("skull")} The seal breaks…`, bossDefFor(dungeonIndexFor(this.dungeon.floor)).awaken, 2.6);
   },
 
-  // Unlocking the gate pulls whoever's delving straight into the arena — the
-  // fight starts the moment the seal breaks, no walking through the doorway.
+  // Breaking the seal wakes the keeper — it storms out of its cell after
+  // whoever opened the door. No teleport: the boss comes to you, wherever you
+  // stand. (openGate wakes it host-side; this makes the aggro explicit and is a
+  // harmless no-op for guests, whose boss AI is driven by the host.)
   _enterBossRoom() {
-    const D = this.dungeon;
-    if (this.playerArea !== "dungeon" || !D.gatePos || !D.bossCenter) return;
-    _v.copy(D.gatePos).add(DUNGEON_ORIGIN);
-    const dx = D.bossCenter.x - _v.x, dz = D.bossCenter.z - _v.z;
-    const l = Math.hypot(dx, dz) || 1;
-    this.player.position.set(_v.x + (dx / l) * 3.2, 0, _v.z + (dz / l) * 3.2);
-    this.player.animator.prevPos.copy(this.player.position);
-    this._invulnT = Math.max(this._invulnT, LEVEL_INVULN); // grace to read the room
+    const boss = this.dungeon.boss;
+    if (!boss) return;
+    boss.dormant = false;
+    boss.woke = true;
+    boss.state = "chase";
   },
 
   // The boss hit half health: phase two (minions + faster patterns, see dungeon)

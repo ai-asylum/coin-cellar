@@ -77,7 +77,11 @@ export const persistenceMethods = {
           for (const slot of SLOTS) {
             const id = s.equipment[slot];
             const eq = equipInfo(id);
-            this.equipment[slot] = eq && eq.slot === slot ? id : (slot === "weapon" ? "wsword" : null);
+            if (eq && eq.slot === slot) this.equipment[slot] = id; // valid piece
+            else if (id == null) this.equipment[slot] = null; // deliberately bare (incl. unarmed)
+            // a saved id that no longer maps to real gear (removed content / drift):
+            // rearm the pine sword for the weapon slot, leave others empty
+            else this.equipment[slot] = slot === "weapon" ? "wsword" : null;
           }
         }
       }

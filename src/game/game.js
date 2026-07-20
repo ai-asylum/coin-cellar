@@ -5,7 +5,7 @@
 //   delve the cellar below for merchandise — then it locks for an hour of real time
 import * as THREE from "three";
 import { clamp, lerp } from "../core/engine.js";
-import { BlockyCreature } from "../chargen/blocky.js";
+import { BlockyCreature, variantForSeed } from "../chargen/blocky.js";
 import { Shop } from "./shop.js";
 import { Dungeon, DUNGEON_ORIGIN } from "./dungeon.js";
 import { Cave } from "./cave.js";
@@ -23,6 +23,7 @@ import { netMethods } from "./game-net.js";
 import { uiMethods } from "./game-ui.js";
 import { narrativeMethods } from "./game-narrative.js";
 import { combatMethods, AUTOAIM_RANGE } from "./game-combat.js";
+import { combat, attackMode, ATTACK_MODES } from "./combat-settings.js";
 import { economyMethods } from "./game-economy.js";
 import { dungeonFlowMethods } from "./game-dungeon-flow.js";
 import { setLayout } from "./layout-store.js";
@@ -48,11 +49,15 @@ export const PLAYER_TURN_RATE = 7;
 const BASE_MAXHP = 6; // hearts before any chestplate / ring bonuses
 
 export class Game {
-  constructor(engine, input, audio, hud) {
+  constructor(engine, input, audio, hud, opts = {}) {
     this.engine = engine;
     this.input = input;
     this.audio = audio;
     this.hud = hud;
+    // Attract mode: build the whole town but hold off the real session so the
+    // title screen can show the hero strolling around behind the menu (Animal
+    // Crossing-style). startPlay() drops it and boots the game for real.
+    this._titleAttract = !!opts.titleAttract;
     this.net = new Coop(this);
     this.particles = new Particles(engine.scene);
     this.slash = new SlashArc(engine.scene);
@@ -124,6 +129,7 @@ export class Game {
     this.godMode = false;
     this.debugHour = null; // admin time-of-day override (0–24); null = real clock
     this._adminOpen = false;
+    this.npcDebug = false; // admin toggle: float state/stuck cards over townsfolk
     this.paused = false;
     this._fsPaused = false; // set while a touch player is out of fullscreen
     this._escOpen = false;
@@ -166,7 +172,8 @@ export class Game {
     // away so invites can land.
     this.playerName = localStorage.getItem(NAME_KEY) || "";
     this.friends = this._loadFriends();
-    if (this.playerName) this.net.goOnline(this.playerName);
+    // hold off going online until the player actually starts (see startPlay)
+    if (this.playerName && !this._titleAttract) this.net.goOnline(this.playerName);
 
     // running tally of this session's trading (loot/sales/spend) for stats
     this.today = this._freshDayStats();
@@ -204,7 +211,7 @@ export class Game {
 
     // --- player
     this.player = new BlockyCreature("a", { height: 1.3, turnRate: PLAYER_TURN_RATE });
-    this.player.position.set(0, 0, 2.5);
+    this.player.position.copy(this.shop.playerSpawn);
     this._heldWeaponId = this.equipment.weapon;
     this.player.holdItem(weaponMesh(this.equipment.weapon));
     engine.scene.add(this.player);
@@ -243,13 +250,122 @@ export class Game {
     this._wireHud();
     this._initFullscreenGate();
     this.input.onKey = (code) => this._handleKey(code);
-    this._beginShop(true);
+    if (this._titleAttract) this._beginTitleAttract();
+    else this._beginShop(true);
     engine.onTick((dt, t) => this.update(dt, t));
+  }
+
+  // ---- title attract (menu backdrop) ---------------------------------------
+  // Park the hero out on the street and set them wandering between waypoints so
+  // the title screen has a living, in-game backdrop. The full shop still ticks
+  // (lighting, ambient strollers), just with no HUD, input or trade.
+  _beginTitleAttract() {
+    // Roaming band on the road: the full width to stroll across (x) and a good
+    // stretch along the street (z). The camera follows the focal NPC through it.
+    const R = this.shop.streetRegion;
+    const pad = 1.0;
+    this._titleBand = {
+      xLo: R.minAlong + pad, // along the road (screen X)
+      xHi: R.maxAlong - pad,
+      zLo: R.minCross + pad, // across the road (screen Z)
+      zHi: R.maxCross - pad,
+    };
+    const B = this._titleBand;
+    const cx = (B.xLo + B.xHi) / 2;
+    const czTitle = (B.zLo + B.zHi) / 2;
+
+    // The star of the title screen: a townsperson the camera follows around.
+    const npc = new BlockyCreature(variantForSeed(1 + Math.floor(Math.random() * 999)), {
+      height: 1.5, turnRate: 2.6, animScale: 0.85,
+    });
+    npc.position.set(cx, 0, czTitle);
+    npc.animator.prevPos.copy(npc.position);
+    this.shop.group.add(npc);
+    this._titleNpc = npc;
+    this._titleNpcWander = { tx: cx, tz: czTitle, pause: 0, speed: 1.3, curSpeed: 0 };
+    this._pickTitleTarget(this._titleNpcWander);
+
+    // the hero mills about too, as ambient life (not the camera's focus)
+    this.player.position.set(cx + 1.6, 0, czTitle + 1.0);
+    this.player.animator.prevPos.copy(this.player.position);
+    this._titlePlayerWander = { tx: cx, tz: czTitle, pause: 0, speed: 1.5, curSpeed: 0 };
+    this._pickTitleTarget(this._titlePlayerWander);
+
+    // frame the NPC straight away so the camera doesn't sail in from the origin
+    const street = this.shop.streetCenter(npc.position);
+    this.engine.camTarget.set(street.cx, 0, street.cz);
+    this.engine.camOffset.copy(this.shop.camStreetOffset);
+    this.engine.camera.position.copy(this.engine.camTarget).add(this.engine.camOffset);
+    this.hud.showBag(false);
+    this.hud.showHearts(false);
+  }
+
+  _pickTitleTarget(w) {
+    const B = this._titleBand;
+    w.tx = B.xLo + Math.random() * (B.xHi - B.xLo);
+    w.tz = B.zLo + Math.random() * (B.zHi - B.zLo);
+  }
+
+  // Step one wandering character toward its waypoint, easing pace and pausing
+  // now and then (shared by the focal NPC and the ambient hero).
+  _titleWanderStep(c, w, dt, elapsed) {
+    if (w.pause > 0) {
+      w.pause -= dt;
+      w.curSpeed += (0 - w.curSpeed) * Math.min(1, dt * 5.5);
+    } else {
+      const dx = w.tx - c.position.x, dz = w.tz - c.position.z;
+      const d = Math.hypot(dx, dz);
+      if (d < 0.4) {
+        this._pickTitleTarget(w);
+        w.pause = Math.random() < 0.5 ? 0.6 + Math.random() * 1.8 : 0;
+        w.curSpeed += (0 - w.curSpeed) * Math.min(1, dt * 5.5);
+      } else {
+        w.curSpeed += (w.speed - w.curSpeed) * Math.min(1, dt * 5.5);
+        if (d > 1e-4) {
+          c.position.x += (dx / d) * w.curSpeed * dt;
+          c.position.z += (dz / d) * w.curSpeed * dt;
+        }
+        c.heading = Math.atan2(dx, dz);
+      }
+    }
+    this.collide(c.position, c.radius * 0.8, this.shop.playerColliders);
+    c.update(dt, elapsed);
+  }
+
+  _updateTitleAttract(dt, elapsed) {
+    this._titleWanderStep(this._titleNpc, this._titleNpcWander, dt, elapsed);
+    this._titleWanderStep(this.player, this._titlePlayerWander, dt, elapsed);
+
+    this.shop.update(dt, elapsed);
+    this.particles.update(dt);
+
+    // the camera follows the focal NPC around the street
+    const street = this.shop.streetCenter(this._titleNpc.position);
+    _townCenter.set(street.cx, 0, street.cz);
+    this.engine.camTarget.lerp(_townCenter, 1 - Math.pow(0.001, dt));
+    this.engine.camOffset.lerp(this.shop.camStreetOffset, 1 - Math.pow(0.1, dt));
+  }
+
+  // Leave attract mode and boot the real session — called when Play is tapped.
+  startPlay() {
+    if (!this._titleAttract) return;
+    this._titleAttract = false;
+    this._titleNpcWander = null;
+    this._titlePlayerWander = null;
+    if (this._titleNpc) { this._titleNpc.dispose(); this._titleNpc = null; }
+    this.player.position.copy(this.shop.playerSpawn);
+    this.player.animator.prevPos.copy(this.player.position);
+    if (this.playerName) this.net.goOnline(this.playerName);
+    this._beginShop(true);
   }
 
   // ================================================================ loop
   update(dt, elapsed) {
     this.input.update();
+    if (this._titleAttract) {
+      this._updateTitleAttract(dt, elapsed);
+      return;
+    }
     if (this.paused || this._fsPaused) {
       // Paused: ESC menu / descend prompt up, or a touch player has dropped out
       // of fullscreen. Freeze the world but keep the HUD live.
@@ -267,6 +383,7 @@ export class Game {
     // person it froze is released back onto the move
     if (this._npcChat && !this.hud.speakOpen) this._endNpcChat();
     this.shop.update(dt, elapsed);
+    this._updateNpcDebug(dt);
     // Storeroom is the back room — its shortcut only makes sense while the
     // player is actually inside the building, not out on the street or at the
     // cave mouth (both of which are still the "shop" area).
@@ -288,43 +405,38 @@ export class Game {
     this.net.update(dt);
     this.lobby.update(dt);
 
-    // camera follows the player in the dungeon, but stays put in the shop —
-    // and locks onto the arena's centre once inside the boss room (fixed cam)
+    // camera follows the player in the dungeon, but stays put in the shop. The
+    // boss fight plays out in the open now (the keeper storms out of its cell),
+    // so there's no fixed arena lock — the camera just tracks the hero as ever.
     const p = this.player.position;
     const inDungeon = this.playerArea === "dungeon";
     const inCave = this.playerArea === "cave";
-    const inBoss = inDungeon && this.dungeon.active && this.dungeon.inBossRoom(p);
     // Indoors the camera follows within the current room's bounds; out on the
     // street it follows the player but stops at the walkable town limits.
-    const outdoors = !inDungeon && !inCave && !inBoss;
+    const outdoors = !inDungeon && !inCave;
     const zone = outdoors ? this.shop.zoneCenter(p) : null;
     const street = outdoors && !zone ? this.shop.streetCenter(p) : null;
-    const camTarget = inBoss ? this.dungeon.bossCenter
+    const camTarget =
       // delving, look a little up the floor (−z reads as "ahead" on screen) so
       // the player sits lower in frame and you can see more of what's coming
-      : inDungeon || inCave ? _dungeonFocus.set(p.x, 0, p.z - DUNGEON_LOOKAHEAD)
+      inDungeon || inCave ? _dungeonFocus.set(p.x, 0, p.z - DUNGEON_LOOKAHEAD)
       : zone ? _townCenter.set(zone.cx, 0, zone.cz)
       : street ? _townCenter.set(street.cx, 0, street.cz)
       : p;
     const shopOffset = zone ? fitShopCamera(this.engine.camera.aspect, this.shop) : null;
-    const camOffset = inBoss ? _camBoss : inDungeon || inCave ? _camDungeon
+    const camOffset = inDungeon || inCave ? _camDungeon
       : shopOffset || this.shop.camStreetOffset;
     this.engine.camTarget.lerp(camTarget, 1 - Math.pow(0.001, dt));
     this.engine.camOffset.lerp(camOffset, 1 - Math.pow(0.1, dt));
     this.audio.setMood(this.gameOver ? null : inDungeon || inCave ? "dungeon" : "shop");
 
-    // boss health bar: pinned up while the boss lives and you're in the cellar
+    // boss health bar: only once the gate's been breached and the fight is on —
+    // the keeper waits dormant behind the bars before that, so no bar yet
     const boss = this.dungeon.boss;
-    if (inDungeon && boss && boss.deadT < 0) {
+    if (inDungeon && boss && boss.deadT < 0 && this.dungeon.gateOpen) {
       const bossName = boss.def?.name ?? "Ogre King of the Cellar";
       this.hud.showBossBar(boss.enraged ? `${bossName} — Enraged` : bossName, boss.enraged);
       this.hud.setBossBar(boss.hp / boss.maxHp);
-      // incoming-attack warning while the boss winds up (guests run telT,
-      // mirrored from the host; the host reads its own attack clock)
-      const windFrac = boss.atkState === "windup" ? boss.atkT / boss.windupDur
-        : boss.telT >= 0 ? boss.telT / boss.telDur : -1;
-      if (windFrac >= 0) this.hud.setBossTelegraph(boss.bossAttack ?? "slam", windFrac);
-      else this.hud.clearBossTelegraph();
     } else this.hud.hideBossBar();
 
     // minimap: floor plan with entrance, exit, foes and players — dungeon only
@@ -344,6 +456,7 @@ export class Game {
       this.highlight.visible = false;
       this.shop.highlightTable(null);
       this.hud.hideInteractHint();
+      this.input.setJoyDash(false);
       this._updateHoleDive(dt, elapsed);
       return;
     }
@@ -352,6 +465,7 @@ export class Game {
       // itself — input is ignored until the little scene wraps up
       this.highlight.visible = false;
       this.hud.hideInteractHint();
+      this.input.setJoyDash(false);
       this._updateCaveIntro(dt, elapsed);
       return;
     }
@@ -360,6 +474,7 @@ export class Game {
       this.highlight.visible = false;
       this.shop.highlightTable(null);
       this.hud.hideInteractHint();
+      this.input.setJoyDash(false);
       c.update(dt, elapsed);
       if (this._respawnT < 0) this._respawn();
       return;
@@ -371,6 +486,7 @@ export class Game {
       this._updateTalkApproach(dt);
       this.hud.hideInteractHint();
       this.highlight.visible = false;
+      this.input.setJoyDash(false);
       c.update(dt, elapsed);
       return;
     }
@@ -407,10 +523,48 @@ export class Game {
     // right mouse button dash in every area via dodgeEdge. In touch landscape
     // there's no attack button — a quick tap on the screen is the attack.
     const underground = this.playerArea === "dungeon" || this.playerArea === "cave";
-    const attackPress = this.input.dodgeEdge ||
+    const mode = attackMode();
+    // Manual triggers work in EVERY mode (keys / RMB, the on-screen button and
+    // the landscape screen-tap while delving) so combat is always reachable.
+    let attackPress = this.input.dodgeEdge ||
       (underground && this.input.actionEdge) ||
-      (underground && this.input.tapAttack && this.input.tapEdge);
-    if (attackPress && !sheetBlocked) this._dodge();
+      // landscape has no attack button so a screen-tap dashes — but not in the
+      // joystick-button mode, where the tap belongs to the shared centre button
+      // (it only attacks when a foe's in range, else it runs the context action)
+      (underground && mode !== "joystickButton" && this.input.tapAttack && this.input.tapEdge);
+    let swipeDir = null;
+    // joystick-button mode parks a foe here so the shared stick-centre button
+    // (armed down in the context block) knows whether it's an attack or an interact
+    let joyFoe = null;
+    if (mode === "swipe" && this.input.swipeEdge) {
+      attackPress = true;
+      swipeDir = this.input.swipeDir; // dash in the flicked direction
+    }
+    if (mode === "joystickButton") {
+      // Note whether a foe's in range for the stick-centre button; the button
+      // itself (and every non-combat context action that shares it) is armed
+      // below in the context block. Attack always wins the button when a foe's
+      // near: the on-screen button OR a tap anywhere fires the strike here.
+      // a chest is a strike target too, so it lights the attack button like a foe
+      joyFoe = underground && !sheetBlocked
+        ? (this._nearestEnemyWithin(combat.joystickButton.range || 3.2, 0, 0, -2)
+          || this._nearestChestWithin(combat.joystickButton.range || 3.2, 0, 0, -2)) : null;
+      if (joyFoe && (this.input.joyDashEdge || this.input.tapEdge)) attackPress = true;
+    } else {
+      this.input.setJoyDash(false);
+    }
+    if (mode === "autodash" && underground && !sheetBlocked &&
+        this._dashT < 0 && this._dashWindT < 0 && this._dodgeCd <= 0 &&
+        this._nearestEnemyWithin(combat.autodash.range || 2.4, 0, 0, -2)) {
+      attackPress = true; // no button — a foe in range triggers the strike
+    }
+    if (attackPress && !sheetBlocked) {
+      if (mode === "strikeInPlace" && underground) this._strikeInPlace();
+      else this._dodge(swipeDir);
+      // autodash holds off re-triggering for its configured beat (never shorter
+      // than the dash's own recovery, which _dodge already set)
+      if (mode === "autodash") this._dodgeCd = Math.max(this._dodgeCd, combat.autodash.cooldown || 0.6);
+    }
 
     // wound up on a locked foe: rooted while the shoulders coil back, then the
     // lunge itself fires the frame the beat runs out (see _dodge / _launchDash)
@@ -458,6 +612,12 @@ export class Game {
       const foe = this._nearestEnemyWithin(AUTOAIM_RANGE, 0, 0, -2);
       if (foe) c.heading = Math.atan2(foe.dx, foe.dz);
       else if (mv.x || mv.y) c.heading = Math.atan2(mv.x, mv.y);
+      else {
+        // standing still by a chest: square off with it so the tap-strike that
+        // cracks it open is telegraphed, the same way the hero faces a foe
+        const chest = this._nearestChestWithin(AUTOAIM_RANGE, 0, 0, -2);
+        if (chest) c.heading = Math.atan2(chest.dx, chest.dz);
+      }
     }
     const colliders = this.playerArea === "shop" ? this.shop.playerColliders
       : this.playerArea === "cave" ? this.cave.colliders : this.dungeon.colliders;
@@ -534,7 +694,37 @@ export class Game {
     const act = this._contextAction();
     const inDungeon = this.playerArea === "dungeon";
     const hasInteract = !!act.label;
-    if (underground) {
+    // out in the open meadow (no interact in reach, not indoors) the button
+    // doubles as a forage dash so touch players can smash the fields too.
+    const fieldDash = !hasInteract && this.playerArea === "shop" && !this.shop.inBuilding;
+    if (mode === "joystickButton") {
+      // Everything the player can do rides ONE pulsing button at the stick's
+      // centre — the same one the dash uses — and a tap anywhere fires it. A foe
+      // in range makes it the attack (fired up in the combat block); otherwise
+      // it shows the context icon and runs act.fn (talk, dive, chest, stairs,
+      // shop deals…), or becomes the open-field forage dash. No separate bottom
+      // attack button or interact button in this mode — it's all the one button.
+      this.input.setActionLabel(null);
+      this.input.setInteract(null, false);
+      this._fieldDashBtn = fieldDash;
+      const joyTap = this.input.joyDashEdge || this.input.tapEdge;
+      if (sheetBlocked || this.gameOver) {
+        this.input.setJoyDash(false); // a sheet / dialogue owns the screen
+      } else if (joyFoe) {
+        this.input.setJoyDash(true, "swords", "danger");
+      } else if (hasInteract) {
+        this.input.setJoyDash(true, act.label, this._actionTier(act.label, act.color));
+        // feed the button / tap into the shared interact path below (which
+        // guards on sheets / dashes and runs act.fn), and swallow the tap so
+        // the shop pick-to-interact underneath can't fire on top of it.
+        if (joyTap) { this.input.interactEdge = true; this.input.tapEdge = false; }
+      } else if (fieldDash) {
+        this.input.setJoyDash(true, "swords", "danger");
+        if (joyTap && this._dashT < 0) { this._dodge(); this.input.tapEdge = false; }
+      } else {
+        this.input.setJoyDash(false);
+      }
+    } else if (underground) {
       // the primary button is the ATTACK button while delving (crossed swords);
       // real interacts (stairs / gate / portal / chest) get their own button
       // when something's in reach, so the two never fight over one press.
@@ -545,7 +735,7 @@ export class Game {
       // above ground the primary button is the context button when something's
       // in reach; out in the open fields (nothing to interact with, not indoors)
       // it becomes a dash button so touch players can forage the meadow too.
-      this._fieldDashBtn = !hasInteract && this.playerArea === "shop" && !this.shop.inBuilding;
+      this._fieldDashBtn = fieldDash;
       // portrait touch interacts by tapping the fixture directly (see _shopPick),
       // so the context button is just clutter — drop it and keep only the
       // field/forage dash button out in the open meadow.
@@ -692,9 +882,27 @@ export class Game {
       case "KeyC": return this._friendSheet();
       case "KeyT": return this._openChat();
       case "KeyM": return document.getElementById("mute-btn").click();
+      case "Digit1": case "Digit2": case "Digit3": case "Digit4": case "Digit5": {
+        const m = ATTACK_MODES[+code.slice(5) - 1];
+        if (m) this._setAttackMode(m.id);
+        return;
+      }
       // NB: E / F (interact) are read as an input edge in _updatePlayer so they
       // stay separate from the Space/click attack — see the action routing there.
     }
+  }
+
+  // Importance tier for the shared stick-centre button (joystick-button mode):
+  // red is reserved for the highest-stakes actions (combat, the boss door),
+  // gold for progression / deals, green for building up the shop, grey for
+  // things you can't do yet (locked, can't afford). Derived from the action's
+  // icon + ring colour so each _contextAction return needn't spell it out.
+  _actionTier(label, color) {
+    if (label === "swords" || label === "skull") return "danger";
+    if (label === "warning") return "muted"; // locked / can't afford
+    if (label === "coin" || label === "box") return "build"; // repair / stock / swap
+    if (label === "home" && color === 0x66ff9e) return "build"; // restore a lot
+    return "primary"; // talk, haggle, buy, dive, descend, go up/home…
   }
 
   _contextAction() {
@@ -773,21 +981,20 @@ export class Game {
             };
           }
         } else {
+          // during the FTUE a placed item is locked in — no swap or take-back,
+          // so the player can't undo the one stock they were guided through
           if (slot.item)
-            return { label: "box", hint: "Swap", fn: () => this._replaceMenu(slot), focus: _focus.copy(slot.pos).clone(), color: 0xff9d5c };
+            return this.tutorial ? { label: null } : { label: "box", hint: "Swap", fn: () => this._replaceMenu(slot), focus: _focus.copy(slot.pos).clone(), color: 0xff9d5c };
           if (this.stash.length > 0)
             return { label: "box", hint: "Stock", fn: () => this._placeMenu(slot), focus: _focus.copy(slot.pos).clone(), color: 0x66ff9e };
         }
       }
       // townsfolk: step up to any shopper or passer-by (not one mid-deal at the
-      // counter) to strike up a chat. Held back during the FTUE so a new player
-      // isn't pulled off the guided loop.
-      if (!this.tutorial) {
-        const talk = this._nearestTalkNpc();
-        if (talk) {
-          const focus = _focus.copy(talk.creature.position).setY(0.06).clone();
-          return { label: "speak", hint: "Talk", fn: () => this._talkToNpc(talk), focus, color: 0x9ad0ff };
-        }
+      // counter) to strike up a chat.
+      const talk = this._nearestTalkNpc();
+      if (talk) {
+        const focus = _focus.copy(talk.creature.position).setY(0.06).clone();
+        return { label: "speak", hint: "Talk", fn: () => this._talkToNpc(talk), focus, color: 0x9ad0ff };
       }
       return { label: null };
     }
@@ -870,6 +1077,7 @@ export class Game {
       consider(c);
     }
     for (const pb of this.shop.passersby) consider(pb);
+    if (this.shop.dojo?.master) consider(this.shop.dojo.master);
     return best;
   }
 
@@ -987,7 +1195,8 @@ export class Game {
         };
       }
       if (slot.disabled) return null;
-      if (slot.item) return { hint: "Swap", focus: _focus.copy(slot.pos).clone(), color: 0xff9d5c };
+      // a placed item is locked in during the FTUE — no swap or take-back
+      if (slot.item) return this.tutorial ? null : { hint: "Swap", focus: _focus.copy(slot.pos).clone(), color: 0xff9d5c };
       if (this.stash.length > 0) return { hint: "Stock", focus: _focus.copy(slot.pos).clone(), color: 0x66ff9e };
     }
     return null;
@@ -1021,7 +1230,7 @@ export class Game {
         return;
       }
       if (slot.disabled) return;
-      if (slot.item) this._replaceMenu(slot);
+      if (slot.item) { if (!this.tutorial) this._replaceMenu(slot); }
       else if (this.stash.length > 0) this._placeMenu(slot);
       else this.hud.toast("Storeroom's empty — dive for stock.");
     }
@@ -1117,6 +1326,7 @@ export class Game {
     document.getElementById("pause-btn").onclick = () => this._toggleEscMenu();
     // set the mute button to match saved preference
     document.getElementById("mute-btn").innerHTML = icon(this.audio.muted ? "soundOff" : "soundOn");
+    this._initCombatBar();
   }
 
   // --------------------------------------------------------- fullscreen gate
@@ -1423,7 +1633,5 @@ const _camDungeon = new THREE.Vector3(0, 11.25, 10.98);
 const DUNGEON_LOOKAHEAD = 3;
 // scratch focus point for the delving camera's look-ahead bias
 const _dungeonFocus = new THREE.Vector3();
-// pulled back + higher so the whole boss arena stays framed while the cam is fixed
-const _camBoss = new THREE.Vector3(0, 13.5, 10);
 // scratch target for the bounded indoor camera focus
 const _townCenter = new THREE.Vector3();

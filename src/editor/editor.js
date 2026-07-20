@@ -62,6 +62,7 @@ const stubGame = {
   player: null,
   playerArea: "street",
   gameOver: false,
+  editor: true, // splits the near "wall" hills into individually-pickable meshes
 };
 
 // ---------- editor state ----------
@@ -71,7 +72,7 @@ let tab = "overworld"; // 'overworld' | 'cave' | 'dungeon' — which editor mode
 // buildings (shop, cave, dojo) so you can slide the structure around as a unit.
 let editScope = "contents";
 let shop = null;
-let selection = null; // { type: 'table'|'fancy'|'lot'|'part'|'decor'|'building'|'dojoDummy'|'dojoMaster', index, key?, state?, partIndex? }
+let selection = null; // { type: 'table'|'fancy'|'lot'|'part'|'decor'|'building'|'dojoDummy'|'dojoMaster'|'hill', index, key?, state?, partIndex? }
 let selBox = null; // THREE.BoxHelper tracking the selected object
 let mode = "idle"; // 'idle' | 'grab' | 'place'
 let grabbed = null; // { obj, planeY, restore: {pos, rotY} } while mode === 'grab'
@@ -95,8 +96,10 @@ const snapHeld = () => !!(editorInput.keys.ControlLeft || editorInput.keys.Contr
 const maybeSnap = (v) => (snapHeld() ? Math.round(v / GRID) * GRID : v);
 const BAKED_YAW = -Math.PI / 2; // _rotateTown's quarter-turn on top-level groups
 // selections whose grab works in PARENT-LOCAL space (they live inside a
-// positioned group): house parts, and the dojo's dummies / master
-const isLocalSel = (sel) => sel && (sel.type === "part" || sel.type === "dojoDummy" || sel.type === "dojoMaster");
+// positioned/rotated group): house parts, the dojo's dummies / master, and the
+// near "wall" hills (children of the quarter-turned terrain group, so their
+// local x/z read straight back as authored coords)
+const isLocalSel = (sel) => sel && (sel.type === "part" || sel.type === "dojoDummy" || sel.type === "dojoMaster" || sel.type === "hill");
 const isBuildingSel = (sel) => sel && sel.type === "building";
 
 // ---------- build / rebuild the town from the live layout ----------
@@ -143,6 +146,24 @@ function tagEditables() {
     shop.dojo.dummies.forEach((d, i) => { d.group.userData.edit = { type: "dojoDummy", index: i }; });
     if (shop.dojo.master?.creature) shop.dojo.master.creature.userData.edit = { type: "dojoMaster" };
   }
+  // the near "wall" hills — the ridge behind the buildings + the cave hillside
+  // (the horizon ring belt stays merged/procedural and isn't pickable)
+  (shop._hillMeshes || []).forEach((m, i) => { m.userData.edit = { type: "hill", index: i }; });
+}
+
+// Seed layout.hills from the near hills the terrain just built (procedural or
+// already-authored) so the first edit has a record to mutate — mirrors
+// ensureBuildings. Colours are serialised to the "#rrggbb" strings the panel's
+// colour input and the lot parts use.
+function ensureHills() {
+  if (!Array.isArray(layout.hills) || !layout.hills.length) {
+    layout.hills = (shop?._hillDescs || []).map((h) => ({
+      x: round2(h.x), z: round2(h.z),
+      radius: round2(h.radius), sink: round2(h.sink),
+      color: "#" + ((h.color >>> 0) & 0xffffff).toString(16).padStart(6, "0"),
+    }));
+  }
+  return layout.hills;
 }
 
 // Seed layout.buildings from the code defaults so the first edit has a record
@@ -170,6 +191,7 @@ function selectionValid(sel) {
   if (sel.type === "building") return sel.key === "shop" || sel.key === "cave" || sel.key === "dojo";
   if (sel.type === "dojoDummy") return sel.index < (layout.buildings?.dojo?.dummies?.length ?? 0);
   if (sel.type === "dojoMaster") return true;
+  if (sel.type === "hill") return !!shop && sel.index < (shop._hillMeshes?.length ?? 0);
   return false;
 }
 
@@ -200,6 +222,7 @@ function selectedObject(sel = selection) {
   }
   if (sel.type === "dojoDummy") return shop.dojo?.dummies[sel.index]?.group ?? null;
   if (sel.type === "dojoMaster") return shop.dojo?.master?.creature ?? null;
+  if (sel.type === "hill") return shop._hillMeshes?.[sel.index] ?? null;
   return null;
 }
 
@@ -213,6 +236,7 @@ function selectedRecord(sel = selection) {
   if (sel.type === "building") return ensureBuildings()[sel.key];
   if (sel.type === "dojoDummy") return ensureBuildings().dojo.dummies[sel.index];
   if (sel.type === "dojoMaster") return ensureBuildings().dojo.master;
+  if (sel.type === "hill") return ensureHills()[sel.index];
   return null;
 }
 
@@ -229,6 +253,7 @@ function selLabel(sel = selection) {
   if (sel.type === "building") return sel.key === "shop" ? "shop building" : sel.key === "dojo" ? "dojo building" : "cave mouth";
   if (sel.type === "dojoDummy") return `dojo dummy ${sel.index + 1}`;
   if (sel.type === "dojoMaster") return "dojo master";
+  if (sel.type === "hill") return `wall hill ${sel.index + 1}`;
   return "";
 }
 
@@ -427,8 +452,9 @@ function commitGrab() {
   if (selection.type === "part") {
     rec.pos[0] = round2(obj.position.x);
     rec.pos[2] = round2(obj.position.z);
-  } else if (selection.type === "dojoDummy" || selection.type === "dojoMaster") {
-    // stored in dojo-local coords (the group is positioned at the hall centre)
+  } else if (selection.type === "dojoDummy" || selection.type === "dojoMaster" || selection.type === "hill") {
+    // dojo pieces sit in dojo-local coords; near hills sit in the quarter-turned
+    // terrain group — either way the local x/z read straight back as authored
     rec.x = round2(obj.position.x);
     rec.z = round2(obj.position.z);
   } else {
@@ -462,6 +488,7 @@ function rotateSelected(delta) {
   if (selection.type === "decor") { setStatus("billboards always face the camera — no yaw"); return; }
   if (selection.type === "building") { setStatus("buildings keep their built orientation — position only"); return; }
   if (selection.type === "dojoDummy" || selection.type === "dojoMaster") { setStatus("dojo pieces are position-only"); return; }
+  if (selection.type === "hill") { setStatus("hills are round — no yaw (use [ ] to resize)"); return; }
   pushUndo(`rot:${JSON.stringify(selection)}`);
   rec.yaw = round2((rec.yaw || 0) + delta);
   obj.rotation.y = selection.type === "part" ? rec.yaw : BAKED_YAW + rec.yaw;
@@ -494,6 +521,14 @@ function scaleSelected(factor) {
     refreshSelBox();
     renderPanel();
     setStatus(`part size: [${rec.size.join(", ")}]`);
+    return;
+  }
+  if (selection.type === "hill") {
+    // radius drives the buried centre height too, so rebuild to reseat it
+    pushUndo(key);
+    rec.radius = round2((rec.radius ?? 6) * factor);
+    rebuild();
+    setStatus(`hill radius: ${rec.radius}`);
     return;
   }
   setStatus("fixtures don't scale — tables, vitrine and lots keep game size");
@@ -540,6 +575,12 @@ function duplicateSelected() {
     layout.decor.push({ ...rec, x: round2(rec.x + 0.8), z: round2(rec.z + 0.8) });
     rebuild();
     setSelection({ type: "decor", index: layout.decor.length - 1 });
+  } else if (selection.type === "hill") {
+    const list = ensureHills();
+    const rec = list[selection.index];
+    list.push({ ...rec, x: round2(rec.x + 3), z: round2(rec.z + 3) });
+    rebuild();
+    setSelection({ type: "hill", index: list.length - 1 });
   }
   setStatus(`duplicated → ${selLabel()}`, "ok");
 }
@@ -559,6 +600,7 @@ function deleteSelected() {
   else if (selection.type === "lot") layout.lots.splice(selection.index, 1);
   else if (selection.type === "part") layout.lots[selection.index][selection.state].splice(selection.partIndex, 1);
   else if (selection.type === "decor") layout.decor.splice(selection.index, 1);
+  else if (selection.type === "hill") ensureHills().splice(selection.index, 1);
   const wasPart = selection.type === "part" ? { type: "lot", index: selection.index } : null;
   selection = null;
   rebuild();
@@ -900,7 +942,7 @@ function renderPanel() {
   if (!rec) {
     panelEl.append(el("div", { className: "muted", textContent: editScope === "buildings"
       ? "Buildings mode (M): click the shop, cave, dojo or a house, then G to drag the whole thing."
-      : "Contents mode (M): click a shelf, house part, decor sprite, or a dojo dummy/master. Enter opens the decor palette." }));
+      : "Contents mode (M): click a shelf, house part, decor sprite, dojo dummy/master, or a wall hill. Enter opens the decor palette." }));
   } else {
     panelEl.append(el("div", { className: "muted", textContent: selLabel() }));
     const sel = selection;
@@ -977,6 +1019,18 @@ function renderPanel() {
       );
     }
 
+    if (sel.type === "hill") {
+      panelEl.append(
+        row("x", numInput(rec.x, (v) => editRec(() => { rec.x = v; }))),
+        row("z", numInput(rec.z, (v) => editRec(() => { rec.z = v; }))),
+        row("radius", numInput(rec.radius ?? 6, (v) => editRec(() => { rec.radius = round2(v); }), 0.5)),
+        row("sink", numInput(rec.sink ?? 0.58, (v) => editRec(() => { rec.sink = round2(v); }), 0.05)),
+      );
+      const colorIn = el("input", { type: "color", value: rec.color || "#40613a", onchange(e) { editRec(() => { rec.color = e.target.value; }); } });
+      panelEl.append(row("color", colorIn));
+      panelEl.append(el("div", { className: "muted", textContent: "wall hill — G to drag, [ ] to resize. 'sink' buries it (bigger = flatter). The horizon ring stays fixed." }));
+    }
+
     panelEl.append(el("div", {},
       el("button", { textContent: "Duplicate (Ctrl+D)", onclick: duplicateSelected }),
       el("button", { textContent: "Delete", onclick: deleteSelected }),
@@ -1048,7 +1102,7 @@ function renderPanel() {
   panelEl.append(el("h3", { textContent: "Layout" }));
   panelEl.append(el("div", {
     className: "muted",
-    textContent: `${layout.tables.length} tables + vitrine · ${layout.lots.length} lots · ${layout.decor.length} decor`,
+    textContent: `${layout.tables.length} tables + vitrine · ${layout.lots.length} lots · ${layout.decor.length} decor · ${(layout.hills?.length ?? 0) || (shop?._hillMeshes?.length ?? 0)} wall hills`,
   }));
 }
 

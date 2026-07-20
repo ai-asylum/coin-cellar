@@ -204,7 +204,7 @@ export function npcLinesFor(npc, hour) {
 // straight to small talk.
 export const INTROS = {
   pip: [
-    "Ooh, a NEW face?! You're the one who took over the old shop, right?!",
+    "Ooh! Are YOU the one who took over the old shop?! Eee, I've SO been wanting to meet you!",
     "I'm Pip! Eee, we're gonna be the BEST of friends, I just KNOW it!",
   ],
   barrow: [
@@ -212,7 +212,7 @@ export const INTROS = {
     "Barrow. That's my name, not that you asked. ...Welcome, I suppose.",
   ],
   tansy: [
-    "Oh, a new face! You must be the one who's taken on the old shop, dear.",
+    "Oh, hello there, dear! You must be the one who's taken on the old shop.",
     "I'm Tansy. It's ever so lovely to have you in town — truly it is.",
   ],
   nib: [
@@ -220,11 +220,11 @@ export const INTROS = {
     "Nib. I kept the ledgers here for years. The counter's yours now.",
   ],
   rocco: [
-    "YO! Fresh face in town! You took over the old shop, huh? Respect!",
+    "YO! You're the one runnin' the old shop now, huh? Respect, champ!",
     "Name's Rocco, champ! Stick with me — we'll get those gains. Er, sales!",
   ],
   marlowe: [
-    "A new face. And here I thought I'd met everyone worth meeting.",
+    "A stranger — and here I thought I'd met everyone worth meeting.",
     "Marlowe. Charmed — you especially, I'd imagine. Welcome to town.",
   ],
   clementine: [
@@ -232,43 +232,43 @@ export const INTROS = {
     "Clementine. Do try to raise the tone now that you've arrived.",
   ],
   sunny: [
-    "Oh... a new face. You drifted in like the shop had been waiting for you.",
+    "Oh... it's you. You drifted in like the old shop had been waiting for you.",
     "I'm Sunny. The town feels a little brighter with you in it, I think.",
   ],
   ozzie: [
-    "Oh, hey... new face. You took the old shop? Sounds like a lotta effort.",
+    "Oh, hey... you're the one who took the old shop? Sounds like a lotta effort.",
     "I'm Ozzie. Welcome, I guess. Don't make me get up to shake on it.",
   ],
   delphine: [
-    "Well, look at you — new in town! Taken on the old shop, have you, kiddo?",
+    "Well, look at you — just blown into town! Running the old shop now, are you, kiddo?",
     "I'm Delphine. Anybody gives you grief, you come straight to me, hear?",
   ],
   gus: [
-    "A new face. The town makes room for whoever wanders in. Welcome, friend.",
+    "Ah, a newcomer. The town makes room for whoever wanders in. Welcome, friend.",
     "I'm Gus. No rush to settle in. The place'll fit you soon enough.",
   ],
   vera: [
-    "A NEW face! Oh, the whole street's been talking about you, dear.",
+    "Oh, it's YOU! The whole street's been talking of nothing else, dear.",
     "I'm Vera. I know everything worth knowing — do come to me first.",
   ],
   bruno: [
-    "New in town, eh? Took the old shop? Brave. I like brave. I'm brave too.",
+    "New in town, eh? Took over the old place? Brave. I like brave. I'm brave too.",
     "Name's Bruno. Ask anyone — best-known man in town. You're welcome to it.",
   ],
   hazel: [
-    "Oh, a new face! You've taken on the old shop, have you, dear?",
+    "A new mouth to feed in town! You've taken charge of the old shop, have you, dear?",
     "I'm Hazel. First things first — you look like you need feeding up.",
   ],
   silas: [
-    "New face! You took the old shop — oh, the things we could rig up in there—",
+    "You're the one with the old shop now — oh, the things we could rig up in there—",
     "I'm Silas. Tinkerer, mostly. Come find me if anything wants improving.",
   ],
   mayor: [
-    "Ah! The new arrival! You've taken the old shop — splendid for MY township!",
+    "Ah! The new arrival! You've claimed the old shop — splendid for MY township!",
     "I am the Mayor. Your prosperity reflects on me, naturally. Welcome!",
   ],
   maple: [
-    "New face in town! Taken on the old shop, have you? Good on ya.",
+    "Fresh boots on our streets, eh! Keeping the old shop these days, are you? Good on ya.",
     "I'm Maple. Ever need out of that stuffy shop, I know all the best trails.",
   ],
 };
@@ -305,6 +305,10 @@ export const NPCS = [
         "I looked at EVERYTHING and my heart didn't go boing. Weird!",
       ],
     },
+    wishLines: [
+      "Ooh, if something all sparkly and precious comes in, save it for ME, 'kay?!",
+      "I go WEAK for shiny treasure — gems, crowns, glittery bits. Bring 'em ALL, hee!",
+    ],
     lines: {
       morning: [
         "Morning morning MORNING! Best part of the day, obviously!",
@@ -356,6 +360,10 @@ export const NPCS = [
         "Bah. Looked, saw nothing, left. Story of my life.",
       ],
     },
+    wishLines: [
+      "Stock honest kit, not glittery junk. Lanterns, boots, a sturdy shield. That's sense.",
+      "I want gear that earns its keep — and none of it priced like it's made of gold. Hmph.",
+    ],
     lines: {
       morning: [
         "Hmph. Up at this hour? Least you've got some sense.",
@@ -407,6 +415,10 @@ export const NPCS = [
         "I had a good look round, dear, but nothing came home with me.",
       ],
     },
+    wishLines: [
+      "A bit of fresh bread or something for the pot, that's what warms a house, dear.",
+      "Keep some good honest food on the shelf and I'll be by ever so often, promise.",
+    ],
     lines: {
       morning: [
         "Good morning! Isn't it a lovely one? Fresh and bright.",
@@ -458,6 +470,10 @@ export const NPCS = [
         "Browsed, catalogued, bought nothing. A tidy sort of visit.",
       ],
     },
+    wishLines: [
+      "I favour the well-made and the sensible — sturdy gear, correctly priced. It endures.",
+      "Stock things built to last, not to dazzle. A sound tool outlives a shiny one. Fact.",
+    ],
     lines: {
       morning: [
         "Morning. Did you know a good ledger outlasts three roofs? It's true.",
@@ -509,6 +525,10 @@ export const NPCS = [
         "Browsed the whole floor, no burn. Maybe tomorrow, champ!",
       ],
     },
+    wishLines: [
+      "Bring in the HEAVY stuff, champ — big blades, solid armour. Gains you can carry!",
+      "Weapons and gear with some WEIGHT to 'em, that's my aisle. Heavier the better!",
+    ],
     lines: {
       morning: [
         "YO! Morning workout DONE. Now I'm ready to shop!",
@@ -560,6 +580,10 @@ export const NPCS = [
         "I browsed, I dazzled, I bought nothing. The shop's loss.",
       ],
     },
+    wishLines: [
+      "I've an eye for the finer things — treasure, trinkets, anything that flatters me.",
+      "Stock something luxurious and I'll be back. Beauty deserves beautiful company.",
+    ],
     lines: {
       morning: [
         "Good morning, and what a fetching one — much like myself.",
@@ -611,6 +635,10 @@ export const NPCS = [
         "I saw nothing worth my coin. Do try harder, darling.",
       ],
     },
+    wishLines: [
+      "I buy nothing but the rarest treasure, darling. Stock accordingly, if you're able.",
+      "The finest gems, the costliest trinkets — that earns my coin. Nothing less will.",
+    ],
     lines: {
       morning: [
         "Morning. This town could use a touch of taste before noon.",
@@ -662,6 +690,10 @@ export const NPCS = [
         "I wandered and dreamed and bought nothing at all. A soft sort of day.",
       ],
     },
+    wishLines: [
+      "If something pretty and quietly magical comes in — a crystal, a star — set it by for me?",
+      "I do love little wonders. Anything that glimmers or hums, I could gaze at for hours.",
+    ],
     lines: {
       morning: [
         "Morning... or is it? The light's the colour of honey, so I forgive it.",
@@ -713,6 +745,10 @@ export const NPCS = [
         "Looked around, got sleepy, left. Standard trip, really.",
       ],
     },
+    wishLines: [
+      "Just keep snacks around, honestly. Cheap eats. Somethin' I don't gotta work for. Mmn.",
+      "Food's the only thing worth reachin' for. Nothin' fancy — nothin' pricey, either.",
+    ],
     lines: {
       morning: [
         "Mmn... mornin'. Is it though? Feels too early for that.",
@@ -764,6 +800,10 @@ export const NPCS = [
         "Browsed a while, bought nothin'. No harm in lookin', kiddo.",
       ],
     },
+    wishLines: [
+      "Keep some good food in, kiddo, and sturdy gear too. A body's gotta eat AND stay safe.",
+      "Hearty meals and kit that won't let folk down — that's what I come lookin' for, hon.",
+    ],
     lines: {
       morning: [
         "Mornin', kiddo! Up with the sun, good on ya.",
@@ -815,6 +855,10 @@ export const NPCS = [
         "Bought nothing. Left lighter than I came. Not a bad trade, really.",
       ],
     },
+    wishLines: [
+      "A little simple food is all I need, friend. Nothing costly, nothing to weigh me down.",
+      "Keep something plain and honest on the shelf — bread, a herb for tea. That's plenty.",
+    ],
     lines: {
       morning: [
         "Morning. Feel that air? Costs nothing, worth everything. Breathe it in.",
@@ -866,6 +910,10 @@ export const NPCS = [
         "Bought nothing, learned everything. That's a good day's shopping, dear.",
       ],
     },
+    wishLines: [
+      "Stock a bit of everything folk'll TALK about, dear — pretty trinkets, nice treats.",
+      "Sweet things and shiny things, that's what gets tongues wagging. And oh, I do love that.",
+    ],
     lines: {
       morning: [
         "Morning! You'll never guess who I saw sneaking home at dawn. Guess. Go on.",
@@ -917,6 +965,10 @@ export const NPCS = [
         "Nothin' grabbed me. Hard to impress a man who's seen what I've seen, eh?",
       ],
     },
+    wishLines: [
+      "Bring in weapons a man can BRAG about, eh — big blades, trophies. Stuff worth a tale.",
+      "I want the heavy, the impressive, the folk-will-stare gear. Nothin' small for Bruno!",
+    ],
     lines: {
       morning: [
         "Morning! Up before dawn, me. Wrestled a fog off the road on the way in.",
@@ -968,6 +1020,10 @@ export const NPCS = [
         "Had a good look, dear, but nothing worth ruining my appetite over.",
       ],
     },
+    wishLines: [
+      "Food, dear — good food. The finer the fare, the faster I'll empty your shelves.",
+      "Keep the pantry stocked with something delicious and you'll never be rid of me.",
+    ],
     lines: {
       morning: [
         "Morning! I've a loaf in the oven and I can't stop thinking about lunch.",
@@ -1019,6 +1075,10 @@ export const NPCS = [
         "Browsed, tinkered mentally, bought nothing. The blueprints stay in my head.",
       ],
     },
+    wishLines: [
+      "Anything with gears or a hinge or a spring — bring it in! I can't resist a mechanism.",
+      "Stock gadgets and clever gear, would you? The more moving parts, the happier I am.",
+    ],
     lines: {
       morning: [
         "Morning! I've been up since three — had an idea, then it had another idea.",
@@ -1070,6 +1130,10 @@ export const NPCS = [
         "I surveyed the wares and abstained. A leader must never be seen to overspend.",
       ],
     },
+    wishLines: [
+      "Stock treasure befitting the township's dignity — grand, glittering, worthy of ME. Ahem.",
+      "Show me splendour! Gems, crowns, things that trumpet civic magnificence. And mine.",
+    ],
     lines: {
       morning: [
         "Ah, the heir! Rise and shine for the greater glory of the township!",
@@ -1121,6 +1185,10 @@ export const NPCS = [
         "Had a look, bought nowt. The fields gave me plenty this mornin' anyhow.",
       ],
     },
+    wishLines: [
+      "Rugged kit and hearty food, that's the trail-goer's list. Stock those and I'm yours, eh.",
+      "Sturdy boots, a good blade, a proper meal — that's what a life outdoors runs on.",
+    ],
     lines: {
       morning: [
         "Mornin'! Already been out to the ridge and back. Dew's grand this hour.",
@@ -1209,6 +1277,17 @@ export function npcBuyLine(npc, bucket, itemName = "", roll = Math.random()) {
   if (!pool || !pool.length) return null;
   const line = pool[Math.floor(roll * pool.length) % pool.length];
   return line.replace(/\{item\}/g, itemName || "that");
+}
+
+// A townsperson's "wishlist" aside — a hint at their taste (see PERSONALITIES
+// .taste: what kind of goods tempt them, cheap or costly) that they drop right
+// after a shopping trip, nudging the player toward the sort of stock they'd buy.
+// Two per person, authored in their own voice; `roll` is a 0–1 number so callers
+// can seed the pick. Returns null if the townsperson has no wish lines.
+export function npcWishLine(npc, roll = Math.random()) {
+  const pool = npc?.wishLines;
+  if (!pool || !pool.length) return null;
+  return pool[Math.floor(roll * pool.length) % pool.length];
 }
 
 // Item-specific reactions: certain signature items get a bespoke line instead of

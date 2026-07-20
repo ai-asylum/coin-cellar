@@ -82,6 +82,48 @@ function dungeonTuningApiPlugin() {
   };
 }
 
+// Dev-only persistence for the admin panel's combat-input settings (` key in
+// game): GET serves the saved knobs, POST overwrites src/game/combat-settings.json.
+// combat-settings.js imports that file and folds it over the code defaults at
+// load, so a save is picked up by the game on its next reload.
+function combatSettingsApiPlugin() {
+  const file = resolve(__dirname, "src/game/combat-settings.json");
+  return {
+    name: "coin-cellar-combat-settings-api",
+    configureServer(server) {
+      server.middlewares.use("/api/combat-settings", async (req, res, next) => {
+        if (req.method === "GET") {
+          res.setHeader("Content-Type", "application/json");
+          res.end(await readFile(file, "utf-8"));
+          return;
+        }
+        if (req.method === "POST") {
+          try {
+            let body = "";
+            for await (const chunk of req) body += chunk;
+            const parsed = JSON.parse(body);
+            if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+              throw new Error("combat settings must be a JSON object");
+            }
+            if (typeof parsed.attackMode !== "string") {
+              throw new Error("combat settings must include an attackMode string");
+            }
+            await writeFile(file, JSON.stringify(parsed, null, 2) + "\n");
+            res.statusCode = 204;
+            res.end();
+          } catch (err) {
+            res.statusCode = 400;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: err.message }));
+          }
+          return;
+        }
+        next();
+      });
+    },
+  };
+}
+
 export default defineConfig({
   base: "./",
   server: {
@@ -89,7 +131,7 @@ export default defineConfig({
     open: false,
     hmr: false,
   },
-  plugins: [layoutApiPlugin(), dungeonTuningApiPlugin()],
+  plugins: [layoutApiPlugin(), dungeonTuningApiPlugin(), combatSettingsApiPlugin()],
   build: {
     target: "es2020",
     rollupOptions: {

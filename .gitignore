@@ -5,3 +5,7 @@ dist
 .vite
 .vercel
 *.log
+
+# Capacitor Android project + build artifacts (regenerate with `npx cap add android`)
+android
+*.apk

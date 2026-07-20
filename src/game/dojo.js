@@ -11,6 +11,7 @@ import { makeToonMaterial } from "../core/toon.js";
 import { BlockyCreature } from "../chargen/blocky.js";
 import { npcById } from "./npc-data.js";
 import { getLayout } from "./layout-store.js";
+import { BUILDING_LIFT } from "./shop-data.js";
 
 // The master reuses Rocco's skin (the jock) — a fitting trainer, and the roster
 // only ships 18 Kenney skins (all spoken for), so a dedicated one isn't free.
@@ -51,7 +52,7 @@ export function buildDojo(shop) {
   // hit coords, master facing spot) are derived from the centre explicitly.
   const dd = getLayout().buildings?.dojo ?? DOJO_DEFAULT;
   const CX = -dd.z, CZ = dd.x;
-  g.position.set(CX, 0, CZ);
+  g.position.set(CX, BUILDING_LIFT, CZ); // lift off the road to avoid z-fighting
 
   const rect = { minX: CX - HW, maxX: CX + HW, minZ: CZ - HD, maxZ: CZ + HD };
   const backZ = -HD;   // north edge (nearest the shop), local

@@ -13,6 +13,7 @@ import { rng, pick } from "../core/engine.js";
 import { buildMethods } from "./shop-build.js";
 import { pathMethods } from "./shop-pathfinding.js";
 import { customerMethods } from "./shop-customers.js";
+import { updateDojo, dojoHitDummies } from "./dojo.js";
 
 // Keep the indoor camera focus away from walls while still allowing it to
 // travel with the player through rooms that do not fit on a phone screen.
@@ -214,6 +215,13 @@ export class Shop {
     return this.slots.filter((s) => s.item).length;
   }
 
+  // ------------------------------------------------------------ dojo
+  // The dashing hero swept through the dojo mats — knock any training dummy in
+  // reach (they tip and spring back; see dojo.js). Returns whether one was hit.
+  dojoDashHit(pos, reach) {
+    return dojoHitDummies(this, this.dojo, pos, reach);
+  }
+
   // ------------------------------------------------------------ meadow forage
   // Smash every destructible forage prop within `reach` of `pos` (the dashing
   // hero). Each pops in a leafy burst and may drop a bit of edible loot on the
@@ -309,6 +317,7 @@ export class Shop {
     for (const s of this.shafts) s.userData.update(dt, elapsed);
     this._updateLighting(dt);
     this._updateForageDrops(dt, elapsed);
+    updateDojo(this, this.dojo, dt, elapsed);
 
     // throb the floor outline on whichever locked table is the current target
     if (this._glowTable && this._glowTable.outline)
@@ -339,7 +348,19 @@ export class Shop {
     // while the shopfront's locked for the FTUE the player can't nudge it open by
     // walking up — only a scripted customer streaming in (or a held-open scene)
     // still swings it, so it reads as firmly shut until the Mayor's intro ends.
-    const wantOpen = this.customers.some((c) => !c._outside) || this.doorHeld || (playerNear && !this.doorLocked);
+    // A shopper only holds the door once they're at the threshold or already
+    // inside — not the moment they spawn way down the street and start walking
+    // over, which used to swing it open far too soon.
+    const dr = this.buildingRect;
+    const customerHoldsDoor = (c) => {
+      if (c._outside || !c.creature) return false;
+      const p = c.creature.position;
+      const inside =
+        p.x > dr.minX - 0.3 && p.x < dr.maxX + 0.3 &&
+        p.z > dr.minZ - 0.3 && p.z < dr.maxZ + 0.3;
+      return inside || p.distanceTo(this.doorPos) < 2.4 || p.distanceTo(this.doorInside) < 2.4;
+    };
+    const wantOpen = this.customers.some(customerHoldsDoor) || this.doorHeld || (playerNear && !this.doorLocked);
 
     // ease the shopfront doors toward their open/shut pose. The swing rides on
     // top of the town bake's yaw (_doorBaseY) — setting absolute angles here
@@ -479,7 +500,13 @@ export class Shop {
     const item = ITEMS[cust.slot.item];
     const game = this.game;
     let ui;
+    let settled = false;
     const finish = (sold, price, grade) => {
+      // Resolve exactly once: closing the sheet fires the cancel hook too, so a
+      // sealed deal (which closes the sheet) must not also fall through to a
+      // "walked away". Guard set before ui.close() so the re-entrant call bails.
+      if (settled) return;
+      settled = true;
       ui.close();
       if (sold) {
         const slot = cust.slot;
@@ -543,7 +570,12 @@ export class Shop {
     const item = ITEMS[cust.sellItem];
     const game = this.game;
     let ui;
+    let settled = false;
     const finish = (bought, price, grade) => {
+      // Resolve exactly once (see startHaggle): the sheet's cancel hook and the
+      // deal buttons can both land here, so ignore anything after the first.
+      if (settled) return;
+      settled = true;
       ui.close();
       if (bought) {
         cust.state = "happy";

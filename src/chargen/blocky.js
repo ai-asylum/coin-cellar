@@ -200,10 +200,13 @@ export class BlockyCreature extends THREE.Group {
     this._chatUntil = 0;
   }
 
-  /** Attach a prop (sword / bow / staff) to the right hand, replacing any prior. */
+  /** Attach a prop (sword / bow / staff) to the right hand, replacing any prior.
+   *  Pass a falsy `obj` to go bare-handed — any held prop is stripped and the
+   *  hand is left empty. */
   holdItem(obj) {
     if (!this.armR) return;
     if (this.heldItem) this.heldItem.removeFromParent();
+    if (!obj) { this.heldItem = null; return; }
     obj.position.set(0, -1.0, 0.32);
     obj.rotation.set(-0.85, 0, 0.12);
     this.armR.add(obj);

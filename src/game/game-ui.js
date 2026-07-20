@@ -10,6 +10,7 @@ import { dayClockStops } from "./shop.js";
 import { godraysEnabled, setGodraysEnabled } from "../core/godrays.js";
 import { esc } from "./game-util.js";
 import { NAME_KEY } from "./game-persistence.js";
+import { ATTACK_MODES, COMBAT_SLIDERS, combat, attackMode, setCombatSettings, saveCombatSettings } from "./combat-settings.js";
 
 // per-call scratch vector (duplicated from game.js — these are transient)
 const _v = new THREE.Vector3();
@@ -65,15 +66,16 @@ export const uiMethods = {
   // above ground and in the backpack sheet while delving. Each slot shows the
   // worn piece's icon, or an empty glyph; tapping one opens the per-slot picker.
   // Whether tapping a slot's cell would open a picker with anything actionable:
-  // at least one matching piece to equip in the pool, or a worn piece we're
-  // allowed to take off (every slot but the weapon, which is never left bare).
+  // at least one matching piece to equip in the pool, or a worn piece we can
+  // take off — including the weapon, which can now be stripped to fight bare-
+  // handed when there's nothing better to swap in.
   _slotHasOptions(slot, source) {
     const pool = source === "inv" ? this.inventory : this.stash;
     for (const id of pool) {
       const eq = equipInfo(id);
       if (eq && eq.slot === slot) return true;
     }
-    return !!this.equipment[slot] && slot !== "weapon";
+    return !!this.equipment[slot];
   },
 
   _gearDollHTML(source) {
@@ -85,12 +87,7 @@ export const uiMethods = {
       // Nothing to swap in and nothing to take off → there's no picker worth
       // opening, so lock the cell rather than showing an empty list.
       const locked = !this._slotHasOptions(slot, source);
-      // A worn non-weapon piece gets a corner "×" for one-tap unequip, so you
-      // don't have to open the picker just to strip a slot (the weapon slot is
-      // never left bare, so it never shows one).
-      const removable = it && slot !== "weapon";
       return `<button class="gear-cell${it ? " filled ti-" + it.tier : ""}${locked ? " locked" : ""}" data-slot="${slot}"${locked ? " disabled" : ""}>
-        ${removable ? `<span class="gear-cell-x" data-unslot="${slot}" role="button" aria-label="Unequip ${SLOT_META[slot].name}">×</span>` : ""}
         ${ic}
         <small>${SLOT_META[slot].name}</small>
         <span class="gear-cell-name">${it ? it.name : SLOT_META[slot].empty}</span>
@@ -112,15 +109,6 @@ export const uiMethods = {
   _wireGearDoll(el, source) {
     el.querySelectorAll(".gear-cell").forEach((b) => {
       b.onclick = () => this._openEquipPicker(b.dataset.slot, source);
-    });
-    // The corner "×" strips the slot in one tap — swallow the click so it
-    // doesn't also bubble up and open the picker behind it.
-    el.querySelectorAll(".gear-cell-x").forEach((x) => {
-      x.onclick = (e) => {
-        e.stopPropagation();
-        this._unequip(x.dataset.unslot, source);
-        this._reopenGearHost(source);
-      };
     });
   },
 
@@ -150,13 +138,15 @@ export const uiMethods = {
     });
 
     const rows = [];
-    if (wornId && slot !== "weapon") {
-      // weapon is never left empty; other slots can be stripped bare
+    if (wornId) {
+      // any slot can be stripped bare now — taking off the weapon just leaves
+      // you fighting bare-handed
       const it = ITEMS[wornId];
       const noRoom = inDungeon && this.inventory.length >= this.invCap;
+      const takeOffHint = slot === "weapon" ? "equipped — tap to fight bare-handed" : "equipped — tap to remove";
       rows.push(`<button class="gear-opt equipped ti-${it.tier}" data-act="unequip"${noRoom ? " disabled" : ""}>
         <span class="gear-opt-ic">${itemIcon(it.icon)}</span>
-        <div class="gear-opt-txt"><b>${it.name}</b><small>${noRoom ? "bag is full — no room to stow it" : "equipped — tap to remove"}</small></div>
+        <div class="gear-opt-txt"><b>${it.name}</b><small>${noRoom ? "bag is full — no room to stow it" : takeOffHint}</small></div>
         <span class="gear-opt-act off">${icon("undo")} Remove</span>
       </button>`);
     }
@@ -212,7 +202,7 @@ export const uiMethods = {
 
   _unequip(slot, source) {
     const prev = this.equipment[slot];
-    if (!prev || slot === "weapon") return; // you always carry a weapon
+    if (!prev) return; // nothing worn here; weapon may be stripped to bare hands
     // stowing gear takes a bag slot while delving — refuse if there's no room
     if (source === "inv" && this.inventory.length >= this.invCap) {
       return this.hud.toast(`${icon("bag")} Bag is full!`);
@@ -259,13 +249,20 @@ export const uiMethods = {
           </div>`;
         }
         // during the FTUE the plain rows carry no actions at all — the only
-        // button in the whole bag is the story action that advances the story
+        // button in the whole bag is the story action that advances the story.
+        // Gear (anything with an `equip` block) gets a one-tap Equip button so
+        // you can slot it straight from the bag without opening the paper-doll;
+        // in the shop it keeps its Store button too, so gear can still be stocked.
+        const eq = equipInfo(id);
         const useBtn = ftue ? ""
-          : inShop
-            ? `<button class="bag-act store" data-store="${i}">${icon("box")} Store</button>`
-            : it.heal
-              ? `<button class="bag-act use" data-i="${i}">Use <small>+${it.heal}${icon("heart")}</small></button>`
-              : `<span class="bag-act ghost">not usable</span>`;
+          : eq
+            ? `<button class="bag-act equip" data-equip="${i}">${icon("sword")} Equip</button>`
+              + (inShop ? `<button class="bag-act store" data-store="${i}">${icon("box")} Store</button>` : "")
+            : inShop
+              ? `<button class="bag-act store" data-store="${i}">${icon("box")} Store</button>`
+              : it.heal
+                ? `<button class="bag-act use" data-i="${i}">Use <small>+${it.heal}${icon("heart")}</small></button>`
+                : `<span class="bag-act ghost">not usable</span>`;
         return `<div class="bag-row ti-${it.tier}">
           <span class="bag-face">${itemIcon(it.icon)}</span>
           <span class="bag-name">${it.name}<small>${it.base}g</small></span>
@@ -294,6 +291,15 @@ export const uiMethods = {
     });
     el.querySelectorAll(".bag-act.store").forEach((btn) => {
       btn.onclick = () => this._storeItem(Number(btn.dataset.store));
+    });
+    el.querySelectorAll(".bag-act.equip").forEach((btn) => {
+      btn.onclick = () => {
+        const i = Number(btn.dataset.equip);
+        const eq = equipInfo(this.inventory[i]);
+        if (!eq) return;
+        this._equipFromPool(eq.slot, i, "inv");
+        this._openBagSheet();
+      };
     });
     el.querySelectorAll(".bag-act[data-q]").forEach((btn) => {
       btn.onclick = () => this._questBagAction(btn.dataset.q)?.fn();
@@ -577,8 +583,11 @@ export const uiMethods = {
         <button data-a="tpexit">${icon("hole")} TP to exit</button>
         <button data-a="key">${itemIcon("key")} Give key</button>
         <button data-a="kill">${icon("skull")} Kill enemies</button>
+        <button data-a="npcdbg">${icon("people")} NPC debug: <b>${this.npcDebug ? "ON" : "off"}</b></button>
         <button data-a="reset" class="danger">${icon("recycle")} Wipe save</button>
       </div>
+      <div class="admin-head"><b>${icon("swords")} Combat input</b><span id="admin-combat-status"></span></div>
+      <div id="admin-combat">${this._combatPanelHtml()}</div>
       <div class="admin-head"><b>${icon("sun")} Time of day</b><span id="admin-clock-val">${this.debugHour == null ? "live" : _fmtHour(this.debugHour)}</span></div>
       <div class="admin-gradient" style="background:linear-gradient(90deg, ${dayClockStops()})">
         <div class="admin-gradient-mark" id="admin-clock-mark" style="left:${((this.debugHour == null ? _realHour() : this.debugHour) / 24) * 100}%"></div>
@@ -613,10 +622,167 @@ export const uiMethods = {
       const mark = this.adminEl?.querySelector("#admin-clock-mark");
       if (mark) mark.style.left = `${(this.debugHour / 24) * 100}%`;
     });
+    // combat sliders: live-update the setting as you drag (reflected in the
+    // label), and persist to the JSON file on release
+    el.addEventListener("input", (e) => {
+      const t = e.target.closest("input[data-cset]");
+      if (!t) return;
+      const [m, key] = t.dataset.cset.split(".");
+      const v = +t.value;
+      setCombatSettings({ [m]: { [key]: v } });
+      const lbl = el.querySelector(`[data-cval="${m}.${key}"]`);
+      if (lbl) lbl.textContent = v;
+    });
+    el.addEventListener("change", (e) => {
+      if (e.target.closest("input[data-cset]")) this._saveCombat();
+    });
+  },
+
+  // The combat-input section's inner markup: the tuning sliders for the
+  // currently selected mode (the mode picker itself lives in the always-on
+  // #combat-modes HUD bar, see _initCombatBar). Rebuilt in place on a mode
+  // switch (see _setAttackMode) so the knobs always match the active mode.
+  _combatPanelHtml() {
+    const mode = attackMode();
+    const active = ATTACK_MODES.find((m) => m.id === mode);
+    const sliders = (COMBAT_SLIDERS[mode] || []).map((d) => {
+      const val = combat[mode]?.[d.key];
+      return `<div class="admin-slider cslider">
+        <label>${esc(d.label)} <b data-cval="${mode}.${d.key}">${val}</b></label>
+        <input type="range" data-cset="${mode}.${d.key}" min="${d.min}" max="${d.max}" step="${d.step}" value="${val}">
+      </div>`;
+    }).join("");
+    return `
+      <div class="admin-hints cmode-desc"><b>${active ? esc(active.label) : ""}</b> — ${active ? esc(active.desc) : ""}</div>
+      ${sliders}
+    `;
+  },
+
+  // Redraw just the combat section (keeps the rest of the panel steady).
+  _renderCombatPanel() {
+    const box = this.adminEl?.querySelector("#admin-combat");
+    if (box) box.innerHTML = this._combatPanelHtml();
+  },
+
+  // Build the always-on-screen combat-input bar: one small square button per
+  // attack mode, numbered 1..N, pinned to the top of the screen. Tapping one
+  // switches the live attack mode. Called once from _wireHud.
+  _initCombatBar() {
+    const bar = document.getElementById("combat-modes");
+    if (!bar) return;
+    bar.innerHTML = ATTACK_MODES.map((m, i) =>
+      `<button class="cmode-btn" data-cmode="${m.id}" title="${esc(m.label)}" aria-label="${esc(m.label)}">${i + 1}</button>`
+    ).join("");
+    bar.addEventListener("click", (e) => {
+      const btn = e.target.closest("button[data-cmode]");
+      if (btn) this._setAttackMode(btn.dataset.cmode);
+    });
+    this._syncCombatBar();
+  },
+
+  // Reflect the live attack mode on the always-on bar (highlight the active).
+  _syncCombatBar() {
+    const bar = document.getElementById("combat-modes");
+    if (!bar) return;
+    const mode = attackMode();
+    bar.querySelectorAll("button[data-cmode]").forEach((b) => {
+      b.classList.toggle("on", b.dataset.cmode === mode);
+    });
+  },
+
+  // Switch attack mode, refresh the on-screen bar + admin sliders, and persist.
+  _setAttackMode(id) {
+    if (!ATTACK_MODES.some((m) => m.id === id)) return;
+    setCombatSettings({ attackMode: id });
+    this._syncCombatBar();
+    this._renderCombatPanel();
+    this._saveCombat();
+    const label = ATTACK_MODES.find((m) => m.id === id)?.label || id;
+    this.hud.toast(`${icon("swords")} Combat: ${label}`);
+  },
+
+  // Write the live combat settings to disk (dev server); reflect the outcome in
+  // the section header so it's clear whether it stuck or is session-only.
+  _saveCombat() {
+    saveCombatSettings().then((ok) => {
+      const s = this.adminEl?.querySelector("#admin-combat-status");
+      if (s) s.textContent = ok ? "saved" : "session only";
+    });
+  },
+
+  // Float a small state/stuck card over every townsperson while the admin's
+  // "NPC debug" toggle is on — the quickest way to see who's wedged and why.
+  // Shows each shopper's errand state, stuck timer and remaining distance to
+  // their goal (the same fields the stuck watchdog watches), plus a simpler
+  // line for the ambient street strollers.
+  _updateNpcDebug(dt = 0) {
+    if (!this.npcDebug || this.playerArea !== "shop" || !this.shop) {
+      this.hud.hideNpcDebug();
+      return;
+    }
+    const pp = this.player.position;
+    const entries = [];
+    // Shoppers: the errand state machine has a real stuck watchdog, so show its
+    // fields directly (state, distance to goal, the watchdog's stuck timer).
+    for (const c of this.shop.customers) {
+      if (!c.creature?.parent) continue;
+      const st = c._stuckT || 0;
+      const goal = c._goalDist != null ? `goal ${c._goalDist.toFixed(2)}m` : "";
+      entries.push({
+        target: c.creature,
+        stuck: st > 1.2,
+        html:
+          `<b>${esc(c.npc?.name ?? "?")}</b>` +
+          `<i>${esc(c.state)}${c.mode === "sell" ? " · sell" : ""}${c.ready ? " · ready" : ""}</i>` +
+          (goal ? `<i>${goal}</i>` : "") +
+          (st > 0.05 ? `<i class="warn">stuck ${st.toFixed(1)}s</i>` : ""),
+      });
+    }
+    // Strollers have no pathing or collision: the only thing that halts one is
+    // the player standing inside its stop radius (the AC-style pause). So the
+    // useful readout is *why* it's stopped — blocked by you, noticing you,
+    // pausing, or leaving — plus a no-progress timer to catch a genuine wedge.
+    for (const p of this.shop.passersby) {
+      const c = p.creature;
+      if (!c?.parent) continue;
+      const leaving = p.life <= -1e7;
+      const pdist = Math.hypot(pp.x - c.position.x, pp.z - c.position.z);
+      const blocked = pdist < 1.45; // NPC_STOP_R
+      const noticing = pdist < 2.6; // NPC_NOTICE_R
+      const dTo = Math.hypot(p.tx - c.position.x, p.tz - c.position.z);
+      // no-progress timer (debug bookkeeping only): trying to walk but the
+      // distance to the target isn't shrinking, and it's not the player pausing it
+      const moving = !p.chatting && p.pause <= 0 && !blocked;
+      if (moving && p._dbgPrevD != null && dTo > p._dbgPrevD - 0.004) {
+        p._dbgStuckT = (p._dbgStuckT || 0) + dt;
+      } else {
+        p._dbgStuckT = 0;
+      }
+      p._dbgPrevD = dTo;
+      const status = p.chatting ? "chatting"
+        : blocked ? "stopped · you"
+        : p.pause > 0 ? "pausing"
+        : leaving ? "leaving"
+        : noticing ? "noticing you"
+        : "strolling";
+      entries.push({
+        target: c,
+        stuck: (p._dbgStuckT || 0) > 1,
+        html:
+          `<b>${esc(p.npc?.name ?? "stroller")}</b>` +
+          `<i${blocked ? ' class="warn"' : ""}>${status}</i>` +
+          `<i>→ ${dTo.toFixed(1)}m · spd ${(p.curSpeed || 0).toFixed(2)}</i>` +
+          (noticing ? `<i>you ${pdist.toFixed(1)}m</i>` : "") +
+          (leaving ? "" : `<i>life ${p.life.toFixed(1)}s</i>`) +
+          ((p._dbgStuckT || 0) > 0.05 ? `<i class="warn">no-progress ${p._dbgStuckT.toFixed(1)}s</i>` : ""),
+      });
+    }
+    this.hud.renderNpcDebug(entries);
   },
 
   _adminAction(a) {
     if (a.startsWith("tut:")) return this._tutJump(a.slice(4));
+    if (a.startsWith("cmode:")) return this._setAttackMode(a.slice(6));
     switch (a) {
       case "g100": this.gainGold(100); break;
       case "g1k": this.gainGold(1000); break;
@@ -718,6 +884,14 @@ export const uiMethods = {
       case "kill":
         for (const e of [...this.dungeon.enemies]) this.dungeon.damageEnemy(e, 999);
         break;
+      case "npcdbg": {
+        this.npcDebug = !this.npcDebug;
+        if (!this.npcDebug) this.hud.hideNpcDebug();
+        const b = this.adminEl?.querySelector('[data-a="npcdbg"] b');
+        if (b) b.textContent = this.npcDebug ? "ON" : "off";
+        this.hud.toast(`${icon("people")} NPC debug ${this.npcDebug ? "ON" : "off"}`);
+        break;
+      }
       case "clocklive": {
         // hand the day/night cycle back to the real wall clock
         this.debugHour = null;

@@ -83,25 +83,36 @@ button { font-family: inherit; cursor: pointer; }
 }
 .hidden { display: none !important; }
 
+/* keep the HUD out of the title shot while the attract scene plays behind
+   the menu (the world is already live under the overlay) */
+#hud.title-hidden { visibility: hidden; }
+
 /* ============================================================ start menu */
 #start-menu {
-  position: absolute; inset: 0; pointer-events: auto;
-  display: flex; align-items: center; justify-content: center;
+  position: fixed; inset: 0; z-index: 30; pointer-events: auto;
+  display: flex; align-items: flex-end; justify-content: center;
   padding: 20px;
-  background: radial-gradient(ellipse at center, #2f2013 0%, #1a1008 100%);
-  animation: recapfade 0.3s;
+  padding-bottom: calc(env(safe-area-inset-bottom) + 12vh);
+  /* transparent so the live town shows through — just a soft vignette to sink
+     the edges and a warm scrim rising from the bottom to seat the card */
+  background:
+    radial-gradient(ellipse at center, transparent 30%, rgba(20, 12, 6, 0.55) 100%),
+    linear-gradient(to top, rgba(20, 12, 6, 0.7) 0%, transparent 45%);
+  animation: recapfade 0.5s;
 }
-.start-card { text-align: center; color: var(--parch-hi); }
+.start-card {
+  text-align: center; color: var(--parch-hi);
+  /* lift the card off the moving scene for legibility */
+  padding: 22px 30px 26px; border-radius: 22px;
+  background: radial-gradient(ellipse at center, rgba(26, 16, 8, 0.62) 0%, rgba(26, 16, 8, 0) 72%);
+}
 .start-logo-img {
-  width: min(220px, 52vw); height: auto; display: block; margin: 0 auto;
+  position: absolute; top: calc(env(safe-area-inset-top) + 24px); left: 50%;
+  transform: translateX(-50%);
+  width: min(240px, 60vw); height: auto; display: block;
   filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.55));
 }
-.start-title {
-  font-size: 44px; font-weight: 900; letter-spacing: 2px; margin-top: 6px;
-  color: var(--parch-hi); text-shadow: 0 3px 0 var(--wood-dark), 0 0 18px rgba(200, 135, 31, 0.4);
-}
-.start-tag { font-size: 15px; color: var(--wood-light); margin-top: 4px; font-weight: 600; }
-.start-play { font-size: 20px; padding: 14px 38px; margin-top: 26px; }
+.start-play { font-size: 20px; padding: 14px 38px; }
 
 /* ============================================================ top bar */
 #topbar {
@@ -221,25 +232,6 @@ button { font-family: inherit; cursor: pointer; }
 }
 @keyframes bosspulse { from { filter: brightness(1); } to { filter: brightness(1.45); } }
 
-/* incoming-attack telegraph under the boss health bar */
-#bossbar-tel { margin-top: 6px; animation: bannerpop 0.2s; }
-#bossbar-tel-name {
-  display: block; font-size: 13px; font-weight: 900; letter-spacing: 0.05em;
-  margin-bottom: 3px; text-shadow: 0 2px 0 var(--wood-dark);
-  animation: bosspulse 0.35s infinite alternate;
-}
-#bossbar-tel-track {
-  height: 7px; border-radius: 4px; border: 1px solid var(--wood-dark);
-  background: rgba(20, 10, 14, 0.75); overflow: hidden;
-}
-#bossbar-tel-fill { height: 100%; width: 0; }
-#bossbar-tel[data-atk="slam"] #bossbar-tel-name { color: #ff8a5a; }
-#bossbar-tel[data-atk="slam"] #bossbar-tel-fill { background: linear-gradient(#ff8a5a, #c8321f); }
-#bossbar-tel[data-atk="charge"] #bossbar-tel-name { color: #ffc46a; }
-#bossbar-tel[data-atk="charge"] #bossbar-tel-fill { background: linear-gradient(#ffc46a, #d06a12); }
-#bossbar-tel[data-atk="burst"] #bossbar-tel-name { color: #c89aff; }
-#bossbar-tel[data-atk="burst"] #bossbar-tel-fill { background: linear-gradient(#c89aff, #7a3ad0); }
-
 #toast-wrap {
   position: absolute; bottom: 22%; left: 0; right: 0;
   display: flex; flex-direction: column; align-items: center; gap: 6px;
@@ -270,6 +262,22 @@ button { font-family: inherit; cursor: pointer; }
 .floaty.gold { color: #ffd34d; }
 .floaty.loot { color: #a8e6b0; font-size: 15px; }
 .floaty.emote { font-size: 26px; animation: emotebob 1s infinite; }
+/* NPC debug cards (admin "NPC debug" toggle) — pinned above each townsperson */
+#npc-debug { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 6; }
+.npc-dbg {
+  position: absolute; transform: translate(-50%, -100%);
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
+  padding: 3px 6px; border-radius: 7px;
+  background: rgba(18, 12, 6, 0.82); border: 1px solid rgba(255, 246, 226, 0.35);
+  color: #fff6dc; font-size: 10px; font-weight: 700; line-height: 1.15;
+  white-space: nowrap; text-align: center;
+}
+.npc-dbg b, .npc-dbg i { display: block; width: 100%; }
+.npc-dbg b { font-size: 11px; font-weight: 900; color: #ffd34d; }
+.npc-dbg i { font-style: normal; opacity: 0.9; }
+.npc-dbg i.warn { color: #ff9a6b; opacity: 1; }
+.npc-dbg.stuck { border-color: #ff6b7a; box-shadow: 0 0 0 1px #ff6b7a, 0 0 8px rgba(255, 60, 80, 0.6); }
+
 .bag-full-msg {
   position: absolute; transform: translate(-50%, 0);
   background: linear-gradient(rgba(255, 246, 226, 0.97), rgba(236, 211, 160, 0.97));
@@ -367,6 +375,38 @@ button { font-family: inherit; cursor: pointer; }
   width: 48px; height: 48px; margin: -24px 0 0 -24px;
   background: rgba(255, 233, 196, 0.55); border: none;
 }
+/* joystick-centre dash button — only shown in the "joystick dash button" attack
+   mode while a foe's in range (toggled from input.setJoyDash). Tap it (2nd
+   finger) to strike; pinned to the stick's origin like the base. */
+#joy-dash {
+  position: absolute; top: 0; left: 0; border-radius: 50%;
+  margin: -33px 0 0 -33px; width: 66px; height: 66px;
+  display: none; align-items: center; justify-content: center;
+  pointer-events: auto; z-index: 21; font-size: 26px;
+  /* tinted by importance tier (see the .tier-* rules below) */
+  --fill1: #ffcaa0; --fill2: #d9613c; --edge: #a8391f; --ink: #3a140c;
+  --glow: rgba(217, 97, 60, 0.7); --glow-bright: rgba(255, 120, 70, 0.95);
+  color: var(--ink);
+  background: radial-gradient(circle at 35% 30%, var(--fill1), var(--fill2));
+  border: 3px solid var(--edge); box-shadow: 0 0 18px var(--glow);
+  animation: joydashpulse 0.9s infinite;
+}
+/* red = most important (combat / the boss door) */
+#joy-dash.tier-danger { --fill1: #ffcaa0; --fill2: #d9613c; --edge: #a8391f; --ink: #3a140c;
+  --glow: rgba(217, 97, 60, 0.7); --glow-bright: rgba(255, 120, 70, 0.95); }
+/* gold = progression / deals (talk, buy, dive, descend, go up) */
+#joy-dash.tier-primary { --fill1: #ffe6a0; --fill2: #e0a12f; --edge: #8f5f1e; --ink: #3d2a08;
+  --glow: rgba(224, 161, 47, 0.6); --glow-bright: rgba(255, 206, 90, 0.95); }
+/* green = building up the shop (restore, repair, stock) */
+#joy-dash.tier-build { --fill1: #b6f2cd; --fill2: #3fae6e; --edge: #1f7a49; --ink: #0c3a22;
+  --glow: rgba(63, 174, 110, 0.55); --glow-bright: rgba(120, 240, 170, 0.9); }
+/* grey = can't do it yet (locked / can't afford) — least urgent, no pulse */
+#joy-dash.tier-muted { --fill1: #d6dae2; --fill2: #8a909c; --edge: #585e6a; --ink: #2a2e36;
+  --glow: rgba(140, 150, 170, 0.45); --glow-bright: rgba(140, 150, 170, 0.45);
+  animation: none; }
+#joy-dash .ic { width: 1em; height: 1em; }
+#joy-dash:active { transform: scale(0.9); }
+@keyframes joydashpulse { 50% { box-shadow: 0 0 30px var(--glow-bright); } }
 #action-btn {
   pointer-events: auto; z-index: 20;
   position: absolute; right: calc(18px + env(safe-area-inset-right));
@@ -820,7 +860,6 @@ button { font-family: inherit; cursor: pointer; }
 .gear-panel .gear-cell-ic .ic { width: 27px; height: 27px; }
 .gear-panel .gear-cell-ic.empty .ic { width: 20px; height: 20px; }
 .gear-panel .gear-cell-name { font-size: 10px; }
-.gear-panel .gear-cell-x { width: 17px; height: 17px; top: 2px; right: 2px; font-size: 13px; }
 
 /* pack-your-bag: the same split layout, but a centered dialog rather than a
    corner popover. The equipment panel sits left of the supplies + delve panel. */
@@ -945,6 +984,8 @@ button { font-family: inherit; cursor: pointer; }
 .bag-act.drop { background: #d98c6c; }
 .bag-act.store { background: #e0b15f; display: inline-flex; align-items: center; gap: 4px; }
 .bag-act.store .ic { width: 14px; height: 14px; }
+.bag-act.equip { background: #8fb6e8; display: inline-flex; align-items: center; gap: 4px; }
+.bag-act.equip .ic { width: 14px; height: 14px; }
 .bag-act.take { background: #8ec86a; }
 .bag-act:active { transform: scale(0.94); }
 .bag-act:disabled { background: #c9b59a; color: var(--ink-soft); cursor: default; }
@@ -989,15 +1030,6 @@ button { font-family: inherit; cursor: pointer; }
 .gear-cell:active { transform: scale(0.95); }
 .gear-cell.locked { opacity: 0.4; cursor: default; pointer-events: none; filter: grayscale(0.6); }
 .gear-cell.locked:active { transform: none; }
-.gear-cell-x {
-  position: absolute; top: 3px; right: 3px; z-index: 2;
-  width: 20px; height: 20px; border-radius: 50%;
-  display: inline-flex; align-items: center; justify-content: center;
-  background: #c0392b; color: #fff; font-weight: 900; font-size: 15px; line-height: 1;
-  border: 1.5px solid #fff3c9; box-shadow: 0 1px 2px rgba(60, 34, 12, 0.4); cursor: pointer;
-}
-.gear-cell-x:active { transform: scale(0.85); }
-@media (pointer: fine) { .gear-cell-x:hover { background: #e05442; } }
 
 .gear-summary {
   margin-top: 12px; padding: 7px 10px; border-radius: 10px;
@@ -1069,11 +1101,36 @@ button { font-family: inherit; cursor: pointer; }
   pointer-events: auto;
   position: absolute; top: calc(58px + env(safe-area-inset-top)); left: 10px;
   width: min(320px, calc(100vw - 20px));
+  max-height: calc(100vh - 72px - env(safe-area-inset-top)); overflow-y: auto;
   background: linear-gradient(#fbeecb, #ead6a2); border: 3px solid var(--wood); border-radius: 16px;
   padding: 12px; color: var(--ink); z-index: 30;
   box-shadow: 0 10px 40px rgba(30, 16, 4, 0.55), inset 0 0 0 2px #fff6e0;
   animation: sheetup 0.18s;
 }
+/* always-on combat-input picker — small square numbered buttons, top-centre */
+#combat-modes {
+  position: absolute; top: calc(6px + env(safe-area-inset-top)); left: 50%;
+  transform: translateX(-50%);
+  display: flex; gap: 6px; z-index: 21; pointer-events: none;
+}
+.cmode-btn {
+  pointer-events: auto;
+  width: 36px; height: 36px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(#f3dfb0, #e2c286); color: var(--ink);
+  border: 2px solid var(--wood); border-radius: 10px;
+  font-size: 16px; font-weight: 800; font-variant-numeric: tabular-nums;
+  box-shadow: 0 3px 0 var(--wood-dark), inset 0 1px 0 #fff7e4;
+}
+.cmode-btn:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--wood-dark); }
+.cmode-btn.on {
+  background: linear-gradient(#ffd88c, #f0ad46); border-color: var(--gold);
+  box-shadow: 0 3px 0 #a9761f, inset 0 0 0 2px #fff3d0;
+}
+.cmode-desc { margin-top: 6px; margin-bottom: 4px; }
+.admin-slider.cslider { flex-direction: column; align-items: stretch; gap: 3px; margin-top: 6px; }
+.admin-slider.cslider label { font-size: 12px; font-weight: 800; color: var(--ink-soft); }
+.admin-slider.cslider label b { color: var(--gold); }
 .admin-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
 .admin-head b { font-size: 16px; }
 .admin-head span { font-size: 11px; color: var(--ink-soft); }

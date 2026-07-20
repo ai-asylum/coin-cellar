@@ -57,13 +57,14 @@ export const ITEMS = {
   meat:     { name: "Roast Meat",       icon: "meat",      base: 18,  tier: 1, heal: 2 },
   rathide:  { name: "Rat Hide",         icon: "rathide",   base: 6,   tier: 1 },
   // ---- wild forage: edible bits smashed out of the meadow scenery around
-  // town (flower patches, berry bushes, nut saplings). No colour PNG art —
-  // they render from their own tiny procedural mesh in-world (`proc`) and an
-  // inline SVG glyph in the bag (see core/icons.js). All food you can eat or
-  // sell, like the herbs and mushrooms foraged down in the cellar.
-  flower:   { name: "Honey Blossom",    icon: "flower",    base: 6,   tier: 1, heal: 1, proc: true },
-  berries:  { name: "Wild Berries",     icon: "berries",   base: 7,   tier: 1, heal: 1, proc: true },
-  nuts:     { name: "Forest Nuts",      icon: "nuts",      base: 9,   tier: 1, heal: 1, proc: true },
+  // town (flower patches, berry bushes, nut saplings). Like the rest of the
+  // wares they carry their own colour PNG art (public/items/<icon>.png), shown
+  // as a billboarded sprite in-world and in the bag. All food you can eat or
+  // sell, like the herbs and mushrooms foraged down in the cellar. Their tiny
+  // procedural meshes (below) survive only for the admin catalogue preview.
+  flower:   { name: "Honey Blossom",    icon: "flower",    base: 6,   tier: 1, heal: 1 },
+  berries:  { name: "Wild Berries",     icon: "berries",   base: 7,   tier: 1, heal: 1 },
+  nuts:     { name: "Forest Nuts",      icon: "nuts",      base: 9,   tier: 1, heal: 1 },
   egg:      { name: "Griffon Egg",      icon: "egg",       base: 40,  tier: 2 },
   key:      { name: "Brass Key",        icon: "key",       base: 52,  tier: 2 },
   // FTUE-only quest props. `quest` items show no price, offer only the story

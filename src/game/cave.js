@@ -461,9 +461,9 @@ export class Cave {
   // The player's dash swept through here: fell any rat it caught — they're
   // prey, not foes, so one hit does it. The game hook handles the loot juice
   // (and the hero's sheepish first-kill line).
-  dashHit(attacker) {
+  dashHit(attacker, reachOverride) {
     const pos = attacker.position;
-    const reach = attacker.radius + 0.5;
+    const reach = reachOverride ?? attacker.radius + 0.5;
     let hitAny = false;
     for (const rat of this.rats) {
       const c = rat.creature;

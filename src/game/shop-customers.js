@@ -206,11 +206,19 @@ export const customerMethods = {
         }
       }
       c.update(dt, elapsed);
-      // retire once they've reached the exit point beyond the street edge
-      if (p.life <= -1e8 && Math.abs(c.position.z) > this.streetRegion.alongMax + 2.4) {
-        this._freeNpc(p.npc);
-        c.dispose();
-        this.passersby = this.passersby.filter((x) => x !== p);
+      // retire once they've reached the exit point beyond the street edge. A
+      // stall watchdog is the backstop: a leaving stroller the player isn't
+      // pausing yet is making no headway (some geometry snag) is force-retired
+      // so it can never freeze into a statue on the street.
+      if (p.life <= -1e8) {
+        if (!blocking && p.curSpeed < 0.06) p._stallT = (p._stallT || 0) + dt;
+        else p._stallT = 0;
+        const R = this.streetRegion;
+        if (c.position.x > R.maxAlong + 2.4 || c.position.x < R.minAlong - 2.4 || p._stallT > 2.5) {
+          this._freeNpc(p.npc);
+          c.dispose();
+          this.passersby = this.passersby.filter((x) => x !== p);
+        }
       }
     }
   },
@@ -220,8 +228,8 @@ export const customerMethods = {
   // buildings, so a straight stroll between waypoints never clips a wall).
   _pickPasserTarget(p) {
     const R = this.streetRegion;
-    p.tx = R.crossNear + Math.random() * (R.crossFar - R.crossNear);
-    p.tz = (Math.random() - 0.5) * 2 * R.alongMax;
+    p.tx = R.minAlong + Math.random() * (R.maxAlong - R.minAlong); // along = screen X
+    p.tz = R.minCross + Math.random() * (R.maxCross - R.minCross); // across = screen Z
   },
 
   _spawnPasserby() {
@@ -230,11 +238,10 @@ export const customerMethods = {
     if (!npc) return; // no free skin right now — skip this stroller
     const seed = Math.floor(Math.random() * 1e6);
     const creature = makeCustomerBody(npc, seed);
-    // in from (and back out through) the village end — the south. The north
-    // end is capped by the cave mound, so nobody strolls out of the rocks.
-    const span = R.alongMax + 2.5;
-    creature.position.set(R.crossNear + Math.random() * (R.crossFar - R.crossNear), 0, span);
-    creature.heading = Math.PI;
+    // in from (and back out through) the village end — the RIGHT end of the road.
+    const startX = R.maxAlong + 2.5;
+    creature.position.set(startX, 0, R.minCross + Math.random() * (R.maxCross - R.minCross));
+    creature.heading = -Math.PI / 2; // walk toward −X, into the street
     this.group.add(creature);
     const p = {
       creature,
@@ -244,8 +251,11 @@ export const customerMethods = {
       curSpeed: 0, // eased actual pace, so accel/decel reads as a natural roll
       life: 10 + Math.random() * 14, // seconds of milling before they head off
       pause: 0,
-      exitX: R.crossNear + Math.random() * (R.crossFar - R.crossNear),
-      exitZ: span, // where they leave once done
+      // Aim the exit well past the despawn line (maxAlong + 2.4) so a leaving
+      // stroller walks clean through it and retires — if the target sat right on
+      // the edge they'd ease to a stop ~0.3m short and freeze there forever.
+      exitX: R.maxAlong + 5,
+      exitZ: R.minCross + Math.random() * (R.maxCross - R.minCross),
       tx: 0, tz: 0,
     };
     this._pickPasserTarget(p);
@@ -626,11 +636,10 @@ export const customerMethods = {
       return false;
     };
     cust._triedMove = false;
-    // slow to a curious amble when the player's right beside them (they turn to
-    // face the player at the end of the tick — see below)
-    const _pp = game.player.position;
-    const _nearP = Math.hypot(_pp.x - c.position.x, _pp.z - c.position.z) < NPC_NOTICE_R;
-    cust._speedMul = _nearP ? NPC_NOTICE_MUL : NPC_WALK_MUL;
+    // shop customers go about their errand at a steady pace — they don't slow to
+    // an amble or turn to face the player as they pass (that curious beat is for
+    // the ambient street crowd only, see _updatePassersby)
+    cust._speedMul = NPC_WALK_MUL;
 
     const faceSlot = (slot) =>
       (c.heading = Math.atan2(slot.pos.x - c.position.x, slot.pos.z - c.position.z));
@@ -841,12 +850,6 @@ export const customerMethods = {
       cust._navKey = null;
     }
 
-    // when the player's right beside a walking shopper, turn to face them — a
-    // little acknowledging glance as they amble past
-    if (_nearP && cust._triedMove) {
-      c.heading = Math.atan2(_pp.x - c.position.x, _pp.z - c.position.z);
-    }
-
     // slide around tables & furniture instead of walking through them
     game.collide(c.position, c.radius * 0.8, this.colliders);
     c.update(dt, elapsed);
@@ -878,7 +881,6 @@ export const customerMethods = {
     this.customers = this.customers.filter((x) => x !== cust);
     this.game.net.send({ t: "custDel", id: cust.id });
     const R = this.streetRegion;
-    const span = R.alongMax + 2.5;
     const p = {
       creature: cust.creature,
       npc: cust.npc,
@@ -887,8 +889,8 @@ export const customerMethods = {
       curSpeed: 0,
       life: 14 + Math.random() * 12, // a good long amble before they head off
       pause: 0,
-      exitX: R.crossNear + Math.random() * (R.crossFar - R.crossNear),
-      exitZ: span,
+      exitX: R.maxAlong + 5, // past the despawn line, so they walk clean off (see _spawnPasserby)
+      exitZ: R.minCross + Math.random() * (R.maxCross - R.minCross),
       tx: 0, tz: 0,
     };
     this._pickPasserTarget(p);

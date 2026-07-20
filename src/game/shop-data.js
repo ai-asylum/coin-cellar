@@ -14,6 +14,11 @@ export const ARCHETYPES = [
 export const MAX_CUSTOMERS = 6;
 export const SELLER_CHANCE = 0.3; // fraction of shoppers who come to sell, not buy
 
+// Every building (shop, cave mouth, dojo, restored house lots) is lifted this
+// far off the ground so its floor/base doesn't sit coplanar with the road and
+// pavement planes (all at y≈0) and z-fight. 2cm reads as flush but breaks the tie.
+export const BUILDING_LIFT = 0.02;
+
 // Pre-rotation dims: the town gets a quarter-turn at build time, so W is the
 // room's on-screen HEIGHT and D its on-screen WIDTH. Kept narrow (9) so the
 // whole interior fits a 9:16 portrait frame.

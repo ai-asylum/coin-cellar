@@ -34,11 +34,11 @@ GUIDE: Inspect  (arrow on the shop door)
 ME: Time to use the key that uncle left me.
 
 *The hero stays rooted on the step. The backpack pulses, an arrow over it:
-"Open the backpack". The player turns the key themselves — open the bag,
+"Open backpack". The player turns the key themselves — open the bag,
 hit USE on the Shop Key. The gates swing open and consume it. Nobody hands
 the shop over — it was already theirs.*
 
-GUIDE: (bag arrow) Open the backpack → USE the key → Step inside
+GUIDE: (bag arrow) Open backpack → USE the key → Step inside
 
 ## Scene 3½ — The Note
 

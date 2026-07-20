@@ -154,12 +154,12 @@ they came prepared.*
 > **ME** — Time to use the key that uncle left me.
 
 *The hero stays rooted on the step. Once the line clears, the backpack
-pulses under a bouncing arrow — "Open the backpack" — and the player turns
+pulses under a bouncing arrow — "Open backpack" — and the player turns
 the key themselves: open the bag, hit `Use` on the Shop Key. The gates
 swing open and consume it. The turning key is the reading of the will:
 nobody hands the shop over, because it was already theirs.*
 
-**→ GUIDE:** the bag arrow (`Open the backpack`), then `Step inside`
+**→ GUIDE:** the bag arrow (`Open backpack`), then `Step inside`
 
 - **Trigger:** proximity to the door while the shop step is active — radius
   tightened from 2.3 to 0.9, so the scene fires only when the player walks
@@ -373,7 +373,7 @@ Same dialogue; the two artifact beats became things the player *does*:
   while a bag beat is live, but the bag stays openable (that's the point).
   Set at the door line and the note pickup; cleared by using/reading.
 - **Bag attention cue:** `hud.bagAttention(label?)` pulses `#bag-btn` and
-  hangs a bouncing arrow above it — labeled "Open the backpack" at the
+  hangs a bouncing arrow above it — labeled "Open backpack" at the
   door, unlabeled at the note (the second rep is the test). Rule 8 landed
   with it: the world guide arrow hides whenever a dialogue or a freeze is
   live, so there's never more than one pointer on screen.

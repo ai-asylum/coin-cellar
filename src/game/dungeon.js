@@ -38,12 +38,9 @@ export class Dungeon {
     this.gate = null;
     this.gateOpen = false;
     this.gatePos = null; // group-local doorway centre (game offsets by DUNGEON_ORIGIN)
-    this.bossRoom = null; // world-space AABB used to lock the camera on the arena
     this.bossCenter = null;
     this.boss = null;
     this.keyChestId = -1;
-    // the summoning portal the boss rises out of when the gate is unlocked
-    this._bossPortal = null;
     // stairs conjured where the boss falls: down to the next stacked dungeon,
     // or (final boss) straight home (world-space anchor)
     this.bossStairs = null;
@@ -74,8 +71,10 @@ export class Dungeon {
     // The grid runs tall on purpose: the game is played portrait on mobile, so
     // floors sprawl along the screen's long (y) axis rather than across it.
     const GW = gen.gw, GH = isBoss ? gen.ghBoss : gen.gh;
-    // boss arena rectangle + its 2-wide doorway (only meaningful on the boss floor)
-    const BW = 9, BH = 6, BX = Math.floor((GW - BW) / 2), BY = 1;
+    // boss cell + its 2-wide doorway (only meaningful on the boss floor). The
+    // cell is just big enough to hold the keeper — it waits in here from the
+    // moment the floor loads, plainly visible through the bars.
+    const BW = 4, BH = 4, BX = Math.floor((GW - BW) / 2), BY = 1;
     const gateX = BX + Math.floor(BW / 2) - 1, gateY = BY + BH;
     const yMin = isBoss ? BY + BH + 2 : 1; // keep normal rooms clear of the arena
     const open = Array.from({ length: GH }, () => new Array(GW).fill(false));
@@ -484,15 +483,15 @@ export class Dungeon {
     this.gateOpen = false;
     this.gatePos = gc.clone();
 
-    // world-space arena bounds (for the fixed camera) + its centre
-    const bMin = cellPos(BX, BY), bMax = cellPos(BX + BW - 1, BY + BH - 1);
-    this.bossRoom = {
-      minX: bMin.x - CELL / 2 + DUNGEON_ORIGIN.x, maxX: bMax.x + CELL / 2 + DUNGEON_ORIGIN.x,
-      minZ: bMin.z - CELL / 2 + DUNGEON_ORIGIN.z, maxZ: bMax.z + CELL / 2 + DUNGEON_ORIGIN.z,
-    };
     this.bossCenter = new THREE.Vector3(center.x + DUNGEON_ORIGIN.x, 0, center.z + DUNGEON_ORIGIN.z);
-    // the boss itself stays out of the world until the gate is unlocked —
-    // the arena reads as an ominous empty room through the bars until then
+    // the keeper is placed the instant the floor loads, pacing its little cell
+    // in plain view through the bars. It stays dormant (never aggros, never
+    // attacks) until the gate is breached. Host spawns it; guests mirror it
+    // via eSnap, so this is host-authoritative only.
+    if (!this.game.net.isGuest) {
+      const boss = this.spawnEnemy("boss", (this.seed % 100000) + 54321 + this.floor * 991, dungeonIndexFor(this.floor) + 2, this.bossCenter.x, this.bossCenter.z);
+      boss.dormant = true;
+    }
   }
 
   /** Unlock the boss door: drop its colliders, start the gate rising, and wake
@@ -503,55 +502,10 @@ export class Dungeon {
     this.gateOpen = true;
     this.colliders = this.colliders.filter((c) => !this.gate.colliders.includes(c));
     this.gate.raiseT = 0;
-    // the boss doesn't just pop in — a summoning portal blooms on the arena
-    // floor and, once it's fully open, the boss heaves out of it (host spawns
-    // the actual enemy; guests mirror the portal FX + receive the boss via net).
-    if (this.isBoss && !this.boss && !this._bossPortal && this.bossCenter) this._summonBoss();
-  }
-
-  /** Bloom a fiery summoning portal at the arena centre and, after a beat, let
-   * the boss rise from it (see the _bossPortal branch in update()). Runs on
-   * host + guest so both see the entrance; only the host spawns the enemy. */
-  _summonBoss() {
-    const lx = this.bossCenter.x - DUNGEON_ORIGIN.x, lz = this.bossCenter.z - DUNGEON_ORIGIN.z;
-    const g = new THREE.Group();
-    g.position.set(lx, 0, lz);
-    const disc = new THREE.Mesh(
-      new THREE.CircleGeometry(2.0, 36).rotateX(-Math.PI / 2),
-      new THREE.MeshBasicMaterial({ color: 0xff3a24, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false })
-    );
-    disc.position.y = 0.05;
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(2.0, 2.5, 44).rotateX(-Math.PI / 2),
-      new THREE.MeshBasicMaterial({ color: 0xffb347, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false })
-    );
-    ring.position.y = 0.06;
-    g.add(disc, ring);
-    this.group.add(g);
-    const shaft = makeLightShaft({ color: 0xff5a3a, length: 5.4, topWidth: 0.6, bottomWidth: 3.0, opacity: 0.5, tilt: 0, spin: 2.4, motes: 20 });
-    shaft.position.set(lx, 3.7, lz);
-    this.group.add(shaft);
-    this.shafts.push(shaft);
-    this._bossPortal = { mesh: g, disc, ring, shaft, t: 0, spawned: false };
-    this.game.audio.telegraph?.();
-    this.game.engine.shake(0.25);
-  }
-
-  _disposeBossPortal() {
-    const bp = this._bossPortal;
-    if (!bp) return;
-    bp.disc.material.dispose();
-    bp.ring.material.dispose();
-    bp.mesh.removeFromParent();
-    this.shafts = this.shafts.filter((s) => s !== bp.shaft);
-    bp.shaft.removeFromParent();
-    this._bossPortal = null;
-  }
-
-  /** True when a world position sits inside the boss arena (camera lock test). */
-  inBossRoom(pos) {
-    const b = this.bossRoom;
-    return !!b && pos.x >= b.minX && pos.x <= b.maxX && pos.z >= b.minZ && pos.z <= b.maxZ;
+    // the keeper has been waiting in its cell — the breached gate wakes it and
+    // it storms out after whoever opened the door (host drives the AI; guests
+    // mirror the chase via eSnap).
+    if (this.isBoss && this.boss) { this.boss.dormant = false; this.boss.woke = true; }
   }
 
   /** x/z are WORLD coordinates. */
@@ -674,34 +628,6 @@ export class Dungeon {
       bs.ring.material.opacity = 0.6 + Math.sin(elapsed * 3 + 1) * 0.15;
     }
 
-    // the boss summoning portal: bloom open, spit the boss out, then fade away
-    if (this._bossPortal) {
-      const bp = this._bossPortal;
-      bp.t += dt;
-      bp.mesh.rotation.y += dt * 2.6;
-      const grow = Math.min(1, bp.t / 0.5);
-      const s = 0.2 + grow * 0.8;
-      bp.mesh.scale.set(s, 1, s);
-      const puls = 0.5 + Math.sin(elapsed * 12) * 0.22;
-      bp.disc.material.opacity = grow * 0.6 * puls;
-      bp.ring.material.opacity = grow * 0.85;
-      bp.shaft.userData.update(dt, elapsed);
-      if (Math.random() < 0.7)
-        this.game.particles.burst(_v.copy(bp.mesh.position).setY(0.2), { color: 0xff6a3a, n: 3, speed: 1.6, up: 4, life: 0.7, size: 0.85 });
-      // portal fully open — the boss rises out (host authoritative)
-      if (!bp.spawned && bp.t >= 1.4) {
-        bp.spawned = true;
-        if (!this.game.net.isGuest && this.isBoss && !this.boss) {
-          const e = this.spawnEnemy("boss", (this.seed % 100000) + 54321 + this.floor * 991, dungeonIndexFor(this.floor) + 2, this.bossCenter.x, this.bossCenter.z);
-          e.creature.animator.squash.kick(6);
-        }
-        this.game.particles.burst(_v.copy(this.bossCenter).setY(0.2), { color: 0xff5a3a, n: 30, speed: 6, up: 3, life: 0.9, size: 1.4 });
-        this.game.engine.shake(0.4);
-        this.game.audio.kill?.();
-      }
-      if (bp.t >= 2.1) this._disposeBossPortal();
-    }
-
     // the boss gate slides up out of sight once it's been unlocked
     if (this.gate && this.gate.raiseT >= 0) {
       this.gate.raiseT += dt;
@@ -814,12 +740,10 @@ export class Dungeon {
     this.gate = null;
     this.gateOpen = false;
     this.gatePos = null;
-    this.bossRoom = null;
     this.bossCenter = null;
     this.boss = null;
     this.keyChestId = -1;
     this.isBoss = false;
-    this._bossPortal = null;
     this.bossStairs = null;
   }
 }

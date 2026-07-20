@@ -6,7 +6,7 @@
 // catalogue always reflects the current game — it can't drift.
 import * as THREE from "three";
 
-import { ITEMS, itemSprite, itemMesh, EQUIP_DROPS, itemKind, ITEM_KINDS, ITEM_KIND_LABELS } from "../game/items.js";
+import { ITEMS, itemSprite, itemMesh, EQUIP_DROPS, ITEM_KINDS, ITEM_KIND_LABELS } from "../game/items.js";
 import { makeChest, makeGate, makeStairs, makeDescent } from "../game/dungeon-geometry.js";
 import { makeCaveMouth, buildLotParts } from "../game/shop-build.js";
 import layoutData from "../game/layout.json";
@@ -14,11 +14,13 @@ import { weaponMesh } from "../game/gear.js";
 import { ENEMY_KINDS, DUNGEON_MIX, HOLE_THEMES, DUNGEON_LOOT, BOSSES, bossDefFor, FLOORS_PER_DUNGEON } from "../game/dungeon.js";
 import { HOLE_DEFS } from "../game/cave.js";
 import { ARCHETYPES } from "../game/shop.js";
-import { NPCS, CROWD_NPCS, PERSONALITIES, personalityName, personalityArchetype, personalityTaste, REFLECTION_BUCKETS, SPECIAL_REACTIONS, TIMES_OF_DAY } from "../game/npc-data.js";
+import { NPCS, CROWD_NPCS, PERSONALITIES, personalityName, personalityArchetype, personalityTaste, REFLECTION_BUCKETS, SPECIAL_REACTIONS, TIMES_OF_DAY, npcIntroLines } from "../game/npc-data.js";
 import { Creature } from "../chargen/creature.js";
 import { BlockyCreature, variantForSeed } from "../chargen/blocky.js";
 import { CHAR_VARIANTS, loadCharacters } from "../chargen/assets.js";
+import { mountFarmViewer } from "../chargen/voxel/farmViewer.js";
 import { icon, itemIcon } from "../core/icons.js";
+import { ATTACK_MODES, COMBAT_SLIDERS, combat, attackMode, setCombatSettings, saveCombatSettings } from "../game/combat-settings.js";
 
 // --- helpers ---------------------------------------------------------------
 
@@ -164,9 +166,18 @@ class View {
 
 let views = [];
 
+// The Farm tab runs its own self-contained WebGL viewer (own canvas + rAF),
+// separate from the shared scissor renderer that drives the .model3d cards.
+// render() calls this before drawing a new tab so leaving Farm tears it down.
+let _farmDispose = null;
+
 function disposeViews() {
   for (const v of views) v.dispose();
   views = [];
+  if (_farmDispose) {
+    _farmDispose();
+    _farmDispose = null;
+  }
 }
 
 function renderLoop() {
@@ -489,43 +500,150 @@ function buildCustomers() {
   });
 }
 
-// The named townsfolk: every shopper and street passer-by is one of these
-// residents — a fixed skin, a personality voice, and their own small talk.
-// Grouped by personality so the temperaments read at a glance.
-function buildNpcs() {
-  const cards = [];
-  const order = Object.keys(PERSONALITIES);
-  const byPersona = new Map(order.map((k) => [k, []]));
-  for (const npc of NPCS) (byPersona.get(npc.personality) || []).push(npc);
+// The named townsfolk. Every shopper and street passer-by is one of these
+// residents, and everything the game knows about a person now lives on a single
+// full-width card: their skin and personality voice up front, and behind
+// per-card tabs their small talk (by time of day), their first-meeting intro,
+// their shopping tastes, and what they say after a trip. One resident per row.
 
-  for (const key of order) {
-    const persona = PERSONALITIES[key];
-    const group = byPersona.get(key);
-    if (!group || !group.length) continue;
-    cards.push({ section: `${persona.name} — ${persona.blurb} · shops as ${persona.archetype}`, icon: icon(persona.mood) });
-    for (const npc of group) {
-      const badges = [{ text: personalityName(npc), kind: "" }, { text: personalityArchetype(npc), kind: "" }];
-      if (npc.reserved) badges.push({ text: "STORY CAMEO", kind: "boss" });
-      cards.push({
-        title: npc.name,
-        id: `${npc.id} · character-${npc.variant}`,
-        icon: icon(persona.mood),
-        badges,
-        visual: `<div class="model3d" data-kind="blocky" data-variant="${npc.variant}"></div>`,
-        stats: [
-          ["Personality", personalityName(npc)],
-          ["Shops as", personalityArchetype(npc)],
-          ["Skin", `character-${npc.variant}`],
-          ["Role", npc.reserved ? "Shopper / passer-by (+ story cameo)" : "Shopper / passer-by"],
-        ],
-        lineGroups: TIMES_OF_DAY.map((t) => ({
-          label: `${t[0].toUpperCase()}${t.slice(1)}`,
-          lines: npc.lines?.[t] || [],
-        })),
-      });
-    }
-  }
-  return cards;
+// A resident's shopper archetype definition (markup range + offer chance), or
+// null if their personality maps to an unknown archetype.
+function npcArchetypeDef(npc) {
+  const name = personalityArchetype(npc);
+  return ARCHETYPES.find((a) => a.name === name) || null;
+}
+
+// A single quoted-lines list (an NPC's spoken bubbles), or an em-dash if empty.
+function linesList(lines) {
+  return (lines || []).length
+    ? `<ul class="card-lines">${lines.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>`
+    : `<p class="npc-empty">—</p>`;
+}
+
+// Grouped line columns (time-of-day buckets, reflection outcomes…) laid out
+// across the row so a card uses its full width instead of one tall column.
+function lineColumns(groups) {
+  const cols = groups
+    .filter((g) => (g.lines || []).length)
+    .map((g) => `<div class="npc-col"><span class="npc-col-h">${esc(g.label)}</span>${linesList(g.lines)}</div>`)
+    .join("");
+  return cols ? `<div class="npc-cols">${cols}</div>` : `<p class="npc-empty">No lines yet.</p>`;
+}
+
+// The four kind multipliers as little labelled bars — >1 draws them in (green),
+// <1 turns their nose up (red). Bar fills relative to a 2× ceiling.
+function tasteBars(taste) {
+  return `<div class="taste-bars">${ITEM_KINDS.map((k) => {
+    const m = taste.kinds[k] ?? 1;
+    const cls = m > 1.05 ? "up" : m < 0.95 ? "down" : "even";
+    const w = Math.max(4, Math.min(100, Math.round((m / 2) * 100)));
+    return `<div class="taste-bar taste-bar--${cls}">
+      <span class="taste-bar-k">${esc(ITEM_KIND_LABELS[k])}</span>
+      <span class="taste-bar-track"><i style="width:${w}%"></i></span>
+      <span class="taste-bar-v">${m.toFixed(2)}×</span>
+    </div>`;
+  }).join("")}</div>`;
+}
+
+// The Tastes panel: temperament blurb, the kind-appeal bars, and the shopper
+// numbers (archetype, tolerated markup, offer chance) plus the tier lean.
+function npcTastePanel(npc) {
+  const persona = PERSONALITIES[npc.personality];
+  const taste = personalityTaste(npc);
+  const { favours, avoids, leanTxt } = tasteSummary(taste);
+  const arch = npcArchetypeDef(npc);
+  const shopStats = arch
+    ? [
+        ["Shops as", arch.name],
+        ["Markup they tolerate", `${arch.lo.toFixed(2)}× – ${arch.hi.toFixed(2)}×`],
+        ["Chance to make an offer", Math.round(arch.buy * 100) + "%"],
+      ]
+    : [["Shops as", personalityArchetype(npc)]];
+  const stats = [...shopStats, ["Tier lean", leanTxt], ["Favours", favours.join(", ") || "—"], ["Turns up nose at", avoids.join(", ") || "—"]];
+  return `
+    <p class="npc-blurb">${esc(persona.blurb)}</p>
+    ${tasteBars(taste)}
+    <div class="stats">${stats.map(([k, v]) => stat(k, v)).join("")}</div>`;
+}
+
+// The signature-item reactions for this voice: bespoke lines for the handful of
+// items the temperament fixates on (see SPECIAL_REACTIONS). Empty if it has none.
+function npcSignaturePanel(npc) {
+  const specials = SPECIAL_REACTIONS[npc.personality] || {};
+  const items = Object.entries(specials);
+  if (!items.length) return "";
+  return items
+    .map(([itemId, byBucket]) => {
+      const it = ITEMS[itemId];
+      const groups = REFLECTION_BUCKETS
+        .filter((b) => byBucket[b.id]?.length)
+        .map((b) => ({ label: b.label, lines: byBucket[b.id] }));
+      return `<div class="npc-signature">
+        <div class="npc-signature-head">${itemIcon(itemId)}<b>${esc(it?.name || itemId)}</b><span class="badge boss">SIGNATURE</span></div>
+        ${lineColumns(groups)}
+      </div>`;
+    })
+    .join("");
+}
+
+// The After-shopping panel: the generic per-outcome reflection lines, then the
+// taste-hint "wishlist" asides they follow up with, then the bespoke
+// signature-item reactions if this resident has any.
+function npcReflectPanel(npc) {
+  const generic = lineColumns(REFLECTION_BUCKETS.map((b) => ({ label: b.label, lines: npc.buyLines?.[b.id] || [] })));
+  const wish = npc.wishLines?.length
+    ? `<div class="npc-sub-h">Wishlist hint (what to stock)</div>${lineColumns([{ label: "Hint", lines: npc.wishLines }])}`
+    : "";
+  const sig = npcSignaturePanel(npc);
+  return `${generic}${wish}${sig ? `<div class="npc-sub-h">Signature items</div>${sig}` : ""}`;
+}
+
+// One full-width card per resident: portrait + identity on the left, and the
+// four content tabs (small talk / first meeting / tastes / after shopping) on
+// the right. The tabs are wired up by mountCardTabs after render.
+function characterCard(npc) {
+  const persona = PERSONALITIES[npc.personality];
+  const badges = [{ text: personalityName(npc), kind: "" }, { text: personalityArchetype(npc), kind: "" }];
+  if (npc.reserved) badges.push({ text: "STORY CAMEO", kind: "boss" });
+  const intro = npcIntroLines(npc);
+  const panels = [
+    {
+      id: "talk",
+      label: "Small talk",
+      body: lineColumns(TIMES_OF_DAY.map((t) => ({ label: `${t[0].toUpperCase()}${t.slice(1)}`, lines: npc.lines?.[t] || [] }))),
+    },
+    {
+      id: "intro",
+      label: "First meeting",
+      body: intro.length
+        ? `<ul class="card-lines">${intro.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>`
+        : `<p class="npc-empty">Opens straight into small talk — no special intro.</p>`,
+    },
+    { id: "taste", label: "Tastes", body: npcTastePanel(npc) },
+    { id: "reflect", label: "After shopping", body: npcReflectPanel(npc) },
+  ];
+  return `
+    <article class="npc-card">
+      <div class="npc-portrait">
+        <div class="model3d" data-kind="blocky" data-variant="${npc.variant}"></div>
+        <h3>${icon(persona.mood)} ${esc(npc.name)}</h3>
+        <code class="card-id">${esc(npc.id)} · character-${npc.variant}</code>
+        <div class="npc-badges">${badges.map((b) => badge(b.text, b.kind)).join("")}</div>
+      </div>
+      <div class="npc-detail">
+        <div class="npc-tabs" role="tablist">
+          ${panels.map((p, i) => `<button class="npc-tab${i === 0 ? " active" : ""}" data-ct="${p.id}">${esc(p.label)}</button>`).join("")}
+        </div>
+        <div class="npc-panels">
+          ${panels.map((p, i) => `<div class="npc-panel${i === 0 ? " active" : ""}" data-cp="${p.id}">${p.body}</div>`).join("")}
+        </div>
+      </div>
+    </article>`;
+}
+
+function buildNpcs() {
+  const html = `<div class="npc-list">${NPCS.map(characterCard).join("")}</div>`;
+  return { html, n: NPCS.length };
 }
 
 // A short human summary of a personality's item taste: which kinds tempt them
@@ -544,66 +662,6 @@ function tasteSummary(taste) {
     : lean < -0.3 ? `leans thrifty (${lean.toFixed(1)})`
     : "no strong tier lean";
   return { favours, avoids, leanTxt };
-}
-
-// Tastes & reasoning: what draws each personality to (or away from) a kind of
-// item, and the lines every resident says next time you chat after they've been
-// shopping — a "loved it", a whim, a "wanted it but…", or "nothing caught me".
-// Grouped by personality (the taste is shared) with the buy-lines per resident.
-function buildTastes() {
-  const cards = [];
-  const order = Object.keys(PERSONALITIES);
-  const byPersona = new Map(order.map((k) => [k, []]));
-  for (const npc of NPCS) (byPersona.get(npc.personality) || []).push(npc);
-
-  for (const key of order) {
-    const persona = PERSONALITIES[key];
-    const group = byPersona.get(key);
-    if (!group || !group.length) continue;
-    const taste = personalityTaste({ personality: key });
-    const { favours, avoids, leanTxt } = tasteSummary(taste);
-    cards.push({
-      section: `${persona.name} — favours ${favours.join(", ") || "everything evenly"} · ${leanTxt}`,
-      icon: icon(persona.mood),
-    });
-    // signature items: the ones this temperament reacts to with a bespoke line
-    // when they buy (see SPECIAL_REACTIONS). Shown once per personality since the
-    // special voice is shared across everyone who shares that temperament.
-    const specials = SPECIAL_REACTIONS[key] || {};
-    for (const [itemId, byBucket] of Object.entries(specials)) {
-      const it = ITEMS[itemId];
-      cards.push({
-        title: `${it?.name || itemId}`,
-        id: `signature item · ${itemId}`,
-        icon: itemIcon(itemId),
-        badges: [{ text: "SIGNATURE ITEM", kind: "boss" }, { text: ITEM_KIND_LABELS[itemKind(itemId)], kind: "" }],
-        tier: it?.tier,
-        lineGroups: REFLECTION_BUCKETS
-          .filter((b) => byBucket[b.id]?.length)
-          .map((b) => ({ label: b.label, lines: byBucket[b.id] })),
-      });
-    }
-    for (const npc of group) {
-      cards.push({
-        title: npc.name,
-        id: `${npc.id} · character-${npc.variant}`,
-        icon: icon(persona.mood),
-        badges: [{ text: personalityName(npc), kind: "" }, { text: personalityArchetype(npc), kind: "" }],
-        visual: `<div class="model3d" data-kind="blocky" data-variant="${npc.variant}"></div>`,
-        stats: [
-          ...ITEM_KINDS.map((k) => [ITEM_KIND_LABELS[k], `${(taste.kinds[k] ?? 1).toFixed(2)}×`]),
-          ["Tier lean", leanTxt],
-          ["Favours", favours.join(", ") || "—"],
-          ["Turns up nose at", avoids.join(", ") || "—"],
-        ],
-        lineGroups: REFLECTION_BUCKETS.map((b) => ({
-          label: b.label,
-          lines: npc.buyLines?.[b.id] || [],
-        })),
-      });
-    }
-  }
-  return cards;
 }
 
 // The character art roster: the Kenney "Blocky Characters" pack the hero and
@@ -872,6 +930,109 @@ function mountPreviews(root) {
   });
 }
 
+// Wire up the per-card content tabs (Townsfolk cards): clicking a tab shows its
+// matching panel and hides the siblings. Scoped per card so cards are independent.
+function mountCardTabs(root) {
+  root.querySelectorAll(".npc-card").forEach((cardEl) => {
+    const tabs = [...cardEl.querySelectorAll(".npc-tab")];
+    const panels = [...cardEl.querySelectorAll(".npc-panel")];
+    tabs.forEach((tab) => {
+      tab.addEventListener("click", () => {
+        const id = tab.dataset.ct;
+        tabs.forEach((t) => t.classList.toggle("active", t === tab));
+        panels.forEach((p) => p.classList.toggle("active", p.dataset.cp === id));
+      });
+    });
+  });
+}
+
+// --- combat settings (editable) --------------------------------------------
+// The one tab that WRITES: mirrors the in-game ` panel's combat-input section.
+// Picks the attack mode + tunes its knobs, POSTing to /api/combat-settings so
+// the change lands in src/game/combat-settings.json (dev server only).
+
+function combatCardHtml() {
+  const mode = attackMode();
+  const modeBtns = ATTACK_MODES.map((m) => `
+    <button class="cmode-card${m.id === mode ? " on" : ""}" data-cmode="${m.id}">
+      <b>${esc(m.label)}</b>
+      <span>${esc(m.desc)}</span>
+    </button>`).join("");
+  const sliders = (COMBAT_SLIDERS[mode] || []).map((d) => {
+    const val = combat[mode]?.[d.key];
+    return `<label class="cset-row">
+      <span class="cset-label">${esc(d.label)}</span>
+      <input type="range" data-cset="${mode}.${d.key}" min="${d.min}" max="${d.max}" step="${d.step}" value="${val}">
+      <b class="cset-val" data-cval="${mode}.${d.key}">${val}</b>
+    </label>`;
+  }).join("");
+  const knobs = sliders
+    ? `<div class="cset-block"><h4>Tuning</h4>${sliders}</div>`
+    : `<div class="cset-block"><p class="cset-none">This mode has no extra knobs — the classic dash strike.</p></div>`;
+  return `
+    <div class="combat-modes">${modeBtns}</div>
+    ${knobs}
+    <p class="cset-status" id="combat-status">Changes save to <code>src/game/combat-settings.json</code> (dev server).</p>`;
+}
+
+function buildCombat() {
+  return { html: `<div class="combat-settings" id="combat-settings">${combatCardHtml()}</div>`, n: ATTACK_MODES.length };
+}
+
+// --- farm animals (ported voxel character viewer) --------------------------
+// A self-contained 3-pane viewer (animations / stage / roster + timeline)
+// for the barnyard livestock ported from the spellwright project's voxel
+// character system — cow, chicken, pig, piglet, sheep. See
+// src/chargen/voxel/ for the ported models, rigs, motion, and renderer.
+
+const FARM_ANIMAL_COUNT = 5;
+
+function buildFarm() {
+  return {
+    html: `
+      <div class="admin-banner">
+        Voxel livestock ported from the <code>spellwright</code> character system
+        (<code>src/chargen/voxel/</code>) — cow, chicken, pig, piglet, sheep.
+        Pick an animation on the left; play/pause/scrub via the timeline.
+      </div>
+      <div id="farm-viewport" class="farm-viewport"></div>`,
+    n: FARM_ANIMAL_COUNT,
+  };
+}
+
+function mountFarm(root) {
+  const el = root.querySelector("#farm-viewport");
+  if (!el) return;
+  _farmDispose = mountFarmViewer(el);
+}
+
+function mountCombat(root) {
+  const box = root.querySelector("#combat-settings");
+  if (!box) return;
+  const status = (msg) => { const s = box.querySelector("#combat-status"); if (s) s.textContent = msg; };
+  const persist = () => saveCombatSettings().then((ok) =>
+    status(ok ? "Saved to src/game/combat-settings.json." : "Session only — dev server not reachable."));
+  box.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-cmode]");
+    if (!btn) return;
+    setCombatSettings({ attackMode: btn.dataset.cmode });
+    box.innerHTML = combatCardHtml();
+    persist();
+  });
+  box.addEventListener("input", (e) => {
+    const t = e.target.closest("input[data-cset]");
+    if (!t) return;
+    const [m, key] = t.dataset.cset.split(".");
+    const v = +t.value;
+    setCombatSettings({ [m]: { [key]: v } });
+    const lbl = box.querySelector(`[data-cval="${m}.${key}"]`);
+    if (lbl) lbl.textContent = v;
+  });
+  box.addEventListener("change", (e) => {
+    if (e.target.closest("input[data-cset]")) persist();
+  });
+}
+
 // --- tabs ------------------------------------------------------------------
 
 const TABS = [
@@ -880,11 +1041,12 @@ const TABS = [
   { id: "enemies", icon: "ogre", label: "Monsters", build: buildEnemies, unit: "monster" },
   { id: "customers", icon: "faceHappy", label: "Shoppers", build: buildCustomers, unit: "archetype" },
   { id: "npcs", icon: "people", label: "Townsfolk", build: buildNpcs, unit: "resident" },
-  { id: "tastes", icon: "faceMonocle", label: "Tastes", build: buildTastes, unit: "resident" },
   { id: "cast", icon: "people", label: "Cast", build: buildCast, unit: "character" },
+  { id: "farm", icon: "people", label: "Farm", build: buildFarm, unit: "animal", mount: mountFarm },
   { id: "floors", icon: "hole", label: "Dungeon", build: buildFloors, unit: "floor" },
   { id: "town", icon: "shop", label: "Town", build: buildTown, unit: "model" },
   { id: "prims", icon: "box", label: "Primitives", build: buildPrimitives, unit: "model" },
+  { id: "combat", icon: "swords", label: "Combat", build: buildCombat, unit: "mode", mount: mountCombat },
 ];
 
 function render(tabId) {
@@ -907,6 +1069,8 @@ function render(tabId) {
     </div>
     ${isBlock ? built.html : grid(built)}`;
   mountPreviews(body);
+  mountCardTabs(body);
+  tab.mount?.(body);
 
   // NB: index.html sets <base href="/">, so a bare "#id" would resolve against
   // "/" and drop the /admin/ path — keep the current path explicitly.

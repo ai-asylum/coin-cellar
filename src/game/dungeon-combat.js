@@ -100,7 +100,9 @@ export const combatMethods = {
   dashHit(attacker, dmg, game, opts = {}) {
     const { crit = false, knock = 1.4, hitIds = null } = opts;
     const pos = attacker.position;
-    const reach = attacker.radius + 0.5;
+    // strike-in-place passes a wider reach (the hero doesn't travel into the
+    // foe); the moving dash leaves it undefined for the body-to-body default.
+    const reach = opts.reach ?? attacker.radius + 0.5;
     let hitAny = false;
     for (const e of this.enemies) {
       if (e.deadT >= 0 || e.hitCd > 0) continue;
@@ -308,7 +310,6 @@ export const combatMethods = {
       game.onBossDefeated?.(e.creature.position);
       const bx = e.creature.position.x, bz = e.creature.position.z;
       const rl = rng(e.seed + 5);
-      const b = this.bossRoom;
       // bosses are the only source of gear: two distinct equipment pieces, plus
       // a guaranteed crown, a healing potion and a fistful of top-tier spoils
       let g1 = pick(rl, EQUIP_DROPS), g2 = pick(rl, EQUIP_DROPS);
@@ -325,13 +326,10 @@ export const combatMethods = {
         // showering across the whole arena (which made loot easy to miss).
         const a = (i / spoils.length) * Math.PI * 2 + rl() * 0.7;
         const rad = 0.9 + rl() * 1.1; // ~1–2 units out, a snug pile
-        let x = bx + Math.sin(a) * rad;
-        let z = bz + Math.cos(a) * rad;
-        // still keep drops off the arena walls when we know the room bounds
-        if (b) {
-          x = Math.min(b.maxX - 1.6, Math.max(b.minX + 1.6, x));
-          z = Math.min(b.maxZ - 1.6, Math.max(b.minZ + 1.6, z));
-        }
+        // land close to the boss corpse, wherever it fell (the keeper hunts out
+        // in the open now, so the hoard clusters by the body, not the old cell)
+        const x = bx + Math.sin(a) * rad;
+        const z = bz + Math.cos(a) * rad;
         this.spawnDrop(id, x, z, null, { flyFrom: { x: bx, z: bz } });
       });
       return;

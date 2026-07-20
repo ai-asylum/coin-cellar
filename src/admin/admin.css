@@ -345,6 +345,185 @@ body {
   margin-bottom: 2px;
 }
 
+/* ---------- townsfolk: one full-width card per resident ---------- */
+/* each card packs everything about a person — small talk, first-meeting intro,
+   shopping tastes, and after-trip reflections — behind its own inner tabs, with
+   the portrait + identity pinned to the left and the content filling the row. */
+.npc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.npc-card {
+  display: flex;
+  gap: 20px;
+  background: linear-gradient(180deg, var(--panel) 0%, var(--bg-2) 100%);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  transition: border-color 0.15s ease;
+}
+.npc-card:hover { border-color: var(--accent); }
+
+.npc-portrait {
+  flex: 0 0 210px;
+  width: 210px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.npc-portrait .model3d {
+  height: 180px;
+  margin-bottom: 2px;
+}
+.npc-portrait h3 {
+  font-size: 18px;
+  font-weight: 900;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.npc-portrait h3 .ic { width: 1em; height: 1em; }
+.npc-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.npc-detail {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* the per-card content tabs — smaller than the top-level page tabs */
+.npc-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  border-bottom: 1px solid var(--edge);
+  padding-bottom: 12px;
+}
+.npc-tab {
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--ink-dim);
+  background: var(--panel-2);
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.npc-tab:hover { color: var(--ink); border-color: var(--accent); }
+.npc-tab.active {
+  color: #fff;
+  background: linear-gradient(180deg, var(--accent) 0%, var(--accent-d) 100%);
+  border-color: var(--accent);
+}
+
+.npc-panel { display: none; }
+.npc-panel.active { display: block; }
+
+/* line groups laid out across the row — time-of-day buckets side by side, etc. */
+.npc-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+.npc-col-h {
+  display: block;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  opacity: 0.8;
+  margin-bottom: 6px;
+}
+.npc-empty {
+  font-size: 13px;
+  font-style: italic;
+  color: var(--ink-dim);
+  opacity: 0.8;
+}
+.npc-blurb {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--ink-dim);
+}
+.npc-sub-h {
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  margin: 4px 0 -2px;
+}
+
+/* the kind-appeal bars on the Tastes tab */
+.taste-bars {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 8px 18px;
+}
+.taste-bar {
+  display: grid;
+  grid-template-columns: 68px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+.taste-bar-k { color: var(--ink-dim); }
+.taste-bar-track {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  border: 1px solid var(--edge);
+  overflow: hidden;
+}
+.taste-bar-track i {
+  display: block;
+  height: 100%;
+  background: var(--ink-dim);
+}
+.taste-bar-v { font-weight: 900; font-variant-numeric: tabular-nums; }
+.taste-bar--up .taste-bar-track i { background: var(--tier2); }
+.taste-bar--up .taste-bar-v { color: var(--tier2); }
+.taste-bar--down .taste-bar-track i { background: #ff7da8; }
+.taste-bar--down .taste-bar-v { color: #ff7da8; }
+
+/* a signature-item reaction block on the After-shopping tab */
+.npc-signature {
+  border: 1px solid var(--edge);
+  border-radius: 10px;
+  background: rgba(150, 120, 220, 0.06);
+  padding: 12px 14px;
+  margin-top: 10px;
+}
+.npc-signature-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 900;
+  margin-bottom: 10px;
+}
+.npc-signature-head .ic { width: 22px; height: 22px; }
+
+@media (max-width: 720px) {
+  .npc-card { flex-direction: column; gap: 14px; }
+  .npc-portrait { flex-basis: auto; width: 100%; }
+  .npc-portrait .model3d { height: 200px; }
+}
+
 /* ---------- 3D model preview ---------- */
 .model3d {
   width: 100%;
@@ -540,4 +719,165 @@ body {
   #admin-app { padding: 18px 14px 48px; }
   .loot-table { font-size: 12px; }
   .loot-table th, .loot-table td { padding: 8px 8px; }
+}
+
+/* --- combat settings (editable tab) -------------------------------------- */
+.combat-settings { max-width: 720px; }
+.combat-modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.cmode-card {
+  display: flex; flex-direction: column; gap: 5px; text-align: left; cursor: pointer;
+  background: var(--panel); border: 2px solid var(--edge); border-radius: var(--radius);
+  padding: 12px 14px; color: var(--ink-dim); font: inherit; transition: border-color 0.12s, background 0.12s;
+}
+.cmode-card:hover { border-color: var(--accent); }
+.cmode-card b { color: var(--ink); font-size: 15px; }
+.cmode-card span { font-size: 12.5px; line-height: 1.45; }
+.cmode-card.on { border-color: var(--gold); background: var(--panel-2); box-shadow: inset 0 0 0 1px var(--gold); }
+.cmode-card.on b { color: var(--gold); }
+.cset-block { margin-top: 20px; }
+.cset-block h4 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--ink-dim); margin-bottom: 10px; }
+.cset-row { display: grid; grid-template-columns: 180px 1fr 52px; align-items: center; gap: 12px; margin-bottom: 12px; }
+.cset-label { font-weight: 700; color: var(--ink); }
+.cset-row input[type="range"] { width: 100%; accent-color: var(--gold); }
+.cset-val { color: var(--gold); font-weight: 900; text-align: right; font-variant-numeric: tabular-nums; }
+.cset-none { color: var(--ink-dim); font-style: italic; }
+.cset-status { margin-top: 18px; font-size: 12.5px; color: var(--ink-dim); }
+.cset-status code { background: var(--panel-2); border: 1px solid var(--edge); border-radius: 5px; padding: 1px 6px; color: var(--gold); }
+@media (max-width: 560px) {
+  .cset-row { grid-template-columns: 1fr 44px; }
+  .cset-row .cset-label { grid-column: 1 / -1; }
+}
+
+/* ---------- farm viewer (ported voxel character tab) ---------- */
+.admin-banner {
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  color: var(--ink-dim);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+.admin-banner code {
+  color: var(--gold);
+  background: var(--bg-2);
+  padding: 1px 5px;
+  border-radius: 5px;
+}
+
+.farm-viewport {
+  height: min(70vh, 640px);
+}
+
+/* Three-column grid: animations | stage | roster, with a transport row
+   spanning the full width beneath. */
+.farm-viewer {
+  display: grid;
+  grid-template-columns: 190px 1fr 210px;
+  grid-template-rows: 1fr auto;
+  gap: 12px;
+  height: 100%;
+}
+
+.farm-list,
+.farm-roster {
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  padding: 10px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.farm-list-title {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-dim);
+  padding: 2px 4px 6px;
+}
+
+.farm-item {
+  appearance: none;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--edge);
+  background: var(--bg-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+.farm-item:hover { border-color: var(--accent); }
+.farm-item.active {
+  border-color: var(--accent);
+  background: linear-gradient(180deg, var(--accent) 0%, var(--accent-d) 100%);
+  color: #fff;
+}
+
+.farm-stage {
+  position: relative;
+  background: radial-gradient(120% 120% at 50% 0%, var(--panel-2) 0%, var(--bg) 100%);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  overflow: hidden;
+  min-height: 260px;
+}
+.farm-canvas { display: block; width: 100%; height: 100%; }
+
+.farm-addons-heading { margin-top: 10px; }
+.farm-addons-list { display: flex; flex-direction: column; gap: 4px; }
+.farm-addon-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--edge);
+  color: var(--ink);
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+.farm-addon-item input { accent-color: var(--accent); }
+
+.farm-transport {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  padding: 8px 14px;
+}
+.farm-play {
+  appearance: none;
+  width: 40px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid var(--edge);
+  background: var(--bg-2);
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.farm-play:hover { border-color: var(--accent); }
+.farm-scrubber { flex: 1; accent-color: var(--accent); cursor: pointer; }
+.farm-time {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-dim);
+  font-size: 0.85rem;
+  min-width: 96px;
+  text-align: right;
+}
+
+@media (max-width: 720px) {
+  .farm-viewer { grid-template-columns: 1fr; grid-template-rows: auto 320px auto auto; }
 }

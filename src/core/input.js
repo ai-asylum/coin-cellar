@@ -11,6 +11,7 @@
 import * as THREE from "three";
 import { icon } from "./icons.js";
 import { viewport } from "./viewport.js";
+import { combat, attackMode } from "../game/combat-settings.js";
 
 export class Input {
   constructor(hudEl) {
@@ -30,6 +31,18 @@ export class Input {
     this._tapQueued = false;
     this.tapEdge = false;
     this.tap = null;
+    // --- combat-input modes (see game/combat-settings.js). The swipe mode fires
+    // a dash in the flicked direction; the joystick-button mode turns the stick's
+    // centre into a tap-to-dash button while a foe is in range.
+    this._swipeQueued = false;
+    this.swipeEdge = false; // true the frame a joystick flick fired
+    this.swipeDir = { x: 0, y: 0 }; // unit direction of the last flick
+    this._swipeArmed = true; // re-armed once the stick slows between flicks
+    this._joyVel = { x: 0, y: 0 }; // px/ms, for flick detection
+    this._joyLast = null;
+    this._joyDashQueued = false;
+    this.joyDashEdge = false; // true the frame the joystick dash button fired
+    this._joyDashActive = false; // game toggles this when a foe's in range
     this.isTouch = matchMedia("(pointer: coarse)").matches;
     // Landscape touch swaps the on-screen attack button for tap-to-attack (see
     // `tapAttack`): the screen's the target, so a quick tap fires the dash.
@@ -69,10 +82,25 @@ export class Input {
     // --- virtual joystick (left 60% of screen, dynamic origin)
     this.stick = document.createElement("div");
     this.stick.id = "joystick";
-    this.stick.innerHTML = `<div id="joy-base"></div><div id="joy-knob"></div>`;
+    this.stick.innerHTML = `<div id="joy-base"></div><div id="joy-knob"></div><div id="joy-dash">${icon("swords")}</div>`;
     hudEl.appendChild(this.stick);
     this._joyBase = this.stick.querySelector("#joy-base");
     this._joyKnob = this.stick.querySelector("#joy-knob");
+    // A tap-to-dash button pinned to the joystick's centre — only live in the
+    // "joystick dash button" attack mode while a foe is in range (the game
+    // toggles it via setJoyDash). Its own touch handler queues the dash and
+    // swallows the event so it doesn't spawn a second joystick.
+    this._joyDash = this.stick.querySelector("#joy-dash");
+    this._joyIcon = "swords"; // the glyph currently drawn on the stick button
+    this._joyTier = "danger"; // importance colour of the stick button
+    this._joyDash.className = "tier-danger";
+    const joyDashPress = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this._joyDashQueued = true;
+    };
+    this._joyDash.addEventListener("touchstart", joyDashPress, { passive: false });
+    this._joyDash.addEventListener("mousedown", joyDashPress);
     this._joyId = null;
     this._joyOrigin = { x: 0, y: 0 };
     this._joyVec = { x: 0, y: 0 };
@@ -177,6 +205,38 @@ export class Input {
     this.interactBtn.style.display = on ? "flex" : "none";
   }
 
+  // Arm/disarm the joystick-centre action button (joystick dash button attack
+  // mode). The game calls this each frame with whether there's something to do;
+  // `name` picks the glyph (crossed swords for the attack, or a context icon
+  // like talk / stairs / chest — see game.js). The button only actually shows
+  // while a joystick touch is live, or in that mode where it stays parked
+  // on-screen (_syncJoyDash).
+  setJoyDash(on, name = "swords", tier = "danger") {
+    if (on) {
+      if (this._joyIcon !== name) {
+        this._joyIcon = name;
+        this._joyDash.innerHTML = icon(name);
+      }
+      // colour the button by importance: red (danger) for combat, then gold /
+      // green / grey for lesser tiers (see #joy-dash.tier-* in style.css)
+      if (this._joyTier !== tier) {
+        this._joyTier = tier;
+        this._joyDash.className = `tier-${tier}`;
+      }
+    }
+    if (this._joyDashActive === on) return;
+    this._joyDashActive = on;
+    this._syncJoyDash();
+  }
+
+  _syncJoyDash() {
+    // The dash button normally rides a live joystick touch, but in the
+    // "joystick dash button" mode the stick is left on screen after release
+    // (see _touchEnd) so the button stays tappable without re-planting the thumb.
+    const show = this._joyDashActive && (this._joyId !== null || attackMode() === "joystickButton");
+    this._joyDash.style.display = show ? "flex" : "none";
+  }
+
   _touchStart(e) {
     for (const t of e.changedTouches) {
       if (this._joyId === null) {
@@ -192,9 +252,15 @@ export class Input {
         this._joyStartT = performance.now();
         this._joyStartClient = { x: t.clientX, y: t.clientY };
         this._joyMoved = false;
+        // fresh gesture: re-arm the flick detector and clear velocity history
+        this._swipeArmed = true;
+        this._joyVel = { x: 0, y: 0 };
+        this._joyLast = { x: p.x, y: p.y, t: performance.now() };
         this.stick.style.display = "block";
         this._joyBase.style.transform = `translate(${p.x}px, ${p.y}px)`;
         this._joyKnob.style.transform = `translate(${p.x}px, ${p.y}px)`;
+        this._joyDash.style.transform = `translate(${p.x}px, ${p.y}px)`;
+        this._syncJoyDash();
       } else if (this.tapAttack) {
         // moving with one thumb: a second finger anywhere is an attack (dash),
         // so landscape players can strike without lifting off the joystick
@@ -217,6 +283,26 @@ export class Input {
         const k = len > max ? max / len : 1;
         this._joyVec = { x: (dx * k) / max, y: (dy * k) / max };
         this._joyKnob.style.transform = `translate(${this._joyOrigin.x + dx * k}px, ${this._joyOrigin.y + dy * k}px)`;
+
+        // swipe attack: track the finger's speed (px/ms). A quick flick past the
+        // threshold fires one dash in the flick's direction; the detector re-arms
+        // only after the stick slows down again, so a held drag never repeats.
+        const now = performance.now();
+        if (this._joyLast) {
+          const dtm = Math.max(1, now - this._joyLast.t);
+          this._joyVel = { x: (p.x - this._joyLast.x) / dtm, y: (p.y - this._joyLast.y) / dtm };
+        }
+        this._joyLast = { x: p.x, y: p.y, t: now };
+        const sp = Math.hypot(this._joyVel.x, this._joyVel.y);
+        const flick = combat.swipe.flick || 1.1;
+        if (sp > flick && this._swipeArmed) {
+          this._swipeArmed = false;
+          this._swipeQueued = true;
+          const l = sp || 1;
+          this.swipeDir = { x: this._joyVel.x / l, y: this._joyVel.y / l };
+        } else if (sp < flick * 0.4) {
+          this._swipeArmed = true;
+        }
       }
     }
   }
@@ -231,7 +317,16 @@ export class Input {
         }
         this._joyId = null;
         this._joyVec = { x: 0, y: 0 };
-        this.stick.style.display = "none";
+        this._joyLast = null;
+        // In the joystick-dash-button mode the stick stays put after release so
+        // the centre dash button remains on screen and tappable; every other
+        // mode tucks the dynamic joystick away until the next touch.
+        if (attackMode() === "joystickButton") {
+          this._joyKnob.style.transform = `translate(${this._joyOrigin.x}px, ${this._joyOrigin.y}px)`;
+        } else {
+          this.stick.style.display = "none";
+        }
+        this._syncJoyDash();
       }
     }
   }
@@ -245,6 +340,10 @@ export class Input {
     this._interactQueued = false;
     this.tapEdge = this._tapQueued;
     this._tapQueued = false;
+    this.swipeEdge = this._swipeQueued;
+    this._swipeQueued = false;
+    this.joyDashEdge = this._joyDashQueued;
+    this._joyDashQueued = false;
 
     let x = 0, y = 0;
     if (this._keys.has("KeyA") || this._keys.has("ArrowLeft")) x -= 1;

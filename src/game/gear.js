@@ -65,6 +65,13 @@ export function aggregateStats(equipment) {
     if (g.dodgeCd) s.dodgeCdMul *= 1 - g.dodgeCd;
     if (g.gold) s.goldMul *= 1 + g.gold;
   }
+  // Bare hands: nothing in the weapon slot. You can still fight, but a punch
+  // lands for about half a blade's bite — enough that going weaponless is a
+  // real trade-off, not a free ride.
+  if (!s.weapon) {
+    s.weaponType = "unarmed";
+    s.dmgMul *= 0.5;
+  }
   return s;
 }
 
@@ -72,6 +79,7 @@ export function aggregateStats(equipment) {
 // The prop clipped to the player's right hand. Swords reuse the shared blade
 // builder; bows and staves get their own little toon models.
 export function weaponMesh(itemId) {
+  if (!itemId) return null; // empty weapon slot → bare hands, no prop
   const g = equipInfo(itemId);
   if (!g || g.type === "sword") {
     return swordMesh(g?.blade ?? 0xd7dde6, g?.grip ?? 0x6e4526, g?.len ?? 0.5);
