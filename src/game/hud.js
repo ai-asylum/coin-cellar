@@ -21,7 +21,6 @@ export class HUD {
           <button class="icon-btn" id="pause-btn">${icon("pause")}</button>
         </div>
       </div>
-      <div id="combat-modes"></div>
       <button id="bag-btn" aria-label="Open backpack (B)">
         <span class="bag-btn-ic">${icon("bag")}</span>
         <span class="bag-btn-key">B</span>
@@ -30,7 +29,10 @@ export class HUD {
         <span class="bag-btn-ic">${icon("box")}</span>
         <span class="bag-btn-key">V</span>
       </button>
-      <canvas id="minimap" class="hidden" aria-hidden="true"></canvas>
+      <div id="minimap-wrap" class="hidden" aria-hidden="true">
+        <canvas id="minimap"></canvas>
+        <button id="mini-up-btn" aria-label="Go back up to the surface">${icon("hole")} <span>Go back up</span></button>
+      </div>
       <div id="banner" class="hidden"><div id="banner-main"></div><div id="banner-sub"></div></div>
       <div id="bossbar" class="hidden">
         <div id="bossbar-name"></div>
@@ -92,8 +94,10 @@ export class HUD {
     this._guideText = null;
     this.hintEl = root.querySelector("#interact-hint");
     this._hintSig = null;
+    this.minimapWrapEl = root.querySelector("#minimap-wrap");
     this.minimapEl = root.querySelector("#minimap");
     this.minimapCtx = this.minimapEl.getContext("2d");
+    this.miniUpBtn = root.querySelector("#mini-up-btn");
     this._miniBase = null;
     this._miniBaseKey = null;
     this._bannerT = null;
@@ -645,6 +649,21 @@ export class HUD {
     entry.until = 0;
   }
 
+  /** A short text speech bubble that follows a 3D object (townsfolk asides,
+   * e.g. what a shopper mutters on their way in). Non-blocking and unclickable —
+   * it just floats over their head for `dur` seconds, then fades. Returns the
+   * tracked entry so callers can drop it early via removeEmote(). */
+  speechBubble(target, text, dur = 2.6) {
+    if (!text) return null;
+    const el = document.createElement("div");
+    el.className = "floaty speech";
+    el.textContent = text;
+    this.floatiesEl.appendChild(el);
+    const entry = { target, el, yOff: (target.height ?? 1.6) + 0.35, until: performance.now() + dur * 1000 };
+    this._tracked.push(entry);
+    return entry;
+  }
+
   /** Debug overlay: a small info card pinned above each NPC while the admin's
    * "NPC debug" toggle is on. `entries` is an array of
    * { target: creature, html, stuck } — pooled label elements are reused frame
@@ -679,7 +698,7 @@ export class HUD {
 
   // ------------------------------------------------------------- minimap
   showMinimap(visible) {
-    this.minimapEl.classList.toggle("hidden", !visible);
+    this.minimapWrapEl.classList.toggle("hidden", !visible);
   }
 
   /**
@@ -689,7 +708,7 @@ export class HUD {
    */
   renderMinimap(d, player, remote) {
     const el = this.minimapEl;
-    if (!el || el.classList.contains("hidden") || !d.open) return;
+    if (!el || this.minimapWrapEl.classList.contains("hidden") || !d.open) return;
     const GW = d.GW, GH = d.GH, open = d.open;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const cell = 8; // logical px per grid cell

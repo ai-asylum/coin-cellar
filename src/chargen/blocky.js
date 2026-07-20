@@ -61,12 +61,13 @@ export class BlockyCreature extends THREE.Group {
         // src is the shared template material (clone(true) copies meshes but
         // keeps material refs), so read from it but never dispose it here.
         const src = o.material;
-        const mat = makeToonMaterial({ map: src.map ?? null, rim: 0.18 });
+        const mat = makeToonMaterial({ map: src.map ?? null, rim: 0.07 });
         mat.transparent = src.transparent;
         mat.alphaTest = src.alphaTest;
         mat.side = src.side;
         o.material = mat;
         o.frustumCulled = false;
+        o.layers.enable(1); // opt into the hero's carried torch (see engine.torch)
         this._mats.push(mat);
         this._baseColors.push(mat.color.clone());
       }
@@ -125,6 +126,15 @@ export class BlockyCreature extends THREE.Group {
 
   _applyColors() {
     for (let i = 0; i < this._mats.length; i++) this._mats[i].color.copy(this._baseColors[i]);
+  }
+
+  /** Opt this actor in/out of the hero's carried torch (light layer 1). The
+   *  local player is opted OUT so their own lantern never washes out their
+   *  model — they light by the global hemi/sun fill instead. */
+  setTorchLit(on) {
+    this.model.traverse((o) => {
+      if (o.isMesh) on ? o.layers.enable(1) : o.layers.disable(1);
+    });
   }
 
   // ---------------------------------------------------------------- anim

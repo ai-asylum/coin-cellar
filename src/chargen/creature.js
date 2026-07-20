@@ -27,6 +27,7 @@ export class Creature extends THREE.Group {
     mesh.add(this.bones[0]);
     mesh.bind(new THREE.Skeleton(this.bones));
     mesh.frustumCulled = false; // skinned bounds don't track the ragdoll
+    mesh.layers.enable(1); // opt into the hero's carried torch (see engine.torch)
     this.mesh = mesh;
     this.add(mesh);
     this.outline = addOutline(mesh, 0.02 * baked.scale + 0.008, true);

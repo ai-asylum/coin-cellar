@@ -14,7 +14,7 @@ import { weaponMesh } from "../game/gear.js";
 import { ENEMY_KINDS, DUNGEON_MIX, HOLE_THEMES, DUNGEON_LOOT, BOSSES, bossDefFor, FLOORS_PER_DUNGEON } from "../game/dungeon.js";
 import { HOLE_DEFS } from "../game/cave.js";
 import { ARCHETYPES } from "../game/shop.js";
-import { NPCS, CROWD_NPCS, PERSONALITIES, personalityName, personalityArchetype, personalityTaste, REFLECTION_BUCKETS, SPECIAL_REACTIONS, TIMES_OF_DAY, npcIntroLines } from "../game/npc-data.js";
+import { NPCS, CROWD_NPCS, PERSONALITIES, personalityName, personalityArchetype, personalityTaste, REFLECTION_BUCKETS, SPECIAL_REACTIONS, TIMES_OF_DAY, npcIntroLines, OCCASIONS, OCCASION_LINES, PLAYER_DEEDS, DEED_LINES, activeOccasions } from "../game/npc-data.js";
 import { Creature } from "../chargen/creature.js";
 import { BlockyCreature, variantForSeed } from "../chargen/blocky.js";
 import { CHAR_VARIANTS, loadCharacters } from "../chargen/assets.js";
@@ -598,9 +598,35 @@ function npcReflectPanel(npc) {
   return `${generic}${wish}${sig ? `<div class="npc-sub-h">Signature items</div>${sig}` : ""}`;
 }
 
+// The Occasions panel: what this resident says on notable calendar days —
+// their bespoke voice line where they have one, else the shared "(shared)"
+// default every resident falls back to. Holidays first, then day-of-the-week.
+function npcOccasionsPanel(npc) {
+  const groups = OCCASIONS.map((o) => {
+    const own = OCCASION_LINES[npc.personality]?.[o.id];
+    const shared = !(own && own.length);
+    const lines = shared ? OCCASION_LINES._default[o.id] || [] : own;
+    return { label: `${o.label}${shared ? " · shared" : ""}`, lines };
+  });
+  return `<p class="npc-blurb">Greets you differently on these days (a holiday always wins over the weekday flavour).</p>${lineColumns(groups)}`;
+}
+
+// The Player-deeds panel: how this resident reacts when the player pulls off
+// something notable underground. {boss}/{place}/{floor} are filled in live from
+// the deed; "(shared)" marks the generic fallback lines.
+function npcDeedsPanel(npc) {
+  const groups = PLAYER_DEEDS.map((d) => {
+    const own = DEED_LINES[npc.personality]?.[d.id];
+    const shared = !(own && own.length);
+    const lines = shared ? DEED_LINES._default[d.id] || [] : own;
+    return { label: `${d.label}${shared ? " · shared" : ""}`, lines };
+  });
+  return `<p class="npc-blurb">Said once, the next time you chat after the deed. <code>{boss}</code>, <code>{place}</code> and <code>{floor}</code> fill in from what you did.</p>${lineColumns(groups)}`;
+}
+
 // One full-width card per resident: portrait + identity on the left, and the
-// four content tabs (small talk / first meeting / tastes / after shopping) on
-// the right. The tabs are wired up by mountCardTabs after render.
+// content tabs (small talk / first meeting / tastes / after shopping /
+// occasions / player deeds) on the right, wired up by mountCardTabs after render.
 function characterCard(npc) {
   const persona = PERSONALITIES[npc.personality];
   const badges = [{ text: personalityName(npc), kind: "" }, { text: personalityArchetype(npc), kind: "" }];
@@ -619,8 +645,17 @@ function characterCard(npc) {
         ? `<ul class="card-lines">${intro.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>`
         : `<p class="npc-empty">Opens straight into small talk — no special intro.</p>`,
     },
+    {
+      id: "arrive",
+      label: "Heading to shop",
+      body: npc.arriveLines?.length
+        ? `<p class="npc-blurb">Floats over their head as they head in to shop.</p>${linesList(npc.arriveLines)}`
+        : `<p class="npc-empty">No arrival lines — they walk in quietly.</p>`,
+    },
     { id: "taste", label: "Tastes", body: npcTastePanel(npc) },
     { id: "reflect", label: "After shopping", body: npcReflectPanel(npc) },
+    { id: "occasions", label: "Occasions", body: npcOccasionsPanel(npc) },
+    { id: "deeds", label: "Player deeds", body: npcDeedsPanel(npc) },
   ];
   return `
     <article class="npc-card">
@@ -642,7 +677,14 @@ function characterCard(npc) {
 }
 
 function buildNpcs() {
-  const html = `<div class="npc-list">${NPCS.map(characterCard).join("")}</div>`;
+  // a quick read on today's real-world date: which occasion greeting the town
+  // would actually lead with right now (holidays win over the weekday flavour)
+  const today = activeOccasions();
+  const occNote = today.length
+    ? `Today (${new Date().toDateString()}) is <b>${today.map((o) => esc(o.label)).join(" · ")}</b> — residents lead with the “${esc(today[0].label)}” greeting.`
+    : `No special occasion today (${new Date().toDateString()}) — residents open with ordinary small talk.`;
+  const banner = `<div class="admin-banner">${icon("speak")} ${occNote} See each resident's <b>Occasions</b> and <b>Player deeds</b> tabs for their reactions.</div>`;
+  const html = `${banner}<div class="npc-list">${NPCS.map(characterCard).join("")}</div>`;
   return { html, n: NPCS.length };
 }
 
@@ -673,9 +715,9 @@ function buildCast() {
       id: "player",
       icon: icon("farmer"),
       badges: [{ text: "PLAYER", kind: "player" }],
-      desc: "The shopkeeper you control above and below ground — Blocky variant “a”, scaled to 1.3 m.",
-      visual: `<div class="model3d" data-kind="blocky" data-variant="a" data-height="1.3"></div>`,
-      stats: [["Model", "character-a"], ["Height", "1.3 m"]],
+      desc: "The shopkeeper you control above and below ground — Blocky variant “a”, scaled to 1.5 m.",
+      visual: `<div class="model3d" data-kind="blocky" data-variant="a" data-height="1.5"></div>`,
+      stats: [["Model", "character-a"], ["Height", "1.5 m"]],
     },
   ];
   for (const v of CHAR_VARIANTS) {

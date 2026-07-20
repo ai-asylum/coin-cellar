@@ -41,6 +41,20 @@ export class Engine {
     this.scene.add(this.sun);
     this.scene.add(this.sun.target);
 
+    // A warm lantern that rides with the hero underground. The surface leans on
+    // the sun/hemi fill above, but the cave and dungeon dim that right down and
+    // let this moving pool do the lighting, so the world brightens dynamically
+    // around the player instead of sitting under one flat wash. Kept dark until
+    // _updateLighting kindles it below ground (position + flicker driven there).
+    this.torch = new THREE.PointLight(0xffb46b, 0, 14, 1.6);
+    this.torch.position.set(0, 1.5, 0);
+    // the torch lives on its own light layer (1) so it only illuminates things
+    // that opt in (the environment + other creatures, see their layer.enable(1)).
+    // The hero themself stays off it, so the lantern they carry never washes out
+    // their own model — they read by the global hemi/sun fill like always.
+    this.torch.layers.set(1);
+    this.scene.add(this.torch);
+
     this.clock = new THREE.Clock();
     this.timeScale = 1; // hit-stop support
     this._hitStopT = 0;

@@ -150,6 +150,20 @@ export function buildDojo(shop) {
   gate.position.set(0, 0, frontZ + 1.2);
   g.add(gate);
 
+  // --- warm paper lanterns (chōchin): their paper bodies always read warm, and
+  // each carries a real point light kindled after dusk (pushed into
+  // shop.lampLights, eased toward night in Shop._updateLighting — same as the
+  // shop's own interior lamps). A red pair hangs at the open front to mark the
+  // entrance, and a smaller amber pair flanks the banner to light the master.
+  for (const sx of [-1, 1]) {
+    const front = makeLantern(shop, darkWood, { paper: 0xff8a5c, light: 0xff9a55, range: 7, cord: 0.55 });
+    front.position.set(sx * 3.2, 2.5, frontZ - 0.5);
+    g.add(front);
+    const rear = makeLantern(shop, darkWood, { paper: 0xffd08a, light: 0xffca7a, range: 5.5, cord: 0.45, size: 0.2 });
+    rear.position.set(sx * 2.7, 2.05, backZ + 0.35);
+    g.add(rear);
+  }
+
   // --- the master: an always-present resident, held off the ambient crowd so
   // he never roams the street as a double. Position is authored in local coords
   // (editable in Contents mode); he faces the entrance / player.
@@ -181,6 +195,40 @@ export function buildDojo(shop) {
   }
 
   return { group: g, rect, roof, roofMats, roofA: 1, master, dummies };
+}
+
+// One warm paper lantern (chōchin): a glowing squashed-sphere paper body under
+// dark caps, hung from a short cord, with a real point light inside. The paper
+// (MeshBasicMaterial) always glows; the point light starts dark and is handed to
+// shop.lampLights so it kindles at night with the rest of the town's interiors.
+function makeLantern(shop, darkWood, { paper = 0xffcaa0, light = 0xffca7a, range = 6, cord = 0.5, size = 0.26 } = {}) {
+  const grp = new THREE.Group();
+  const cordMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, cord, 6), darkWood);
+  cordMesh.position.y = size + 0.08 + cord / 2;
+  grp.add(cordMesh);
+  const topCap = new THREE.Mesh(new THREE.CylinderGeometry(size * 0.4, size * 0.55, 0.08, 12), darkWood);
+  topCap.position.y = size + 0.04;
+  grp.add(topCap);
+  const body = new THREE.Mesh(
+    new THREE.SphereGeometry(size, 14, 12),
+    new THREE.MeshBasicMaterial({ color: paper }),
+  );
+  body.scale.y = 0.85;
+  grp.add(body);
+  // a couple of dark rib rings so it reads as a folded paper lantern
+  for (const y of [-size * 0.4, 0, size * 0.4]) {
+    const rib = new THREE.Mesh(new THREE.TorusGeometry(size * 0.96, 0.012, 6, 18), darkWood);
+    rib.rotation.x = Math.PI / 2;
+    rib.position.y = y * 0.85;
+    grp.add(rib);
+  }
+  const botCap = new THREE.Mesh(new THREE.CylinderGeometry(size * 0.55, size * 0.4, 0.08, 12), darkWood);
+  botCap.position.y = -size * 0.85 - 0.04;
+  grp.add(botCap);
+  const glow = new THREE.PointLight(light, 0, range, 1.7);
+  grp.add(glow);
+  shop.lampLights.push(glow);
+  return grp;
 }
 
 // One straw practice dummy: a post, a burlap body, a round head and a belt,
@@ -262,8 +310,15 @@ export function updateDojo(shop, dojo, dt, elapsed) {
   dojo.roof.visible = dojo.roofA > 0.02;
   if (dojo.roof.visible) for (const m of dojo.roofMats) m.opacity = dojo.roofA;
 
+  // a conversation drops the camera to an eye-level two-shot (chatting with the
+  // master, or reading the note) — the straw dummies out front would fill the
+  // frame at that height, so they duck out of sight for the duration and pop
+  // back the moment the dialogue closes
+  const dialogue = !!game._npcChat || !!game._noteCam || !!game._selfCam;
+
   // dummies: critically-ish damped spring back to upright, with a hit flash
   for (const d of dojo.dummies) {
+    d.group.visible = !dialogue;
     if (d.hitCd > 0) d.hitCd -= dt;
     const K = 55, DAMP = 6.5; // stiffness / damping
     d.tvX += (-K * d.tiltX - DAMP * d.tvX) * dt;

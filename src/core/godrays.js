@@ -92,6 +92,11 @@ export function makeLightShaft({
   tilt = 0.32,
   spin = 0,
   always = false, // stairs beams stay lit regardless of the god-rays toggle
+  // when set, the shaft doubles as a REAL light source: a PointLight rides the
+  // beam so it carves a lit pool out of the scene (see the cave + dungeon,
+  // where the dimmed underground fill hands the lighting over to these). It's a
+  // child of the group, so it flickers with the beam and hides/shows with it.
+  light = null, // { color?, intensity, range?, decay?, y? }
 } = {}) {
   const group = new THREE.Group();
   group.rotation.set(tilt, spin, 0);
@@ -150,6 +155,17 @@ export function makeLightShaft({
     group.add(motePts);
   }
 
+  // the real light the beam casts (optional). Sits down in the lower half of
+  // the beam so its pool lands on the floor, not up at the ceiling source.
+  let lightObj = null, lightBaseI = 0;
+  if (light) {
+    lightBaseI = light.intensity ?? 2.4;
+    lightObj = new THREE.PointLight(light.color ?? color, lightBaseI, light.range ?? 8.5, light.decay ?? 1.6);
+    lightObj.position.set(0, light.y ?? -length * 0.5, 0);
+    group.add(lightObj);
+    group.userData.light = lightObj;
+  }
+
   group.renderOrder = 3;
   const base = opacity;
   const phase = Math.random() * Math.PI * 2;
@@ -157,6 +173,7 @@ export function makeLightShaft({
     // lazy, candle-ish flicker
     const f = 0.8 + Math.sin(elapsed * 1.1 + phase) * 0.13 + Math.sin(elapsed * 4.3 + phase) * 0.05;
     mat.opacity = base * f;
+    if (lightObj) lightObj.intensity = lightBaseI * f; // the cast pool flickers with the beam
     if (motePts) {
       motePts.material.opacity = base * 0.9 * f;
       const p = motePts.geometry.attributes.position;

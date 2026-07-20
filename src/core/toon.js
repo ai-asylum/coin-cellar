@@ -236,6 +236,15 @@ export function feedOccluder(mat, player, cam, torsoFrac = 0.6, enemies = null) 
   sh.uniforms.uCamPos.value.copy(cam.position);
 }
 
+// Switch an `occlude:true` material's cutout off so it renders fully solid
+// (uOccluderCount 0 → the shader's discard loop never runs). Used for fixtures
+// that should only turn see-through on demand — e.g. the shop furniture that
+// dithers away during the eye-level dialogue camera and is solid otherwise.
+export function clearOccluder(mat) {
+  const sh = mat && mat.userData && mat.userData.shader;
+  if (sh && sh.uniforms.uOccluderCount) sh.uniforms.uOccluderCount.value = 0;
+}
+
 // Outline material: black backfaces pushed out along the normal in the
 // vertex shader (after skinning, so it hugs animated bodies).
 export function makeOutlineMaterial(width = 0.02, color = 0x1a0e24, dissolve = false) {
@@ -291,6 +300,26 @@ export function addOutline(mesh, width = 0.022, dissolve = false) {
   shell.frustumCulled = mesh.frustumCulled;
   mesh.add(shell);
   return shell;
+}
+
+// A soft round smudge of near-black, cached, for the fog banks (the FTUE cave
+// veil and the boss arena). A wall of overlapping puffs reads as thick rolling
+// smoke; alpha falls off to the edge so the puffs blend instead of stamping
+// hard discs.
+let _fogTex = null;
+export function fogPuffTexture() {
+  if (_fogTex) return _fogTex;
+  const c = document.createElement("canvas");
+  c.width = c.height = 64;
+  const g = c.getContext("2d");
+  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0, "rgba(3,3,6,0.95)");
+  grad.addColorStop(0.55, "rgba(3,3,6,0.6)");
+  grad.addColorStop(1, "rgba(3,3,6,0)");
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 64, 64);
+  _fogTex = new THREE.CanvasTexture(c);
+  return _fogTex;
 }
 
 let _blobTex = null;
