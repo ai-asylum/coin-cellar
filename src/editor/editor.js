@@ -287,11 +287,13 @@ function resolveHit(hit) {
   }
   if (!chain.length) return null;
   if (editScope === "buildings") {
-    // grab the whole building regardless of what fixture was clicked
-    const b = chain.find((c) => c.edit.type === "building");
+    // whole structures: the shop/cave/dojo shells AND the houses (lots), grabbed
+    // as one unit regardless of which fixture/part was clicked
+    const b = chain.find((c) => c.edit.type === "building" || c.edit.type === "lot");
     return b ? { edit: b.edit, partIndex: null, stateGroup: null } : null;
   }
-  // contents: the nearest non-building fixture (skip the building shell)
+  // contents: the nearest non-building fixture (skip the building shells). A lot
+  // hit keeps its partIndex so handleSelectClick can drop straight onto the part.
   const c = chain.find((c) => c.edit.type !== "building");
   return c ? { edit: c.edit, partIndex, stateGroup: c.stateGroup } : null;
 }
@@ -324,9 +326,9 @@ function handleSelectClick() {
     if (solid && solid.distance - hit.distance < 4) hit = solid;
   }
   const { edit, partIndex, stateGroup } = hit;
-  // clicking the already-selected lot drills down into the hit part
-  if (edit.type === "lot" && partIndex != null && selection &&
-      (selection.type === "lot" || selection.type === "part") && selection.index === edit.index) {
+  // In Contents mode a house drops straight onto the clicked part (the whole
+  // house is a Buildings-mode thing now). Buildings mode selects the whole lot.
+  if (editScope === "contents" && edit.type === "lot" && partIndex != null) {
     const lot = shop.lots[edit.index];
     const state = stateGroup === lot.before ? "before" : stateGroup === lot.after ? "after" : lotView;
     setSelection({ type: "part", index: edit.index, state, partIndex });
@@ -604,8 +606,11 @@ function setEditScope(scope) {
   if (scope === editScope) return;
   editScope = scope;
   cancelGrab(false);
-  if (scope === "buildings" && !isBuildingSel(selection)) selection = null;
-  else if (scope === "contents" && isBuildingSel(selection)) selection = null;
+  // the building category is the shop/cave/dojo shells + whole houses (lots);
+  // everything else (fixtures, parts, decor, dojo pieces) is contents
+  const inBuildingCat = isBuildingSel(selection) || selection?.type === "lot";
+  if (scope === "buildings" && !inBuildingCat) selection = null;
+  else if (scope === "contents" && inBuildingCat) selection = null;
   refreshSelBox();
   renderPanel();
   renderHint();
@@ -894,7 +899,7 @@ function renderPanel() {
   const rec = selectedRecord();
   if (!rec) {
     panelEl.append(el("div", { className: "muted", textContent: editScope === "buildings"
-      ? "Buildings mode (M): click the shop, cave or dojo, then G to drag the whole thing."
+      ? "Buildings mode (M): click the shop, cave, dojo or a house, then G to drag the whole thing."
       : "Contents mode (M): click a shelf, house part, decor sprite, or a dojo dummy/master. Enter opens the decor palette." }));
   } else {
     panelEl.append(el("div", { className: "muted", textContent: selLabel() }));
@@ -934,7 +939,7 @@ function renderPanel() {
         ...["Cheapskate", "Regular", "Wealthy", "Collector"].map((n, i) => el("option", { value: String(i), textContent: `${i} — ${n}` })));
       resSel.value = String(rec.resident);
       panelEl.append(row("kind", kindSel), row("resident", resSel));
-      panelEl.append(el("div", { className: "muted", textContent: `editing the ${lotView.toUpperCase()} model — click the lot again to pick a part` }));
+      panelEl.append(el("div", { className: "muted", textContent: `editing the ${lotView.toUpperCase()} model — switch to Contents mode (M) to move its parts` }));
       panelEl.append(el("div", {},
         el("button", { textContent: "+ box part", onclick: () => addLotPart("box") }),
         el("button", { textContent: "+ cone part", onclick: () => addLotPart("cone") }),
