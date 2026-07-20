@@ -3,13 +3,13 @@
 // Dungeon.prototype via Object.assign in dungeon.js, so every `this._method()`
 // call keeps working.
 import * as THREE from "three";
-import { makeBlobShadow } from "../core/toon.js";
+import { makeBlobShadow, makeToonMaterial, feedOccluder, fogPuffTexture } from "../core/toon.js";
 import { makeLightShaft } from "../core/godrays.js";
 import { EQUIP_DROPS, itemSprite } from "./items.js";
 import { disposeDecor, DECOR_LOOT } from "./decor.js";
 import { rng, pick } from "../core/engine.js";
 import { DUNGEON_ORIGIN, dungeonIndexFor, DUNGEON_LOOT, FLOORS_PER_DUNGEON } from "./dungeon-data.js";
-import { makeStairs, modelCollider } from "./dungeon-geometry.js";
+import { CELL, makeStairs, modelCollider } from "./dungeon-geometry.js";
 
 const _v = new THREE.Vector3();
 const _p = new THREE.Vector3();
@@ -302,35 +302,16 @@ export const combatMethods = {
         m.creature.animator.squash.kick(5);
       }
     }
-    // the boss goes out with a bang: its body blows apart and the treasure it
-    // guarded flies out across the whole arena
+    // the boss goes out slow: felled, its body chars to black while the arena
+    // fog is drawn back into the corpse; only once the last of the smoke is
+    // swallowed does it blow apart, spilling the hoard and opening the way down
+    // (see _beginBossDeath — the callback runs after the final blast).
     if (e.isBoss) {
       this.boss = null;
-      this._explodeBoss(e);
-      game.onBossDefeated?.(e.creature.position);
-      const bx = e.creature.position.x, bz = e.creature.position.z;
-      const rl = rng(e.seed + 5);
-      // bosses are the only source of gear: two distinct equipment pieces, plus
-      // a guaranteed crown, a healing potion and a fistful of top-tier spoils
-      let g1 = pick(rl, EQUIP_DROPS), g2 = pick(rl, EQUIP_DROPS);
-      while (g2 === g1) g2 = pick(rl, EQUIP_DROPS);
-      // the rest of the hoard is the dungeon's own treasure, and deeper
-      // keepers guard a bigger pile of it
-      const hole = dungeonIndexFor(this.floor);
-      const table = DUNGEON_LOOT[hole] ?? DUNGEON_LOOT[0];
-      const spoils = [g1, g2, "crown", "potion"];
-      for (let i = 0; i < 3 + hole; i++) spoils.push(pick(rl, table.rare));
-      spoils.forEach((id, i) => {
-        // land close to the boss corpse — each spoil arcs out in a tight ring
-        // from where the boss fell so the hoard clusters by the body instead of
-        // showering across the whole arena (which made loot easy to miss).
-        const a = (i / spoils.length) * Math.PI * 2 + rl() * 0.7;
-        const rad = 0.9 + rl() * 1.1; // ~1–2 units out, a snug pile
-        // land close to the boss corpse, wherever it fell (the keeper hunts out
-        // in the open now, so the hoard clusters by the body, not the old cell)
-        const x = bx + Math.sin(a) * rad;
-        const z = bz + Math.cos(a) * rad;
-        this.spawnDrop(id, x, z, null, { flyFrom: { x: bx, z: bz } });
+      this._beginBossDeath(e, () => {
+        game.onBossDefeated?.(e.creature.position);
+        this._spawnBossLoot(e);
+        this._removeEnemy(e);
       });
       return;
     }
@@ -351,10 +332,157 @@ export const combatMethods = {
     }
   },
 
+  /** Roll a thick fog bank through the boss arena. It's an occluder material
+   * (like the walls), so the wall-removal dither eats the puffs sitting between
+   * the camera and the keeper — you see the boss through the smoke. Built on
+   * host + guest and seeded off the floor so co-op peers agree. The puffs are
+   * flat quads billboarded to the camera each frame (see _updateBossFog), which
+   * keeps them round like the cave's veil while still taking the shader. */
+  _buildBossFog(center, BW, BH) {
+    const group = new THREE.Group();
+    const geo = new THREE.PlaneGeometry(1, 1);
+    const mat = makeToonMaterial({ map: fogPuffTexture(), color: 0x0b0d18, rim: 0, occlude: true });
+    mat.transparent = true;
+    mat.opacity = 0.92;
+    mat.depthWrite = false; // stack cleanly; the boss (solid) still occludes it
+    mat.fog = false;
+    const r = rng(this.seed + 7788);
+    const puffs = [];
+    const hw = (BW * CELL) / 2, hd = (BH * CELL) / 2;
+    const add = (x, y, z, sc) => {
+      const m = new THREE.Mesh(geo, mat);
+      m.position.set(center.x + x, y, center.z + z);
+      m.scale.set(sc, sc, 1);
+      m.raycast = () => {};
+      m.userData = { hx: center.x + x, hy: y, hz: center.z + z, sc, delay: r() * 0.5, fly: 0.55 + r() * 0.45, ang: r() * Math.PI * 2 };
+      group.add(m);
+      puffs.push(m);
+    };
+    // fill the arena, biased toward the back (−z) so the doorway and its
+    // portcullis (the +z rim) stay clear — no smoke spilling over the locked
+    // gate or into the corridor — while still leaving plenty of haze between
+    // the camera and the keeper for the see-through dither to read against.
+    const zLo = -hd * 0.9, zHi = hd * 0.4; // never reach the +z gate line (±hd)
+    for (let i = 0; i < 80; i++)
+      add((r() - 0.5) * hw * 1.7, 0.3 + r() * 3.2, zLo + (zHi - zLo) * r(), 2.2 + r() * 1.6);
+    // a denser inner band the hero peers through — kept a stride north of the
+    // doorway so it thickens the room without hiding the gate
+    for (let i = 0; i < 22; i++)
+      add((r() - 0.5) * hw * 1.5, 0.3 + r() * 2.6, hd * (0.2 + r() * 0.2), 2.2 + r() * 1.2);
+    this.group.add(group);
+    this._bossFogMat = mat;
+    this.bossFog = { group, puffs, mat, geo };
+  },
+
+  /** Per-frame arena fog: billboard the puffs, breathe them, and feed the
+   * occluder so the keeper (and any hero inside) reads through the smoke. Once
+   * the boss is felled (_fogDeath set), stream every puff into the corpse while
+   * the body chars black, then hand off to _explodeBoss. */
+  _updateBossFog(dt, elapsed) {
+    const fog = this.bossFog;
+    if (!fog) return;
+    const cam = this.game.engine.camera;
+    for (const m of fog.puffs) m.quaternion.copy(cam.quaternion);
+
+    if (!this._fogDeath) {
+      const occ = [];
+      if (this.boss && this.boss.deadT < 0) occ.push(this.boss.creature);
+      feedOccluder(fog.mat, this.game.player, cam, 0.55, occ);
+      // a wider clear than the walls use (1.7) so the whole keeper reads through
+      // the smoke, not just a narrow tube to its torso
+      const sh = fog.mat.userData.shader;
+      if (sh?.uniforms?.uFadeRadius) sh.uniforms.uFadeRadius.value = 2.6;
+      for (const m of fog.puffs) {
+        const u = m.userData;
+        const w = elapsed * 0.6 + u.hx * 0.4;
+        m.position.x = u.hx + Math.sin(w) * 0.35;
+        m.position.y = u.hy + Math.cos(w * 0.9) * 0.22;
+        m.position.z = u.hz + Math.sin(w * 0.6) * 0.18;
+      }
+      return;
+    }
+
+    // death: char the body to black and swirl the whole bank into the corpse
+    const d = this._fogDeath;
+    d.t += dt;
+    const e = d.e;
+    const bm = e.creature.bodyMat?.userData?.uBlacken;
+    if (bm) bm.value = Math.min(1, d.t / 0.5);
+    const cx = e.creature.position.x - DUNGEON_ORIGIN.x;
+    const cz = e.creature.position.z - DUNGEON_ORIGIN.z;
+    const cy = e.creature.height * 0.5;
+    let alive = 0;
+    for (const m of fog.puffs) {
+      const u = m.userData;
+      const k = Math.min(1, Math.max(0, (d.t - u.delay) / u.fly));
+      if (k >= 1) { m.visible = false; continue; }
+      alive++;
+      if (k <= 0) continue;
+      const e2 = k * k * (3 - 2 * k);
+      const swirl = Math.sin(k * Math.PI) * 1.3; // arcs in, tightening as it lands
+      const a = u.ang + k * 7;
+      m.position.set(
+        u.hx + (cx - u.hx) * e2 + Math.cos(a) * swirl,
+        u.hy + (cy - u.hy) * e2,
+        u.hz + (cz - u.hz) * e2 + Math.sin(a) * swirl
+      );
+      m.scale.setScalar(u.sc * (1 - e2));
+    }
+    if (alive === 0 || d.t >= d.dur) {
+      const after = d.afterExplode;
+      this.group.remove(fog.group);
+      fog.geo.dispose();
+      fog.mat.dispose();
+      this.bossFog = null;
+      this._bossFogMat = null;
+      this._fogDeath = null;
+      // the smoke was the keeper's life — swallowed, the body detonates
+      this._explodeBoss(e, after);
+    }
+  },
+
+  /** Begin the boss's drawn-out death: it's already ragdolling from die(), but
+   * we take over the char/dissolve driver so the body stays put and blackens in
+   * place while the arena fog pours into it (see _updateBossFog). Run on host +
+   * guest; `afterExplode` fires once the final blast plays. If there's no fog
+   * (shouldn't happen), it detonates at once. */
+  _beginBossDeath(e, afterExplode) {
+    // stop Creature.update's auto blacken→dissolve; we drive the blacken and
+    // never dissolve (the body vanishes in the explosion's bursts instead)
+    e.creature._deathT = undefined;
+    if (e.creature.bodyMat?.userData?.uDissolve) e.creature.bodyMat.userData.uDissolve.value = 0;
+    if (e.creature.outline?.material?.userData?.uDissolve) e.creature.outline.material.userData.uDissolve.value = 0;
+    if (this.bossFog) {
+      this._fogDeath = { e, t: 0, dur: 1.5, afterExplode };
+    } else {
+      this._explodeBoss(e, afterExplode);
+    }
+  },
+
+  /** The boss hoard: the only source of gear — two distinct pieces, a crown, a
+   * potion and a fistful of the dungeon's top spoils, arcing out from the
+   * corpse in a snug ring. Host-only (guests receive the drops over the wire). */
+  _spawnBossLoot(e) {
+    const bx = e.creature.position.x, bz = e.creature.position.z;
+    const rl = rng(e.seed + 5);
+    let g1 = pick(rl, EQUIP_DROPS), g2 = pick(rl, EQUIP_DROPS);
+    while (g2 === g1) g2 = pick(rl, EQUIP_DROPS);
+    const hole = dungeonIndexFor(this.floor);
+    const table = DUNGEON_LOOT[hole] ?? DUNGEON_LOOT[0];
+    const spoils = [g1, g2, "crown", "potion"];
+    for (let i = 0; i < 3 + hole; i++) spoils.push(pick(rl, table.rare));
+    spoils.forEach((id, i) => {
+      const a = (i / spoils.length) * Math.PI * 2 + rl() * 0.7;
+      const rad = 0.9 + rl() * 1.1; // ~1–2 units out, a snug pile by the body
+      this.spawnDrop(id, bx + Math.sin(a) * rad, bz + Math.cos(a) * rad, null, { flyFrom: { x: bx, z: bz } });
+    });
+  },
+
   /** Blow the boss apart piece by piece: each body mesh pops in a staggered
    * burst of debris and vanishes, capped by one big white flash. Cosmetic, so
-   * it runs on host + guest (see the eDie mirror). */
-  _explodeBoss(e) {
+   * it runs on host + guest (see the eDie mirror). `onDone` fires with the
+   * final blast (loot + stairs hang off it). */
+  _explodeBoss(e, onDone) {
     const game = this.game;
     const c = e.creature;
     const parts = [];
@@ -380,6 +508,7 @@ export const combatMethods = {
       game.particles.burst(_p, { color: 0xffffff, n: 34, speed: 7.5, up: 3.4, life: 0.85, size: 1.5 });
       game.particles.burst(_p, { color: 0xff5a3a, n: 20, speed: 5, up: 2.6, life: 0.9, size: 1.2 });
       game.engine.shake(0.5);
+      onDone?.();
     }, parts.length * 85 + 80);
   },
 
@@ -421,6 +550,34 @@ export const combatMethods = {
     this.group.add(shaft);
     this.shafts.push(shaft);
     this.bossStairs = { pos: new THREE.Vector3(wx, 0, wz), mesh: g, disc, ring, descend, collider: stairsCollider };
+  },
+
+  /** Reveal the staircase down cut into the boss arena's back wall (built
+   * hidden by _buildBossArena). Drops the cover, lands its collider, lights a
+   * warm shaft over it and wires it up as `bossStairs` — the same shape the
+   * arrow, minimap and interact prompt already read. Built from the seed, so
+   * host and guest both run it from onBossDefeated. Returns false (so the
+   * caller can fall back to a conjured flight) when there's nothing to reveal —
+   * e.g. the final boss, which leaves the way home instead. */
+  revealBossStairs() {
+    if (this.bossStairs) return true;
+    const d = this.bossDescent;
+    if (!d) return false;
+    d.group.visible = true;
+    if (d.cover) {
+      d.cover.removeFromParent();
+      d.cover.geometry.dispose();
+      d.cover.material.dispose();
+      d.cover = null;
+    }
+    this.colliders.push(d.collider);
+    const lx = d.pos.x - DUNGEON_ORIGIN.x, lz = d.pos.z - DUNGEON_ORIGIN.z;
+    const shaft = makeLightShaft({ color: 0xff9a4d, length: 4.8, topWidth: 0.5, bottomWidth: 2.2, opacity: 0.5, tilt: 0, spin: 1.4, motes: 14, always: true });
+    shaft.position.set(lx, 3.4, lz);
+    this.group.add(shaft);
+    this.shafts.push(shaft);
+    this.bossStairs = { pos: d.pos.clone(), mesh: d.group, descend: true, collider: d.collider };
+    return true;
   },
 
   /** x/z are WORLD coordinates. `opts.flyFrom` ({x,z}) makes the drop arc out

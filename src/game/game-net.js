@@ -49,7 +49,7 @@ export const netMethods = {
 
   _spawnRemote() {
     if (this.remote) this.remote.creature.dispose();
-    const c = new BlockyCreature("j", { height: 1.3 });
+    const c = new BlockyCreature("j", { height: 1.5 });
     c.position.set(1.5, 0, 3);
     c.holdItem(swordMesh(0xd7dde6, 0x3f5f9e, 0.75));
     c.setNameLabel(this.net.partnerName || "friend");
@@ -120,7 +120,7 @@ export const netMethods = {
       if (!pl.buf.length) continue; // presence known, no position yet
       let a = av.get(id);
       if (!a) {
-        const c = new BlockyCreature(variantForSeed(hashStr(id)), { height: 1.3 });
+        const c = new BlockyCreature(variantForSeed(hashStr(id)), { height: 1.5 });
         c.holdItem(swordMesh(0xd7dde6, 0x3f5f9e, 0.75));
         const last = pl.buf[pl.buf.length - 1];
         c.position.set(last.x, 0, last.z);
@@ -215,6 +215,7 @@ export const netMethods = {
       case "inv":
         this.inventory = m.list;
         if (m.stash) this.stash = m.stash;
+        this._refreshBagIfOpen(); // partner-driven change while the bag's open
         break;
       case "stockAll":
         m.stocked.forEach((item, i) => this._applyStockSlot(i, item));
@@ -583,14 +584,15 @@ export const netMethods = {
         const e = D.enemies.find((v) => v.id === m.id);
         if (e && e.deadT < 0) {
           e.deadT = 0;
-          // guests share the boss fanfare (drops arrive separately from the host)
-          if (e.isBoss) {
-            D.boss = null;
-            D._explodeBoss(e);
-            this.onBossDefeated(e.creature.position);
-          }
           e.creature.die(_v.set(m.kx * 8, -3, m.kz * 8));
           this.audio.kill();
+          // guests share the boss's drawn-out death: the fog is drawn into the
+          // corpse, then it blasts and the fanfare/stairs play (drops arrive
+          // separately from the host). The corpse is disposed on the host's eDel.
+          if (e.isBoss) {
+            D.boss = null;
+            D._beginBossDeath(e, () => this.onBossDefeated(e.creature.position));
+          }
         }
         break;
       }

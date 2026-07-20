@@ -9,7 +9,7 @@ import { Creature } from "../chargen/creature.js";
 import { scatterDungeonDecor, disposeDecor } from "./decor.js";
 import { Projectiles } from "./projectile.js";
 import { rng, pick } from "../core/engine.js";
-import { DUNGEON_ORIGIN, isBossFloor, dungeonIndexFor, bossDefFor, ENEMY_KINDS, HOLE_THEMES, DEFAULT_THEME, FLOORS_PER_DUNGEON, floorMixFor, genFor } from "./dungeon-data.js";
+import { DUNGEON_ORIGIN, MAX_DEPTH, isBossFloor, dungeonIndexFor, bossDefFor, ENEMY_KINDS, HOLE_THEMES, DEFAULT_THEME, FLOORS_PER_DUNGEON, floorMixFor, genFor } from "./dungeon-data.js";
 import { CELL, makeChest, makeGate, makeFloorGeometry, makeStairs, makeDescent, buildAssetFloor, buildAssetWalls, scatterAssetProps, modelCollider } from "./dungeon-geometry.js";
 import { dungeonAssetsReady, dungeonWallMaterial } from "./dungeon-assets.js";
 import { aiMethods } from "./dungeon-ai.js";
@@ -29,7 +29,7 @@ export class Dungeon {
     this.chests = [];
     this.decor = []; // destructible props — billboards + smashable kit models
     this.structural = []; // unbreakable kit props (pillars); spark when struck
-    this.shafts = []; // god-ray light shafts (animated each frame)
+    this.shafts = []; // god-ray light shafts (animated each frame; some cast real light)
     this.colliders = [];
     this.projectiles = new Projectiles(game.engine.scene);
     this._wallMesh = null;
@@ -44,6 +44,10 @@ export class Dungeon {
     // stairs conjured where the boss falls: down to the next stacked dungeon,
     // or (final boss) straight home (world-space anchor)
     this.bossStairs = null;
+    // a real flight of stairs sunk into the boss arena's back wall, built
+    // hidden under a cover and revealed once the keeper falls (non-final bosses)
+    this.bossDescent = null;
+    this.bossDescentCell = null;
   }
 
   /** Build floor n from a seed (deterministic — co-op peers share the seed).
@@ -63,6 +67,9 @@ export class Dungeon {
     // (Never on the tutorial floor — it's a single peaceful room.)
     const isBoss = !tutorial && isBossFloor(floorN);
     this.isBoss = isBoss;
+    // the deepest boss has nowhere deeper to go — it leaves the way home
+    // instead of a staircase down (see onBossDefeated / spawnBossStairs)
+    const finalBoss = isBoss && floorN >= MAX_DEPTH;
 
     // generator knobs for this floor (base GEN + any per-floor overrides)
     const gen = genFor(floorN);
@@ -76,6 +83,10 @@ export class Dungeon {
     // moment the floor loads, plainly visible through the bars.
     const BW = 4, BH = 4, BX = Math.floor((GW - BW) / 2), BY = 1;
     const gateX = BX + Math.floor(BW / 2) - 1, gateY = BY + BH;
+    // non-final boss floors hide a staircase down against the arena's back wall,
+    // cut into both the tile floor (a floorHole) and the moody slab above it,
+    // then revealed when the keeper falls. Centred on the back row (BY).
+    this.bossDescentCell = (isBoss && !finalBoss) ? { x: BX + Math.floor(BW / 2), y: BY } : null;
     const yMin = isBoss ? BY + BH + 2 : 1; // keep normal rooms clear of the arena
     const open = Array.from({ length: GH }, () => new Array(GW).fill(false));
     const rooms = [];
@@ -189,7 +200,9 @@ export class Dungeon {
       if (room.cy < _farY) { _farY = room.cy; _farRoom = room; }
     }
     const hasDown = !tutorial && !isBoss;
-    const floorHoles = hasDown ? new Set([`${_farRoom.cx},${_farRoom.cy}`]) : null;
+    const floorHoles = new Set();
+    if (hasDown) floorHoles.add(`${_farRoom.cx},${_farRoom.cy}`);
+    if (this.bossDescentCell) floorHoles.add(`${this.bossDescentCell.x},${this.bossDescentCell.y}`);
 
     // --- floor slab (colors come from the hole's theme; tutorial gets the default)
     const theme = tutorial ? DEFAULT_THEME : (HOLE_THEMES[dungeonIndexFor(floorN)] ?? DEFAULT_THEME);
@@ -346,27 +359,38 @@ export class Dungeon {
     // --- god-ray shafts: light leaking through cracks in the ceiling above.
     // Cool arcane glow over the up-stairs at the entrance, warm dusk over the
     // down-stairs, and a couple of pale beams scattered through deeper rooms.
+    // Underground the shafts double as REAL light sources: each carries a
+    // PointLight (see makeLightShaft's `light`) so it carves a glowing pool out
+    // of the dimmed underground fill — the floor lights dynamically from these
+    // beams plus the hero's lantern rather than under one flat wash. `always`
+    // keeps them lit regardless of the decorative god-rays toggle, and their
+    // light is capped so deep floors never pile on too many.
+    const LIGHT_CAP = 6;
     const addShaft = (pos, opts) => {
+      if (opts.light && this._litShafts >= LIGHT_CAP) opts = { ...opts, light: null };
       const shaft = makeLightShaft(opts);
       shaft.position.set(pos.x, 3.4, pos.z);
       this.group.add(shaft);
       this.shafts.push(shaft);
+      if (opts.light) this._litShafts++;
       return shaft;
     };
-    addShaft(this.entrancePos, { color: 0x9a6dff, length: 4.6, topWidth: 0.6, bottomWidth: 2.6, opacity: 0.4, tilt: 0.28, spin: 0.4, motes: 14, always: true });
+    this._litShafts = 0;
+    addShaft(this.entrancePos, { color: 0x9a6dff, length: 4.6, topWidth: 0.6, bottomWidth: 2.6, opacity: 0.4, tilt: 0.28, spin: 0.4, motes: 14, always: true, light: { intensity: 2.4, range: 9.5 } });
     if (this.hasDownStairs)
-      addShaft(this.stairsPos, { color: 0xff9a4d, length: 4.6, topWidth: 0.55, bottomWidth: 2.4, opacity: 0.34, tilt: 0.24, spin: 1.2, motes: 12, always: true });
-    // the tutorial's up-stairs get a warm "way home" beam that's part of the
-    // chest-crack reveal
+      addShaft(this.stairsPos, { color: 0xff9a4d, length: 4.6, topWidth: 0.55, bottomWidth: 2.4, opacity: 0.34, tilt: 0.24, spin: 1.2, motes: 12, always: true, light: { intensity: 2.4, range: 9 } });
+    // the tutorial's up-stairs get a warm "way home" beam (with its pool light)
+    // that's part of the chest-crack reveal — hidden, light and all, until then
     if (tutorial) {
-      const homeShaft = addShaft(this.upStairsPos, { color: 0xffd9a0, length: 4.6, topWidth: 0.55, bottomWidth: 2.4, opacity: 0.34, tilt: 0.24, spin: 1.2, motes: 12, always: true });
+      const homeShaft = addShaft(this.upStairsPos, { color: 0xffd9a0, length: 4.6, topWidth: 0.55, bottomWidth: 2.4, opacity: 0.34, tilt: 0.24, spin: 1.2, motes: 12, always: true, light: { intensity: 2.4, range: 9 } });
       homeShaft.visible = false;
       this._stairsMeshes.push(homeShaft);
     }
     for (const room of rooms.slice(1, -1)) {
       if (r() < 0.5) {
         const p = cellPos(room.cx, room.cy);
-        addShaft(p, { color: pick(r, theme.shafts), length: 4.4, topWidth: 0.5, bottomWidth: 2.1, opacity: 0.24 + r() * 0.1, tilt: 0.18 + r() * 0.3, spin: r() * Math.PI, motes: 10 });
+        const col = pick(r, theme.shafts);
+        addShaft(p, { color: col, length: 4.4, topWidth: 0.5, bottomWidth: 2.1, opacity: 0.24 + r() * 0.1, tilt: 0.18 + r() * 0.3, spin: r() * Math.PI, motes: 10, always: true, light: { intensity: 1.9, range: 7.5 } });
       }
     }
 
@@ -447,6 +471,11 @@ export class Dungeon {
 
     // --- boss arena furniture, gate and the boss itself (final floor only)
     if (isBoss) this._buildBossArena(seed, cellPos, BX, BY, BW, BH, gateX, gateY);
+
+    // opt the whole floor's geometry into the hero's carried torch (light layer
+    // 1) so the lantern pool falls on the walls, floor and props around them
+    // (enemies opt in on spawn; the local player stays out — see engine.torch)
+    this.group.traverse((o) => o.layers.enable(1));
   }
 
   // Build the sealed arena: a moody slab, a dramatic red light shaft, the
@@ -455,14 +484,56 @@ export class Dungeon {
   _buildBossArena(seed, cellPos, BX, BY, BW, BH, gateX, gateY) {
     const center = cellPos(BX + BW / 2 - 0.5, BY + BH / 2 - 0.5);
 
-    const slab = new THREE.Mesh(
-      new THREE.PlaneGeometry(BW * CELL, BH * CELL).rotateX(-Math.PI / 2),
-      new THREE.MeshToonMaterial({ color: 0x3a2030 })
-    );
+    // the moody arena slab. On non-final floors it's cut with a square gap over
+    // the back-wall descent cell so the staircase down can drop through it once
+    // the keeper falls (a matching cover fills the gap until then).
+    let slabGeo;
+    if (this.bossDescentCell) {
+      const dp = cellPos(this.bossDescentCell.x, this.bossDescentCell.y);
+      // ShapeGeometry lives in the XY plane; rotateX(-90°) maps +y → -z, so the
+      // hole's shape-space centre is (Δx, -Δz) from the slab's centre.
+      const hx = dp.x - center.x, hy = -(dp.z - center.z), h = CELL / 2;
+      const hw = (BW * CELL) / 2, hh = (BH * CELL) / 2;
+      const shape = new THREE.Shape();
+      shape.moveTo(-hw, -hh); shape.lineTo(hw, -hh); shape.lineTo(hw, hh); shape.lineTo(-hw, hh); shape.lineTo(-hw, -hh);
+      const hole = new THREE.Path();
+      hole.moveTo(hx - h, hy - h); hole.lineTo(hx + h, hy - h); hole.lineTo(hx + h, hy + h); hole.lineTo(hx - h, hy + h); hole.lineTo(hx - h, hy - h);
+      shape.holes.push(hole);
+      slabGeo = new THREE.ShapeGeometry(shape).rotateX(-Math.PI / 2);
+    } else {
+      slabGeo = new THREE.PlaneGeometry(BW * CELL, BH * CELL).rotateX(-Math.PI / 2);
+    }
+    const slab = new THREE.Mesh(slabGeo, new THREE.MeshToonMaterial({ color: 0x3a2030 }));
     slab.position.set(center.x, 0.02, center.z);
     this.group.add(slab);
 
-    const shaft = makeLightShaft({ color: 0xff3b3b, length: 5.2, topWidth: 0.85, bottomWidth: 3.6, opacity: 0.3, tilt: 0.1, spin: 0.7, motes: 18 });
+    // the way deeper: a real flight of stairs sunk into the arena's back wall.
+    // Built now (deterministic on host + guest) but held hidden under a cover
+    // that matches the slab — revealBossStairs drops the cover and lights it
+    // when the keeper falls (see game.onBossDefeated).
+    if (this.bossDescentCell) {
+      const dp = cellPos(this.bossDescentCell.x, this.bossDescentCell.y);
+      const descent = makeDescent();
+      descent.position.copy(dp);
+      descent.visible = false;
+      this.group.add(descent);
+      const cover = new THREE.Mesh(
+        new THREE.PlaneGeometry(CELL, CELL).rotateX(-Math.PI / 2),
+        new THREE.MeshToonMaterial({ color: 0x3a2030 })
+      );
+      cover.position.set(dp.x, 0.03, dp.z);
+      this.group.add(cover);
+      this.bossDescent = {
+        group: descent,
+        cover,
+        collider: modelCollider(descent, DUNGEON_ORIGIN),
+        pos: new THREE.Vector3(dp.x + DUNGEON_ORIGIN.x, 0, dp.z + DUNGEON_ORIGIN.z),
+      };
+    }
+
+    // a menacing red glow pools over the arena — the beam is a real light so the
+    // sealed fight reads dramatically lit apart from the corridors leading to it
+    const shaft = makeLightShaft({ color: 0xff3b3b, length: 5.2, topWidth: 0.85, bottomWidth: 3.6, opacity: 0.3, tilt: 0.1, spin: 0.7, motes: 18, always: true, light: { intensity: 3.0, range: 12, decay: 1.5 } });
     shaft.position.set(center.x, 3.6, center.z);
     this.group.add(shaft);
     this.shafts.push(shaft);
@@ -492,6 +563,12 @@ export class Dungeon {
       const boss = this.spawnEnemy("boss", (this.seed % 100000) + 54321 + this.floor * 991, dungeonIndexFor(this.floor) + 2, this.bossCenter.x, this.bossCenter.z);
       boss.dormant = true;
     }
+
+    // a thick fog bank rolls through the arena (built on host + guest, seeded so
+    // it matches). It's an occluder material, so the wall-removal dither eats
+    // the puffs between the camera and the keeper — you see the boss through the
+    // smoke. Felled, the boss draws the whole bank back into its corpse.
+    this._buildBossFog(center, BW, BH);
   }
 
   /** Unlock the boss door: drop its colliders, start the gate rising, and wake
@@ -621,8 +698,13 @@ export class Dungeon {
 
     for (const s of this.shafts) s.userData.update(dt, elapsed);
 
-    // the boss stairs' floor glow pulses once they've been conjured
-    if (this.bossStairs) {
+    // the arena fog: billboard + breathe it, feed the occluder so the keeper
+    // reads through it, and (once felled) stream it into the corpse
+    if (this.bossFog) this._updateBossFog(dt, elapsed);
+
+    // the conjured boss stairs' floor glow pulses once revealed (the sunk
+    // arena staircase has no disc/ring, so it's skipped here)
+    if (this.bossStairs && this.bossStairs.disc) {
       const bs = this.bossStairs;
       bs.disc.material.opacity = 0.45 + Math.sin(elapsed * 3) * 0.15;
       bs.ring.material.opacity = 0.6 + Math.sin(elapsed * 3 + 1) * 0.15;
@@ -745,6 +827,17 @@ export class Dungeon {
     this.keyChestId = -1;
     this.isBoss = false;
     this.bossStairs = null;
+    this.bossDescent = null;
+    this.bossDescentCell = null;
+    // arena fog + its death-sequence clock
+    if (this.bossFog) {
+      this.bossFog.group.removeFromParent();
+      this.bossFog.geo.dispose();
+      this.bossFog.mat.dispose();
+    }
+    this.bossFog = null;
+    this._bossFogMat = null;
+    this._fogDeath = null;
   }
 }
 

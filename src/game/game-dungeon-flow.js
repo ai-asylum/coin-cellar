@@ -375,13 +375,20 @@ export const dungeonFlowMethods = {
     this.player.animator.prevPos.copy(this.player.position);
     this._invulnT = Math.max(this._invulnT, LEVEL_INVULN); // grace on arrival
     this.today.deepest = Math.max(this.today.deepest, this.dungeon.floor);
+    const place = this.cave.holes[this.cellarHole]?.name ?? "Cellar";
+    // a genuinely new deepest floor is town news — the residents remark on it
+    // next time you chat (floor 1 doesn't count as a "deeper" push)
+    if (this.dungeon.floor > this.deepestEver && this.dungeon.floor > 1) {
+      this.deepestEver = this.dungeon.floor;
+      this.recordPlayerDeed("newDepth", { floor: this.dungeon.floor, place });
+      if (!this.net.isGuest) this._save();
+    }
     // hop onto this hole's realtime channel so fellow delvers show up
     if (this.cellarHole >= 0) this.lobby.join(`hole:${utcDay()}:${this.cellarHole}`);
     this.audio.stairs();
     this._snapCamera();
     const bossFloor = isBossFloor(this.dungeon.floor);
     const finalFloor = this.dungeon.floor >= MAX_DEPTH;
-    const place = this.cave.holes[this.cellarHole]?.name ?? "Cellar";
     this.hud.banner(
       bossFloor
         ? `${icon("skull")} ${place} — ${finalFloor ? "Final Floor" : "Boss Floor"}`
@@ -407,12 +414,12 @@ export const dungeonFlowMethods = {
     this.paused = !this.net.connected;
     const el = this.hud.showSheet(`
       <div class="sheet-title"><span class="big-emoji">${icon("home")}</span>
-        <div><b>Leave the dungeon?</b><br/><small>Climb back to the surface — your run ends and the bag empties into the storeroom.</small></div></div>
+        <div><b>Leave the dungeon?</b></div></div>
       <div class="sheet-btns">
         <button class="btn deny" id="up-stay">${icon("arrowDown")} Keep delving</button>
         <button class="btn deal" id="up-leave">${icon("home")} Go up</button>
       </div>
-    `, "sheet-card");
+    `, "sheet-card leave-sheet");
     el.querySelector("#up-stay").onclick = () => {
       this.paused = false;
       this.hud.hideSheet();
@@ -524,12 +531,12 @@ export const dungeonFlowMethods = {
     const boss = bossDefFor(dungeonIndexFor(this.dungeon.floor));
     const el = this.hud.showSheet(`
       <div class="sheet-title"><span class="big-emoji">${icon("skull")}</span>
-        <div><b>The sealed door</b><br/><small>${has ? `${boss.name} waits beyond — enter, or turn back up?` : `You need a ${itemIcon("key")} Brass Key to breach it.`}</small></div></div>
+        <div><b>The sealed door</b><br/><small>${has ? `${boss.name} — enter, or turn back up?` : `You need a ${itemIcon("key")} Brass Key to breach it.`}</small></div></div>
       <div class="sheet-btns">
         <button class="btn deny" id="gate-up">${icon("home")} Go back up</button>
         <button class="btn deal" id="gate-enter">${icon("skull")} Enter boss</button>
       </div>
-    `, "sheet-card");
+    `, "sheet-card gate-sheet");
     el.querySelector("#gate-up").onclick = () => {
       this.paused = false;
       this.hud.hideSheet();
@@ -601,11 +608,14 @@ export const dungeonFlowMethods = {
       this._save();
     }
     this.hud.banner(`${icon("crown")} ${name} falls!`, "", 3.4);
+    // town news: the next resident you chat with leads with the boss kill
+    this.recordPlayerDeed("bossFelled", { boss: name, place: this.cave.holes[this.cellarHole]?.name ?? "the cellar", floor: this.dungeon.floor });
     if (pos) {
       this.particles.burst(_v.copy(pos).setY(1), { color: 0xffe08a, n: 30, speed: 5, up: 2.2, life: 1.1, size: 1.3 });
-      // deterministic on host + guest (both run this): descent stairs, or the
-      // way home once the deepest boss falls
-      this.dungeon.spawnBossStairs(pos.x, pos.z, !final);
+      // deterministic on host + guest (both run this): reveal the real staircase
+      // down sunk into the arena's back wall — or, once the deepest boss falls,
+      // conjure the way straight home where it fell (no floor deeper to sink into)
+      if (final || !this.dungeon.revealBossStairs()) this.dungeon.spawnBossStairs(pos.x, pos.z, !final);
     }
   },
 };

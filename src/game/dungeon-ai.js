@@ -81,7 +81,9 @@ export const aiMethods = {
     if (e.deadT >= 0) {
       e.deadT += dt;
       c.update(dt, elapsed);
-      if (e.deadT > 1.4) {
+      // the boss corpse is held in place by its death sequence (fog drawn in,
+      // then the blast) and removed explicitly once that wraps — never sunk
+      if (!e.isBoss && e.deadT > 1.4) {
         c.position.y -= dt * 1.2; // sink away
         if (e.deadT > 2.2) this._removeEnemy(e);
       }

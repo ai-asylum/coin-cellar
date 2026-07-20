@@ -10,7 +10,7 @@
 // additionally spawns the opener's slime here (see spawnSlime /
 // game-narrative's _updateCaveIntro).
 import * as THREE from "three";
-import { makeToonMaterial, feedOccluder } from "../core/toon.js";
+import { makeToonMaterial, feedOccluder, fogPuffTexture } from "../core/toon.js";
 import { makeLightShaft } from "../core/godrays.js";
 import { rng } from "../core/engine.js";
 import { Creature } from "../chargen/creature.js";
@@ -23,25 +23,6 @@ import { dungeonAssetsReady, dungeonPalette, cloneModel } from "./dungeon-assets
 import { getLayout } from "./layout-store.js";
 
 export const CAVE_ORIGIN = new THREE.Vector3(-200, 0, 200);
-
-// A soft round smudge of near-black, cached, for the FTUE fog bank (a wall of
-// overlapping puffs reads as thick rolling smoke). Alpha falls off to the edge
-// so the puffs blend into one another instead of stamping hard discs.
-let _fogTex = null;
-function fogPuffTexture() {
-  if (_fogTex) return _fogTex;
-  const c = document.createElement("canvas");
-  c.width = c.height = 64;
-  const g = c.getContext("2d");
-  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
-  grad.addColorStop(0, "rgba(3,3,6,0.95)");
-  grad.addColorStop(0.55, "rgba(3,3,6,0.6)");
-  grad.addColorStop(1, "rgba(3,3,6,0)");
-  g.fillStyle = grad;
-  g.fillRect(0, 0, 64, 64);
-  _fogTex = new THREE.CanvasTexture(c);
-  return _fogTex;
-}
 
 // The footprint: the old cellar lobby's 9×5 hall, dug out at the deep (north)
 // end, with a narrow tunnel running down to a one-cell mouth carved out of the
@@ -96,7 +77,7 @@ export class Cave {
     this.group = new THREE.Group();
     this.group.position.copy(CAVE_ORIGIN);
     game.engine.scene.add(this.group);
-    this.shafts = [];
+    this.shafts = []; // god-ray beams; the mouths + daylight ones also cast real light
     this.colliders = [];
     this.rats = [];
     this.slime = null; // the FTUE opener's mark — spawned on demand
@@ -248,7 +229,9 @@ export class Cave {
         mouth.position.copy(local).setY(0.02);
         this.group.add(mouth);
       }
-      const shaft = makeLightShaft({ color: hole.color, length: 4.2, topWidth: 0.45, bottomWidth: 1.6, opacity: 0.22, tilt: 0.16, spin: r() * Math.PI, motes: 8 });
+      // the beam doubles as a soft coloured light, so each trapdoor reads as a
+      // lit landmark carved out of the cave's gloom rather than a flat patch
+      const shaft = makeLightShaft({ color: hole.color, length: 4.2, topWidth: 0.45, bottomWidth: 1.6, opacity: 0.22, tilt: 0.16, spin: r() * Math.PI, motes: 8, always: true, light: { intensity: 1.5, range: 6.5 } });
       shaft.position.set(local.x, 3.2, local.z);
       this.group.add(shaft);
       this.shafts.push(shaft);
@@ -282,7 +265,9 @@ export class Cave {
 
     // --- the daylight mouth: a warm shaft pouring in, a glare quad filling the
     // gap (facing the camera) and a pool of light spilling onto the floor
-    const shaft = makeLightShaft({ color: 0xfff0c0, length: 5.2, topWidth: 0.7, bottomWidth: 2.8, opacity: 0.5, tilt: 0.3, spin: 0.4, motes: 16 });
+    // warm daylight spilling in from the mouth — the beam casts a bright pool
+    // (the brightest light in the cave) that pulls the eye toward the way out
+    const shaft = makeLightShaft({ color: 0xfff0c0, length: 5.2, topWidth: 0.7, bottomWidth: 2.8, opacity: 0.5, tilt: 0.3, spin: 0.4, motes: 16, always: true, light: { intensity: 3.4, range: 12, decay: 1.5, y: -3.0 } });
     shaft.position.set(exitLocal.x, 3.6, exitLocal.z);
     this.group.add(shaft);
     this.shafts.push(shaft);
@@ -334,6 +319,11 @@ export class Cave {
     scatterDungeonDecor(this.group, r, [CHAMBER, TUNNEL], cellPos, { skip, theme: HOLE_THEMES[0].decor });
     for (const pr of scatterAssetProps(this.group, r, [CHAMBER, TUNNEL], cellPos, { skip, origin: CAVE_ORIGIN }))
       this.colliders.push(pr.collider);
+
+    // opt the cave geometry into the hero's carried torch (light layer 1) so the
+    // lantern pool lands on the walls, floor and props (critters opt in on
+    // spawn; the local player stays out — see engine.torch)
+    this.group.traverse((o) => o.layers.enable(1));
   }
 
   _spawnRats() {
@@ -414,12 +404,16 @@ export class Cave {
     const tex = fogPuffTexture();
     const r = rng(4242);
     const puffs = [];
-    // one dark puff, drawn over everything behind (depthTest off) so no mouth,
-    // shaft or wall pokes through — stacked, they read as one rolling black mass
+    // one dark puff — stacked, they read as one rolling black mass. depthTest
+    // stays ON so the fog is correctly occluded by anything nearer the camera
+    // (namely the hero, who wakes just south of the lip): with it off, the bank
+    // painted straight over his head. The bank sits at the chamber's south lip,
+    // frontmost of the mouths/shafts/walls it hides, so depth-testing still
+    // covers them cleanly. depthWrite stays off so overlapping puffs blend.
     const addPuff = (x, y, z, sc, op) => {
       const mat = new THREE.SpriteMaterial({
         map: tex, color: 0x04040a, transparent: true,
-        opacity: op, depthWrite: false, depthTest: false, fog: false,
+        opacity: op, depthWrite: false, depthTest: true, fog: false,
       });
       const s = new THREE.Sprite(mat);
       s.position.set(x, y, z);
@@ -430,14 +424,23 @@ export class Cave {
       group.add(s);
       puffs.push(s);
     };
-    // the boundary the player actually sees: an even grid of same-size puffs
-    // standing along the fog lip, so it reads as one coherent, clean-edged wall
-    // rather than a ragged scatter (the wave in update() keeps it alive)
+    // the boundary the player actually sees: a row of puffs standing along the
+    // fog lip. With depth-testing on, only this front row survives (the loose
+    // scatter behind gets clipped by the cave geometry), so the ragged crown
+    // has to live here — each column's top puff juts up by a jittered amount,
+    // with a little scale/x wobble, so the silhouette reads as a rolling,
+    // uneven bank rather than a ruler-straight wall. (the wave in update()
+    // keeps it alive)
     const HALF = 12, COLS = 13, ROWS = 4;
     for (let c = 0; c <= COLS; c++) {
       const x = -HALF + (2 * HALF) * (c / COLS);
-      for (let row = 0; row < ROWS; row++)
-        addPuff(x, 0.5 + row * 1.5, VEIL_EDGE_Z, 4.0, 0.82);
+      const lift = r() * 1.6; // how high this column's crown juts above the rest
+      for (let row = 0; row < ROWS; row++) {
+        const top = row === ROWS - 1;
+        const y = 0.5 + row * 1.5 + (top ? lift : 0);
+        const sc = 4.0 + (top ? r() * 1.8 : 0) + (r() - 0.5) * 0.7;
+        addPuff(x + (r() - 0.5) * 1.3, y, VEIL_EDGE_Z + (r() - 0.5) * 0.6, sc, 0.82);
+      }
     }
     // fill packed in behind it (north, out of sight) — this is the part that
     // guarantees the mouths and walls never poke through, so it can stay loose
@@ -494,7 +497,15 @@ export class Cave {
   }
 
   update(dt, elapsed) {
-    if (this.game.playerArea !== "cave") return;
+    // the cave group lives in the scene permanently, so its shaft lights would
+    // otherwise be counted (and cost shader cycles) everywhere, including the
+    // shop far away — only let them contribute while the player's actually here
+    const inCave = this.game.playerArea === "cave";
+    if (this._litArea !== inCave) {
+      for (const s of this.shafts) { const l = s.userData.light; if (l) l.visible = inCave; }
+      this._litArea = inCave;
+    }
+    if (!inCave) return;
     // walls dither away between the camera and the hero, plus the creatures in
     // here (the FTUE slime and any live rats), so none get tucked behind a wall
     const occluders = this.rats.filter((r) => !r.creature.dead).map((r) => r.creature);
