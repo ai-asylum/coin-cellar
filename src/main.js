@@ -7,6 +7,7 @@ import { loadCharacters } from "./chargen/assets.js";
 import { loadDungeonAssets } from "./game/dungeon-assets.js";
 import { icon } from "./core/icons.js";
 import { initAnalytics, track } from "./core/analytics.js";
+import { SAVE_KEY } from "./game/game-persistence.js";
 
 initAnalytics();
 
@@ -26,14 +27,29 @@ function loadingScreen(text) {
 // a user gesture). The menu floats over the live attract scene (the hero
 // strolling the town), so it's its own transparent overlay on <body> rather
 // than owning the HUD layer.
+function hasSave() {
+  try {
+    const s = JSON.parse(localStorage.getItem(SAVE_KEY));
+    return !!(s && s.day);
+  } catch {
+    return false;
+  }
+}
+
 function startMenu() {
   return new Promise((resolve) => {
     const el = document.createElement("div");
     el.id = "start-menu";
+    // "New Game" only makes sense for returning players — a fresh start wipes
+    // the saved run, so it's hidden entirely until there's something to wipe.
+    const newGameBtn = hasSave()
+      ? `<button class="btn deny start-new" id="start-new">${icon("play")} New Game</button>`
+      : "";
     el.innerHTML = `
       <img class="start-logo-img" src="logo2.png" alt="Coin Cellar" />
       <div class="start-card">
         <button class="btn deal start-play" id="start-play">${icon("play")} Play</button>
+        ${newGameBtn}
       </div>`;
     document.body.appendChild(el);
     el.querySelector("#start-play").onclick = () => {
@@ -43,7 +59,36 @@ function startMenu() {
       el.remove();
       resolve();
     };
+    el.querySelector("#start-new")?.addEventListener("click", () => confirmNewGame());
   });
+}
+
+// Confirm before starting over — wiping the save is destructive, so make the
+// player opt in. On confirm we clear the save and reload; boot then rebuilds
+// the world fresh (no save to load) and drops back to the menu, where Play
+// starts the new run on a deliberate tap (keeping the audio-unlock gesture).
+function confirmNewGame() {
+  const modal = document.createElement("div");
+  modal.id = "new-game-modal";
+  modal.innerHTML = `
+    <div class="ng-card">
+      <div class="ng-title">Start a New Game?</div>
+      <div class="ng-body">This will erase your saved run. This can't be undone.</div>
+      <div class="ng-btns">
+        <button class="btn ng-cancel">Cancel</button>
+        <button class="btn deny ng-confirm">${icon("play")} New Game</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  const close = () => modal.remove();
+  modal.querySelector(".ng-cancel").onclick = close;
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) close();
+  });
+  modal.querySelector(".ng-confirm").onclick = () => {
+    localStorage.removeItem(SAVE_KEY);
+    location.reload();
+  };
 }
 
 async function boot() {
