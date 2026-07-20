@@ -284,6 +284,8 @@ export function npcIntroLines(npc) {
 // ambient crowd allocator leaves their skins free for those set-pieces. `lines`
 // carries five small-talk bubbles per time of day (see TIMES_OF_DAY) so a face
 // you meet at dawn greets you differently than the same face after dark.
+// `arriveLines` are the asides they mutter as they head in to shop (shown as a
+// floating speech bubble on the way to the door — see npcArriveLine).
 export const NPCS = [
   {
     id: "pip", name: "Pip", variant: "b", personality: "peppy",
@@ -308,6 +310,11 @@ export const NPCS = [
     wishLines: [
       "Ooh, if something all sparkly and precious comes in, save it for ME, 'kay?!",
       "I go WEAK for shiny treasure — gems, crowns, glittery bits. Bring 'em ALL, hee!",
+    ],
+    arriveLines: [
+      "Shop time, shop time! Ooh, I can't WAIT to see what's new!",
+      "Eee, I'm gonna buy something today, I just KNOW it!",
+      "Skippety-skip to the shop! Best errand EVER!",
     ],
     lines: {
       morning: [
@@ -364,6 +371,11 @@ export const NPCS = [
       "Stock honest kit, not glittery junk. Lanterns, boots, a sturdy shield. That's sense.",
       "I want gear that earns its keep — and none of it priced like it's made of gold. Hmph.",
     ],
+    arriveLines: [
+      "Hmph. Suppose I'll see if there's anything worth buying.",
+      "Better not be overpriced junk again. We'll see.",
+      "In and out, that's the plan. No dawdling.",
+    ],
     lines: {
       morning: [
         "Hmph. Up at this hour? Least you've got some sense.",
@@ -418,6 +430,11 @@ export const NPCS = [
     wishLines: [
       "A bit of fresh bread or something for the pot, that's what warms a house, dear.",
       "Keep some good honest food on the shelf and I'll be by ever so often, promise.",
+    ],
+    arriveLines: [
+      "Ooh, let me pop in and see what's on the shelves, dear.",
+      "I do enjoy a little browse of an afternoon.",
+      "Best see if there's anything nice for the house.",
     ],
     lines: {
       morning: [
@@ -474,6 +491,11 @@ export const NPCS = [
       "I favour the well-made and the sensible — sturdy gear, correctly priced. It endures.",
       "Stock things built to last, not to dazzle. A sound tool outlives a shiny one. Fact.",
     ],
+    arriveLines: [
+      "Time to inspect the stock. I keep a mental ledger, you know.",
+      "Let's see whether today's prices are correctly set. They rarely are.",
+      "A quick, orderly browse. In and catalogued by half past.",
+    ],
     lines: {
       morning: [
         "Morning. Did you know a good ledger outlasts three roofs? It's true.",
@@ -528,6 +550,11 @@ export const NPCS = [
     wishLines: [
       "Bring in the HEAVY stuff, champ — big blades, solid armour. Gains you can carry!",
       "Weapons and gear with some WEIGHT to 'em, that's my aisle. Heavier the better!",
+    ],
+    arriveLines: [
+      "Shop run, let's GO champ! Errands count as cardio!",
+      "Time to scope the gains on the shelves, whoo!",
+      "Powerwalkin' to the shop! Feel that burn!",
     ],
     lines: {
       morning: [
@@ -584,6 +611,11 @@ export const NPCS = [
       "I've an eye for the finer things — treasure, trinkets, anything that flatters me.",
       "Stock something luxurious and I'll be back. Beauty deserves beautiful company.",
     ],
+    arriveLines: [
+      "Let's see if anything's worthy of my company today.",
+      "A little shopping. Everything looks better once I've browsed it.",
+      "Time to grace the shop with my exquisite taste.",
+    ],
     lines: {
       morning: [
         "Good morning, and what a fetching one — much like myself.",
@@ -638,6 +670,11 @@ export const NPCS = [
     wishLines: [
       "I buy nothing but the rarest treasure, darling. Stock accordingly, if you're able.",
       "The finest gems, the costliest trinkets — that earns my coin. Nothing less will.",
+    ],
+    arriveLines: [
+      "One supposes one must see if the stock has improved.",
+      "Do let there be something befitting my standards today.",
+      "Off to browse. I shan't lower my expectations, darling.",
     ],
     lines: {
       morning: [
@@ -694,6 +731,11 @@ export const NPCS = [
       "If something pretty and quietly magical comes in — a crystal, a star — set it by for me?",
       "I do love little wonders. Anything that glimmers or hums, I could gaze at for hours.",
     ],
+    arriveLines: [
+      "I wonder what little wonders are waiting today...",
+      "The shop's calling, soft as a daydream. I'll drift over.",
+      "Maybe something that glimmers is waiting for me.",
+    ],
     lines: {
       morning: [
         "Morning... or is it? The light's the colour of honey, so I forgive it.",
@@ -748,6 +790,11 @@ export const NPCS = [
     wishLines: [
       "Just keep snacks around, honestly. Cheap eats. Somethin' I don't gotta work for. Mmn.",
       "Food's the only thing worth reachin' for. Nothin' fancy — nothin' pricey, either.",
+    ],
+    arriveLines: [
+      "Ugh, fine, I'll go look. Cheaper than growin' my own snacks.",
+      "Shop's close enough. Barely counts as effort. Barely.",
+      "Gonna go buy a snack. Then a nap. Priorities.",
     ],
     lines: {
       morning: [
@@ -804,6 +851,11 @@ export const NPCS = [
       "Keep some good food in, kiddo, and sturdy gear too. A body's gotta eat AND stay safe.",
       "Hearty meals and kit that won't let folk down — that's what I come lookin' for, hon.",
     ],
+    arriveLines: [
+      "Right, off to the shop. Somebody in my house always needs somethin'.",
+      "Let's see what's worth pickin' up for the family, hon.",
+      "In we go, kiddo. I'll grab what we need and be gone.",
+    ],
     lines: {
       morning: [
         "Mornin', kiddo! Up with the sun, good on ya.",
@@ -858,6 +910,11 @@ export const NPCS = [
     wishLines: [
       "A little simple food is all I need, friend. Nothing costly, nothing to weigh me down.",
       "Keep something plain and honest on the shelf — bread, a herb for tea. That's plenty.",
+    ],
+    arriveLines: [
+      "A gentle wander to the shop. No rush, no fuss.",
+      "The shelves will show me what I need, friend. Or nothing. Both are fine.",
+      "I'll drift in and see what the day offers.",
     ],
     lines: {
       morning: [
@@ -914,6 +971,11 @@ export const NPCS = [
       "Stock a bit of everything folk'll TALK about, dear — pretty trinkets, nice treats.",
       "Sweet things and shiny things, that's what gets tongues wagging. And oh, I do love that.",
     ],
+    arriveLines: [
+      "Ooh, off to the shop — bet there's news to hear AND goods to buy!",
+      "A browse AND a natter? My favourite kind of errand, dear.",
+      "Let's see what everyone's been buying. Purely research!",
+    ],
     lines: {
       morning: [
         "Morning! You'll never guess who I saw sneaking home at dawn. Guess. Go on.",
@@ -968,6 +1030,11 @@ export const NPCS = [
     wishLines: [
       "Bring in weapons a man can BRAG about, eh — big blades, trophies. Stuff worth a tale.",
       "I want the heavy, the impressive, the folk-will-stare gear. Nothin' small for Bruno!",
+    ],
+    arriveLines: [
+      "Off to the shop! They'll want to see me, no doubt.",
+      "Time to find gear worthy of my many legends, eh.",
+      "Bruno's shoppin'! Clear the aisle, folk'll want a look.",
     ],
     lines: {
       morning: [
@@ -1024,6 +1091,11 @@ export const NPCS = [
       "Food, dear — good food. The finer the fare, the faster I'll empty your shelves.",
       "Keep the pantry stocked with something delicious and you'll never be rid of me.",
     ],
+    arriveLines: [
+      "Ooh, let's see if there's anything delicious in today, dear.",
+      "Off to the shop — my stew won't season itself!",
+      "I can practically smell a good bargain. To the shelves!",
+    ],
     lines: {
       morning: [
         "Morning! I've a loaf in the oven and I can't stop thinking about lunch.",
@@ -1078,6 +1150,11 @@ export const NPCS = [
     wishLines: [
       "Anything with gears or a hinge or a spring — bring it in! I can't resist a mechanism.",
       "Stock gadgets and clever gear, would you? The more moving parts, the happier I am.",
+    ],
+    arriveLines: [
+      "To the shop! Maybe something with gears I can tinker with.",
+      "Let's see what mechanisms are waiting to be improved.",
+      "Off to browse — every gadget's a project in disguise!",
     ],
     lines: {
       morning: [
@@ -1134,6 +1211,11 @@ export const NPCS = [
       "Stock treasure befitting the township's dignity — grand, glittering, worthy of ME. Ahem.",
       "Show me splendour! Gems, crowns, things that trumpet civic magnificence. And mine.",
     ],
+    arriveLines: [
+      "The Mayor shall grace the shop with his patronage. Ahem.",
+      "Let us see what splendour befits a man of my office.",
+      "A civic duty, this — supporting local trade. And myself.",
+    ],
     lines: {
       morning: [
         "Ah, the heir! Rise and shine for the greater glory of the township!",
@@ -1188,6 +1270,11 @@ export const NPCS = [
     wishLines: [
       "Rugged kit and hearty food, that's the trail-goer's list. Stock those and I'm yours, eh.",
       "Sturdy boots, a good blade, a proper meal — that's what a life outdoors runs on.",
+    ],
+    arriveLines: [
+      "Off to the shop — need to restock the trail kit, eh.",
+      "Let's see if there's sturdy gear worth haulin' home.",
+      "A quick supply run, then back to the open air!",
     ],
     lines: {
       morning: [
@@ -1286,6 +1373,17 @@ export function npcBuyLine(npc, bucket, itemName = "", roll = Math.random()) {
 // can seed the pick. Returns null if the townsperson has no wish lines.
 export function npcWishLine(npc, roll = Math.random()) {
   const pool = npc?.wishLines;
+  if (!pool || !pool.length) return null;
+  return pool[Math.floor(roll * pool.length) % pool.length];
+}
+
+// A townsperson's little "on my way to the shop" aside — the line that floats
+// over their head (see hud.speechBubble) as they peel off the street and head
+// for the door. In their own voice; three per person. `roll` is a 0–1 number so
+// callers can seed the pick (keeping host/guest in sync). Returns null if the
+// townsperson has no arrival lines.
+export function npcArriveLine(npc, roll = Math.random()) {
+  const pool = npc?.arriveLines;
   if (!pool || !pool.length) return null;
   return pool[Math.floor(roll * pool.length) % pool.length];
 }
@@ -1617,4 +1715,358 @@ export function npcReflectionLine(npc, bucket, itemId, itemName = "", roll = Mat
   if (!pool || !pool.length) return null;
   const line = pool[Math.floor(roll * pool.length) % pool.length];
   return line.replace(/\{item\}/g, itemName || "that");
+}
+
+// ---- occasions: what day it is ---------------------------------------------
+// Townsfolk greet you differently on notable calendar days — the seasonal
+// holidays first (Easter, Halloween, Christmas…), then a lighter day-of-the-week
+// flavour. Each occasion carries a `test(date)` predicate resolved against the
+// real (or an admin-pinned) date; the list is priority-ordered, so a holiday
+// always wins over a weekday. `mood` is a core/icons.js key for the admin panel.
+// The spoken lines live in OCCASION_LINES, keyed by personality (with a generic
+// _default fallback), so a face you meet on Halloween reads in its own voice.
+
+// Gregorian Easter Sunday (Meeus/Jones/Butcher algorithm) for a given year,
+// returned as a { month:0-11, date } so the occasion test can match it — Easter
+// wanders by lunar reckoning, so it can't be a fixed calendar day.
+export function easterFor(year) {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31); // 3 = March, 4 = April
+  const date = ((h + l - 7 * m + 114) % 31) + 1;
+  return { month: month - 1, date };
+}
+
+// True if `date` falls within `spanDays` on/after Easter Sunday (so the shop's
+// Easter greeting covers the long weekend, not just the Sunday).
+function isEaster(date, spanDays = 2) {
+  const e = easterFor(date.getFullYear());
+  const sunday = new Date(date.getFullYear(), e.month, e.date);
+  const diff = Math.floor((date - sunday) / 86400000);
+  return diff >= 0 && diff <= spanDays;
+}
+
+export const OCCASIONS = [
+  { id: "newyear", label: "New Year", mood: "faceStar", test: (d) => d.getMonth() === 0 && d.getDate() === 1 },
+  { id: "valentines", label: "Valentine's Day", mood: "faceHappy", test: (d) => d.getMonth() === 1 && d.getDate() === 14 },
+  { id: "easter", label: "Easter", mood: "faceHappy", test: (d) => isEaster(d) },
+  { id: "halloween", label: "Halloween", mood: "faceConfused", test: (d) => d.getMonth() === 9 && d.getDate() === 31 },
+  { id: "christmas", label: "Christmas", mood: "faceStar", test: (d) => d.getMonth() === 11 && (d.getDate() === 24 || d.getDate() === 25) },
+  // the lighter day-of-the-week flavour — only used when no holiday is running
+  { id: "weekend", label: "Weekend", mood: "faceSmile", test: (d) => d.getDay() === 0 || d.getDay() === 6 },
+  { id: "monday", label: "Monday", mood: "faceNeutral", test: (d) => d.getDay() === 1 },
+  { id: "friday", label: "Friday", mood: "faceSmile", test: (d) => d.getDay() === 5 },
+];
+
+const _occById = new Map(OCCASIONS.map((o) => [o.id, o]));
+
+export function occasionById(id) {
+  return _occById.get(id) || null;
+}
+
+// Every occasion active on `date`, priority-ordered (holidays before weekdays).
+export function activeOccasions(date = new Date()) {
+  return OCCASIONS.filter((o) => {
+    try { return o.test(date); } catch { return false; }
+  });
+}
+
+// The single top-priority occasion for `date` (or null on an ordinary day).
+export function activeOccasion(date = new Date()) {
+  return activeOccasions(date)[0] || null;
+}
+
+// Per-personality occasion greetings, with a generic _default pool so every
+// resident always has something to say on a given day even without a bespoke
+// line. One line per personality per holiday keeps each voice distinct; the
+// day-of-the-week flavour leans on the shared _default.
+export const OCCASION_LINES = {
+  _default: {
+    newyear: [
+      "Happy new year! A fresh ledger, a fresh start — make it a good one.",
+      "New year, new stock, new luck. The whole town's feeling hopeful today.",
+    ],
+    valentines: [
+      "Happy Valentine's! Even a shopkeeper deserves a little sweetness today.",
+      "Love's in the air — and a few extra coins for treats, I'd wager.",
+    ],
+    easter: [
+      "Happy Easter! The whole town's out hunting painted eggs.",
+      "Spring's here and so's Easter — everything feels new-hatched today.",
+    ],
+    halloween: [
+      "Happy Halloween! They say the cave's spookier than usual tonight.",
+      "Spooky night! The little ones are out in their monster masks.",
+    ],
+    christmas: [
+      "Merry Christmas! The whole street's strung with lights tonight.",
+      "Happy Christmas! A warm shop on a cold night — bless you for opening.",
+    ],
+    weekend: [
+      "Weekend at last — the street's in no hurry today.",
+      "Lovely lazy weekend. Folk are out just to wander and browse.",
+    ],
+    monday: [
+      "Monday again. The town's a touch slow to wake, but here we are.",
+      "Fresh week ahead. Let's make it a busy one at the counter.",
+    ],
+    friday: [
+      "Friday! Folk have coin in their pockets and a spring in their step.",
+      "End of the week — expect a livelier crowd through the door tonight.",
+    ],
+  },
+  peppy: {
+    newyear: ["Happy new yeeear! I already made a hundred resolutions, hee!"],
+    valentines: ["Happy Valentine's! I made everyone a card. EVERYONE. Even the cat!"],
+    easter: ["Eee, Easter! I found SO many eggs I lost count twice!"],
+    halloween: ["Boo! Happy Halloween! My costume's the sparkliest ghost EVER!"],
+    christmas: ["Merry Christmas!! I've been good ALL year. Mostly. Hee!"],
+  },
+  cranky: {
+    newyear: ["New year. Same me. Don't expect resolutions — too old to change. Hmph."],
+    valentines: ["Valentine's. Bah. In my day we didn't fuss. ...Happy Valentine's, then."],
+    easter: ["Easter. Kids trampling my garden for eggs. Every blessed year. Hmph."],
+    halloween: ["Halloween. Knock for sweets and you'll get a lecture. Fair warning."],
+    christmas: ["Christmas. Suppose I'll allow a bit of cheer. Just the once. Merry Christmas, bah."],
+  },
+  normal: {
+    newyear: ["Happy new year, dear! I've a good feeling about this one, I really do."],
+    valentines: ["Happy Valentine's, dear. I've baked heart biscuits — do take one."],
+    easter: ["Happy Easter, dear! I've hidden eggs all round the garden for the little ones."],
+    halloween: ["Happy Halloween, dear! There's sweets by my door for the trick-or-treaters."],
+    christmas: ["Merry Christmas, dear! Come in from the cold — there's mulled cider on."],
+  },
+  bookish: {
+    newyear: ["New year. Statistically the best time to start a fresh ledger. I've started three."],
+    valentines: ["Valentine's Day. Older tradition than the town itself, you know. A fact for you."],
+    easter: ["Easter. The date wanders yearly by lunar reckoning — endlessly satisfying to calculate."],
+    halloween: ["Halloween. Records show the cave's noticeably restless tonight. Documented. Mind it."],
+    christmas: ["Merry Christmas. I've catalogued my gifts by size, then usefulness. Efficient, no?"],
+  },
+  jock: {
+    newyear: ["New year, new PRs, champ! Resolution number one: more reps! Whoo!"],
+    valentines: ["Happy Valentine's! Nothin' says love like a matching workout, am I right?!"],
+    easter: ["Easter egg hunt's basically cardio, champ! I found forty. FORTY!"],
+    halloween: ["Happy Halloween! My costume's just gym gear. Scary how swole, right? Ha!"],
+    christmas: ["Merry Christmas! Big feast means big gains tomorrow, LET'S GO!"],
+  },
+  smug: {
+    newyear: ["New year. I resolve to stay effortlessly charming. Achieved already, naturally."],
+    valentines: ["Valentine's — my busiest day. So many admirers, so little of me to share. Alas."],
+    easter: ["Easter. I needn't hunt for eggs; lovely things simply find their way to me."],
+    halloween: ["Halloween. I went as myself. Terrifyingly handsome, everyone agreed."],
+    christmas: ["Merry Christmas. My gift to the town is, as ever, my presence."],
+  },
+  snooty: {
+    newyear: ["A new year, darling. One trusts the town will finally acquire some taste."],
+    valentines: ["Valentine's. I received admirers, obviously. Quality over quantity, of course."],
+    easter: ["Easter. I do hope the egg-hunting rabble keeps clear of my hedges, darling."],
+    halloween: ["Halloween. Such a common little holiday. I'm dressed as good breeding."],
+    christmas: ["Merry Christmas, I suppose. Do keep the decorations tasteful, darling."],
+  },
+  dreamer: {
+    newyear: ["A whole new year, untouched... like fresh snow nobody's walked on yet."],
+    valentines: ["Valentine's. Love's just a warm colour, isn't it? The whole town glows pink today."],
+    easter: ["Easter. Little painted eggs hidden like secrets the garden's keeping. Lovely."],
+    halloween: ["Halloween. The veil feels thin tonight — like the dark's just daydreaming back."],
+    christmas: ["Christmas lights look like fallen stars caught in the eaves. I could gaze for hours."],
+  },
+  lazy: {
+    newyear: ["New year. My resolution? Nap more. I'm already ahead of schedule, mmn."],
+    valentines: ["Valentine's. Effort. But chocolate's involved, so... okay, I'm in. Barely."],
+    easter: ["Easter. Egg hunt? Nah. If one rolls to me, I'll eat it. That's my hunt."],
+    halloween: ["Happy Halloween. My costume's a blanket. I'm a very tired ghost. Mmn."],
+    christmas: ["Merry Christmas. Best holiday — basically socially approved napping."],
+  },
+  sisterly: {
+    newyear: ["Happy new year, kiddo! Same rule as ever: you look after yourself, hear?"],
+    valentines: ["Happy Valentine's, hon. Don't let nobody spend it alone — round 'em up, I say."],
+    easter: ["Happy Easter, kiddo! Hid eggs for the little ones. You can hunt too, I won't tell."],
+    halloween: ["Happy Halloween, hon! Walk the little trick-or-treaters home safe tonight, yeah?"],
+    christmas: ["Merry Christmas, kiddo! Table's set for anyone with nowhere to be. That includes you."],
+  },
+  zen: {
+    newyear: ["A new year, friend. Same breath, same quiet. No need to chase it — just begin."],
+    valentines: ["Valentine's. Kindness costs nothing and warms two people. That's plenty, friend."],
+    easter: ["Easter. New shoots, longer light. The world renews with no fuss. We could learn from it."],
+    halloween: ["Halloween. Even the dark likes to play tonight. Let it, and stay easy, friend."],
+    christmas: ["Merry Christmas. A warm room, good company, a full breath — a rich man's day, friend."],
+  },
+  gossip: {
+    newyear: ["Happy new year, dear! Oh, the resolutions I've heard folk break already — do ask!"],
+    valentines: ["Valentine's! And oh, the whispers — who sent whom what. I know it ALL, dear."],
+    easter: ["Happy Easter! Someone hid the eggs terribly this year. I have theories. Several."],
+    halloween: ["Happy Halloween! Behind every mask, a secret — and I'll have every one by dawn."],
+    christmas: ["Merry Christmas, dear! Whose gift cost what — oh, the tallying I've done already."],
+  },
+  boastful: {
+    newyear: ["New year, eh! I resolve to top last year's legends. Bold, I know. I'm bold."],
+    valentines: ["Valentine's! I got so many cards the postman needed help. True story."],
+    easter: ["Easter! I'd have found the golden egg first, if I'd looked. Busy man, me."],
+    halloween: ["Halloween! Scariest fella in town, me. The monsters dress up as ME, eh!"],
+    christmas: ["Merry Christmas! I once wrestled a snowstorm to save the feast. Ask anyone."],
+  },
+  foodie: {
+    newyear: ["Happy new year, dear! First meal of the year sets the tone — make it a feast."],
+    valentines: ["Happy Valentine's! I've been baking heart-shaped everything since dawn, dear."],
+    easter: ["Happy Easter! Egg hunt, then egg feast. That's the correct order, I assure you."],
+    halloween: ["Happy Halloween! Toffee apples, pumpkin pie — spooky season is DELICIOUS season."],
+    christmas: ["Merry Christmas, dear! The oven's not cooled in days and I couldn't be happier."],
+  },
+  inventor: {
+    newyear: ["New year! A resolution list, a fireworks contraption, and only minor burns so far."],
+    valentines: ["Valentine's — I built a little clockwork heart. It beats! Mostly. Occasionally sideways."],
+    easter: ["Easter! Built an automatic egg-hunter. It found my breakfast and hid it. Iterating."],
+    halloween: ["Halloween! My pumpkin's got gears and a lantern. It winks. Or it's stuck. Fifty-fifty."],
+    christmas: ["Merry Christmas! Rigged the tree lights to blink in sequence. Blew a fuse. Worth it."],
+  },
+  pompous: {
+    newyear: ["A new year for MY township! I shall proclaim its greatness at length. Happy new year, ahem."],
+    valentines: ["Valentine's Day — the town's affection for its Mayor is, naturally, most touching."],
+    easter: ["Easter! I shall officiate the egg hunt personally. With my own ceremonial basket."],
+    halloween: ["Halloween. I've dressed as a great statesman. That is, myself, in a fetching cape."],
+    christmas: ["Merry Christmas! I've a speech, a feast, and a ribbon to cut. Chiefly the speech."],
+  },
+  outdoorsy: {
+    newyear: ["Happy new year, eh! First hike of the year at dawn cleared my head lovely."],
+    valentines: ["Valentine's. Picked wildflowers for half the town. Cost nowt, meant plenty, eh."],
+    easter: ["Happy Easter! Best egg hunt's out in the meadow. I know all the good hiding spots."],
+    halloween: ["Happy Halloween! Owls out, mist low — the wild does spooky better than any costume."],
+    christmas: ["Merry Christmas, eh! Snow on the ridge this mornin' — prettiest gift there is."],
+  },
+};
+
+// The line a townsperson greets you with on a given occasion — their bespoke
+// voice line if they have one, else the shared _default. Returns null on an
+// ordinary day (or an unknown occasion). `roll` seeds the pick.
+export function npcOccasionLine(npc, occasionId, roll = Math.random()) {
+  if (!occasionId) return null;
+  const own = OCCASION_LINES[npc?.personality]?.[occasionId];
+  const pool = own && own.length ? own : OCCASION_LINES._default[occasionId];
+  if (!pool || !pool.length) return null;
+  return pool[Math.floor(roll * pool.length) % pool.length];
+}
+
+// ---- player deeds: reacting to what you just did ---------------------------
+// When the player pulls off something notable underground — felling a dungeon
+// boss, or pushing to a new deepest floor — the news travels the town, and the
+// next townsperson you chat with leads with it (once per person; see
+// game-narrative recordPlayerDeed / _takeNpcDeed). {boss}, {place} and {floor}
+// are filled from the deed. Keyed by personality, generic _default fallback.
+export const PLAYER_DEEDS = [
+  { id: "bossFelled", label: "Felled a boss", mood: "faceStar" },
+  { id: "newDepth", label: "Reached a new depth", mood: "faceSmile" },
+];
+
+const _deedById = new Map(PLAYER_DEEDS.map((d) => [d.id, d]));
+
+export function playerDeedById(id) {
+  return _deedById.get(id) || null;
+}
+
+export const DEED_LINES = {
+  _default: {
+    bossFelled: [
+      "Word is you brought down {boss}! The whole town's talking about it.",
+      "They say you felled {boss} down in {place}. Quite the feat!",
+    ],
+    newDepth: [
+      "Floor {floor}? You're going deeper than anyone dares. Mind yourself down there.",
+      "I heard you reached floor {floor} in {place}. Braver than me, that's certain.",
+    ],
+  },
+  peppy: {
+    bossFelled: ["You beat {boss}?! EEE, you're basically a HERO now, hee!", "The whole town heard about {boss} — I told everyone TWICE!"],
+    newDepth: ["Floor {floor}?! That's SO deep, I'd get the wobbles, eee!", "You went ALL the way to floor {floor}? You're the bravest, hee!"],
+  },
+  cranky: {
+    bossFelled: ["Heard you put {boss} down. Hmph. Not bad, kid. Not bad at all.", "So {boss} finally fell. About time someone had the spine for it."],
+    newDepth: ["Floor {floor}? Daft. Brave, but daft. Mind you come back up.", "Deeper than's sensible, floor {floor}. Don't go gettin' cocky."],
+  },
+  normal: {
+    bossFelled: ["I heard you bested {boss}, dear. The whole street's so proud of you.", "You saw off {boss}? Do be careful down there — but well done, truly."],
+    newDepth: ["Floor {floor}, dear? Goodness. You will come home safe, won't you?", "All the way to floor {floor}! I'll put an extra bun by for you."],
+  },
+  bookish: {
+    bossFelled: ["You felled {boss}. I've logged it — the first such entry in the ledger. Remarkable.", "{boss}, defeated. Statistically, few manage it. You're in the record now."],
+    newDepth: ["Floor {floor}. That's a new personal deepest — I do keep track, naturally.", "Reached floor {floor}, did you? The deep floors predate the town, you know."],
+  },
+  jock: {
+    bossFelled: ["YO, you dropped {boss}?! Personal best, champ, LET'S GO!", "{boss} down! Boss fights are just heavy cardio, and you CRUSHED it!"],
+    newDepth: ["Floor {floor}, champ?! That's endurance gains right there, whoo!", "You pushed to floor {floor}? Respect — that's the grind payin' off!"],
+  },
+  smug: {
+    bossFelled: ["You bested {boss}? How dashing. Almost as impressive as me. Almost.", "Word of your {boss} triumph reached me. I allowed myself a small clap."],
+    newDepth: ["Floor {floor}? Bold. I'd go myself, but the lighting down there is dreadful.", "So you've seen floor {floor}. I prefer to be admired at surface level, personally."],
+  },
+  snooty: {
+    bossFelled: ["You slew {boss}? Well. Perhaps you've a touch of quality after all, darling.", "{boss}, was it? One supposes that IS the sort of thing worth doing. Barely."],
+    newDepth: ["Floor {floor}? How frightfully grubby. Effective, I'll grant, but grubby.", "You descended to floor {floor}? Do bathe before you next call, darling."],
+  },
+  dreamer: {
+    bossFelled: ["You quieted {boss}... the deep feels a little softer now, don't you think?", "They say you met {boss} and won. Some battles echo like dropped stones."],
+    newDepth: ["Floor {floor}... imagine the dark that far down. Does it dream too, I wonder?", "You touched floor {floor}. That's near the bottom of a very long sigh."],
+  },
+  lazy: {
+    bossFelled: ["You beat {boss}? Mmn. That sounds like a LOT of moving. Respect, honestly.", "Heard about {boss}. Just hearing it made me need a nap. Nice one, though."],
+    newDepth: ["Floor {floor}? That's a lotta stairs, man. I'd have stopped at, like, two.", "You went to floor {floor}? Ugh. Tired just picturing the walk back."],
+  },
+  sisterly: {
+    bossFelled: ["You took down {boss}, kiddo? C'mere — big sib's proud. Now, you eat yet?", "{boss}'s beaten and you're in one piece? Good. That's all I ask, hon."],
+    newDepth: ["Floor {floor}?! Don't you dare go deeper without tellin' me first, kiddo.", "All the way to floor {floor}. Brave, hon — brave AND gettin' a scolding."],
+  },
+  zen: {
+    bossFelled: ["So {boss} rests now. You carried something heavy and set it down. Enough, friend.", "You bested {boss}. Notice the quiet after? That's the real prize."],
+    newDepth: ["Floor {floor}. Deep water, that. Go gentle, come back gentle — no need to prove a thing.", "You reached floor {floor}, friend. The dark's patient. So should you be."],
+  },
+  gossip: {
+    bossFelled: ["Have you HEARD — oh, of course you have, YOU did it! {boss}, felled! Delicious.", "The whole well was buzzing about your {boss} win, dear. I may have embellished. A little."],
+    newDepth: ["Floor {floor}?! Everyone's talking — and for once I didn't start it. Well. Mostly.", "You reached floor {floor}, they say. And oh, do they say. I'll keep the details spicy."],
+  },
+  boastful: {
+    bossFelled: ["You dropped {boss}, eh? Ha! I once felled three at once. Still, good effort.", "{boss}, beaten! Nearly as grand as my own legends. NEARLY, mind."],
+    newDepth: ["Floor {floor}? Pfft, I've been deeper. Probably. Good on you, though.", "You saw floor {floor}? I once went so deep I came out the other side. Respectable, that."],
+  },
+  foodie: {
+    bossFelled: ["You beat {boss}, dear? That calls for a celebration pie. I'll get baking!", "{boss} down! A hero works up an appetite — sit, I'll fix you a plate."],
+    newDepth: ["Floor {floor}?! You must be famished, dear. Nobody delves that deep on an empty stomach.", "All the way to floor {floor}! I'm making stew. You're having two bowls, no arguments."],
+  },
+  inventor: {
+    bossFelled: ["You bested {boss}? Fascinating — I'd love to study how its guard dropped. For science!", "{boss}, down! If I'd rigged a spring-trap— oh, never mind, you managed."],
+    newDepth: ["Floor {floor}? The mechanisms that deep must be ANCIENT. Bring me a cog if you spot one!", "You reached floor {floor}? I've a lamp-contraption that'd help down there. Mostly works."],
+  },
+  pompous: {
+    bossFelled: ["You vanquished {boss}! A triumph for the township — and, by extension, for ME. Ahem.", "{boss} has fallen! I shall commission a plaque. Small print for you, large for the office."],
+    newDepth: ["Floor {floor}? The revenue-generating depths of MY jewel of a cave! Splendid, splendid.", "You reached floor {floor}? I shall reference this civic milestone in Tuesday's address."],
+  },
+  outdoorsy: {
+    bossFelled: ["You brought down {boss}, eh? Now that's a trail worth walkin'. Grand work.", "{boss} beaten! Toughest country in town, that cave. You read it well."],
+    newDepth: ["Floor {floor}? That's proper deep country, eh. Pack water and mind your footing.", "You made floor {floor}! Furthest track in town. I'd hike it with you sometime."],
+  },
+};
+
+// The line a townsperson says about a fresh player deed — their bespoke voice
+// line if they have one, else the shared _default — with {boss}/{place}/{floor}
+// filled from the deed context. Returns null for an unknown deed. `roll` seeds
+// the pick.
+export function npcDeedLine(npc, deedId, ctx = {}, roll = Math.random()) {
+  if (!deedId) return null;
+  const own = DEED_LINES[npc?.personality]?.[deedId];
+  const pool = own && own.length ? own : DEED_LINES._default[deedId];
+  if (!pool || !pool.length) return null;
+  const line = pool[Math.floor(roll * pool.length) % pool.length];
+  return line
+    .replace(/\{boss\}/g, ctx.boss || "the keeper")
+    .replace(/\{place\}/g, ctx.place || "the cellar")
+    .replace(/\{floor\}/g, ctx.floor != null ? ctx.floor : "the deep");
 }

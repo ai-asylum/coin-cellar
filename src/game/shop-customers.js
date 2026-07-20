@@ -8,7 +8,7 @@ import { BlockyCreature, variantForSeed, HARD_SEED } from "../chargen/blocky.js"
 import { ITEMS, LOOT_BY_TIER, itemKind } from "./items.js";
 import { rng, pick, clamp } from "../core/engine.js";
 import { ARCHETYPES, SELLER_CHANCE, MAX_CUSTOMERS } from "./shop-data.js";
-import { CROWD_NPCS, npcById, npcByVariant, personalityArchetype, personalityTaste } from "./npc-data.js";
+import { CROWD_NPCS, npcById, npcByVariant, personalityArchetype, personalityTaste, npcArriveLine } from "./npc-data.js";
 
 const _d = new THREE.Vector3();
 
@@ -179,6 +179,7 @@ export const customerMethods = {
       if (p.pause > 0 && !blocking) {
         p.pause -= dt; // loitering — stand still but keep the idle anim ticking
         if (noticing) c.heading = facePlayer; // glance over if they wander close
+        else this._lookAround(p, dt); // idle: glance about, taking in the street
         p.curSpeed += (0 - p.curSpeed) * Math.min(1, dt * NPC_ACCEL);
       } else {
         const dx = p.tx - c.position.x, dz = p.tz - c.position.z;
@@ -187,7 +188,13 @@ export const customerMethods = {
           // reached the waypoint: dawdle, then pick the next spot (or head off
           // the edge once this stroller's time is up)
           if (p.life <= 0) { p.tx = p.exitX; p.tz = p.exitZ; p.life = -1e9; p.pause = 0; }
-          else { this._pickPasserTarget(p); p.pause = Math.random() < 0.4 ? 0.6 + Math.random() * 1.4 : 0; }
+          else {
+            this._pickPasserTarget(p);
+            // stop and linger fairly often — they'll look around while stood
+            // still, then set off toward the fresh (usually new) direction
+            if (Math.random() < 0.65) { p.pause = 1.2 + Math.random() * 2.4; p.lookBase = c.heading; p.lookT = 0.4 + Math.random() * 0.7; }
+            else p.pause = 0;
+          }
           p.curSpeed += (0 - p.curSpeed) * Math.min(1, dt * NPC_ACCEL);
         } else {
           // ease speed toward the pace the moment calls for: a full stop when
@@ -221,6 +228,19 @@ export const customerMethods = {
         }
       }
     }
+  },
+
+  // While a stroller is stood still, have them idly look about — turning to a
+  // fresh angle every couple of seconds (left, then right, wherever) so a
+  // paused pedestrian reads as taking in the street rather than a frozen statue.
+  _lookAround(p, dt) {
+    p.lookT = (p.lookT ?? 0) - dt;
+    if (p.lookT > 0) return;
+    const base = p.lookBase ?? p.creature.heading;
+    const turn = (0.5 + Math.random() * 1.0) * (Math.random() < 0.5 ? -1 : 1);
+    p.lookBase = base + turn;
+    p.creature.heading = p.lookBase;
+    p.lookT = 0.9 + Math.random() * 1.7;
   },
 
   // Roll a fresh waypoint out on the open road for a stroller: anywhere across
@@ -260,6 +280,17 @@ export const customerMethods = {
     };
     this._pickPasserTarget(p);
     this.passersby.push(p);
+  },
+
+  // Float a townsperson's "on my way in" aside over their head as they peel off
+  // the street and head for the shop door (see npcArriveLine + hud.speechBubble).
+  // Seeded off the customer's stable seed so the host and every co-op guest pick
+  // the same line for the same shopper. Cosmetic — skipped during the FTUE so the
+  // hand-scripted first sale stays uncluttered.
+  _sayArrival(creature, npc, seed) {
+    if (this.game.tutorial || !npc || !creature) return;
+    const line = npcArriveLine(npc, rng(seed + 917)());
+    if (line) this.game.hud.speechBubble(creature, line, 2.8);
   },
 
   // Hand out a townsperson whose skin isn't already on screen — and never the
@@ -390,6 +421,7 @@ export const customerMethods = {
     };
     this.customers.push(cust);
     game.audio.doorbell();
+    this._sayArrival(creature, npc, seed);
     game.net.send({
       t: "custAdd",
       id: cust.id, seed,
@@ -475,6 +507,31 @@ export const customerMethods = {
 
   // Done browsing: maybe make an offer on their favourite, maybe just wander off.
   _decide(cust) {
+    // The FTUE's scripted first shopper must always leave with something — a
+    // brand-new player watches their first sale simply land. Fully deterministic
+    // (no RNG at all): if browsing scored nothing (e.g. they reached the counter
+    // before lingering at the table), fall back to the first stocked slot, and
+    // always take the plain-table sticker sale rather than a haggle they'd have
+    // to win. This is what keeps the sell step from ever soft-locking.
+    if (cust.scripted) {
+      const fav = (cust.favorite && cust.favorite.item)
+        ? cust.favorite
+        : this.slots.find((s) => s.item && !s.disabled);
+      if (fav) {
+        cust.slot = fav;
+        cust.favorite = fav;
+        cust._boughtLoved = _lovesKind(cust.npc, fav.item);
+        cust.maxPay = ITEMS[fav.item].base; // full sticker; only used if a haggle ever opens
+        cust.t = 0;
+        this.game.net.send({ t: "custWant", id: cust.id, slotIdx: this.slots.indexOf(fav), maxPay: cust.maxPay });
+        cust.state = "autobuy";
+        cust.ready = false;
+        cust.buySpot = this._browseSpotFor(cust, fav);
+        cust._payT = 0.5;
+        cust.emote = this.game.hud.emote(cust.creature, "moneyfly", 999);
+        return;
+      }
+    }
     const fav = cust.favorite;
     // FTUE: on the tutorial's sell step every shopper must actually commit, so a
     // brand-new player is always handed a haggle to win instead of watching the
@@ -542,6 +599,7 @@ export const customerMethods = {
       emote: null,
       _target: { x: m.x, z: m.z, h: 0 },
     });
+    this._sayArrival(creature, npc, m.seed);
   },
 
   // Host told us which item this shopper settled on — needed so the guest can
@@ -763,13 +821,19 @@ export const customerMethods = {
           cust._atDoor = false;
           break;
         }
-        if (walkTo(cust.buySpot || (cust.buySpot = this._browseSpotFor(cust, slot)), 2.6)) {
-          faceSlot(slot);
-          cust._payT -= dt;
-          if (cust._payT <= 0) {
-            this._clearEmote(cust);
-            this.game._autoSell(cust, slot);
-          }
+        // Head for their nearest chosen spot, but let the sale ring up the
+        // moment they've reached ANY side of the table — the standing spots
+        // ring it (see browseSpots), so a shopper buys from wherever they walk
+        // up rather than having to squeeze onto one exact face.
+        const spot = cust.buySpot || (cust.buySpot = this._browseSpotFor(cust, slot));
+        const spots = slot.browseSpots || [slot.browsePos];
+        const atTable = spots.some((s) => Math.hypot(s.x - c.position.x, s.z - c.position.z) < 0.6);
+        if (!atTable && !walkTo(spot, 2.6)) break; // still walking up to the table
+        faceSlot(slot);
+        cust._payT -= dt;
+        if (cust._payT <= 0) {
+          this._clearEmote(cust);
+          this.game._autoSell(cust, slot);
         }
         break;
       }

@@ -17,7 +17,7 @@ import { portraitDataURL } from "../chargen/portrait.js";
 import { icon, itemIcon } from "../core/icons.js";
 import { ITEMS } from "./items.js";
 import { SHOP } from "./shop-data.js";
-import { npcLinesFor, timeOfDay, npcReflectionLine, npcIntroLines, npcWishLine } from "./npc-data.js";
+import { npcLinesFor, timeOfDay, npcReflectionLine, npcIntroLines, npcWishLine, activeOccasion, npcOccasionLine, npcDeedLine } from "./npc-data.js";
 import { track } from "../core/analytics.js";
 
 // The Mayor NPC: a fixed character variant (so his walking body matches the
@@ -37,11 +37,6 @@ const CLERK_LINE = "We found you in the dungeon, you're lucky you didn't pass ou
 const PLAYER_WAKE_LINES = [
   "Is this cave REALLY the only way to this town?",
   "Alright, uncle. Let's go see what you left me.",
-];
-// Scene 2 — out on the road, first sight of the village (the guide arrow
-// carries the instruction, so one line is plenty)
-const PLAYER_ROAD_LINES = [
-  "So that's the town? Smaller than I thought.",
 ];
 // Scene 3 — the shopfront won't open, and the heir came prepared: one bubble,
 // then the key that came with the will turns. Nobody has to hand over
@@ -69,6 +64,10 @@ const MAYOR_PRAISE_LINES = [
 ];
 
 const TUT_ORDER = ["exit", "shop", "stock", "sell", "delve"];
+
+// Which player deed is the bigger news when two land close together: a boss
+// kill always trumps a mere new-depth push (see recordPlayerDeed).
+const DEED_PRIORITY = { newDepth: 1, bossFelled: 2 };
 
 // per-call scratch vectors (duplicated from game.js — these are transient)
 const _v = new THREE.Vector3();
@@ -300,12 +299,21 @@ export const narrativeMethods = {
   // the arrow itself lives in the HUD (hud.guide) and clamps to the screen edge
   // when the objective is out of view.
   _updateTutGuide() {
-    if (!this.tutorial) return this.hud.hideGuide();
     // arrows wait their turn: never on screen with a dialogue bubble or a
     // sheet, and the frozen bag beats hand the stage to the bag arrow instead
     if (this.gameOver || this.hud.sheetOpen || this.hud.speakOpen ||
         this._ftueFreeze || this._respawnT >= 0 || this._cine)
       return this.hud.hideGuide();
+    // outside the FTUE, the one standing guide is the way the fallen boss
+    // opened: point at the stairs it leaves behind (same bouncing arrow) until
+    // the delver takes them (descending regenerates the floor, clearing it).
+    if (!this.tutorial) {
+      const bs = this.dungeon.bossStairs;
+      if (this.playerArea === "dungeon" && this.dungeon.active && bs) {
+        return this.hud.guide(_v.copy(bs.pos).setY(1.4), bs.descend ? "Descend — the way deeper" : "The way home");
+      }
+      return this.hud.hideGuide();
+    }
     const inShop = this.playerArea === "shop";
     let pos = null, text = "";
     switch (this.tutorial) {
@@ -354,14 +362,11 @@ export const narrativeMethods = {
   },
 
   // ---- scene transitions ------------------------------------------------------
-  // The FTUE's first walk into the daylight (called by _exitCave): the banner,
-  // the step advance, and the hero's first look at the village.
+  // The FTUE's first walk into the daylight (called by _exitCave): the banner
+  // and the step advance. The guide arrow carries the player on to the shop.
   _onFtueCaveExit() {
     this.hud.banner(`${icon("home")} The end of the road`, "", 2.2);
     this._tutAdvance("exit");
-    setTimeout(() => {
-      if (this.tutorial === "shop" && !this.hud.speakOpen) this._selfSay(PLAYER_ROAD_LINES);
-    }, 1000);
   },
 
   // Scene 3, at the shopfront: the door won't open — the hero already holds
@@ -403,11 +408,19 @@ export const narrativeMethods = {
     // skewed a little so it reads as left there, not laid out for sale
     const mesh = new THREE.Mesh(
       new THREE.PlaneGeometry(0.5, 0.65),
-      new THREE.MeshBasicMaterial({ color: 0xffffff })
+      // polygonOffset pulls the sheet toward the camera in the depth buffer so
+      // it never fights the tabletop it lies flush against (same trick as the
+      // door/grate trim); the tiny lift is belt-and-braces.
+      new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
+      })
     );
     mesh.rotation.x = -Math.PI / 2;
     mesh.rotation.z = 0.35;
-    mesh.position.copy(slot.pos).y += 0.01; // just off the wood, no z-fighting
+    mesh.position.copy(slot.pos).y += 0.02; // just off the wood, no z-fighting
     this.shop.group.add(mesh);
     this._noteProp = { mesh, pos: slot.pos.clone() };
   },
@@ -444,7 +457,9 @@ export const narrativeMethods = {
     if (!this._notePicked || this._noteRead) return;
     this.hud.hideSheet();
     this.hud.clearBagAttention();
+    this._noteCam = true; // drop the camera to eye level while the hero reads
     this._speakLines("The Note", "characters/uncle-portrait.png", NOTE_LINES, () => {
+      this._noteCam = false;
       this._noteRead = true;
       const i = this.inventory.indexOf("unclenote");
       if (i !== -1) this.inventory.splice(i, 1);
@@ -529,9 +544,15 @@ export const narrativeMethods = {
     this._speakLines("The Mayor", this._mayor?.portrait, lines, onDone);
   },
 
-  // The hero thinking out loud — same dialogue bar, the player's own bust.
+  // The hero thinking out loud — same dialogue bar, the player's own bust. The
+  // camera glides down to the same intimate eye-level framing as a chat, since
+  // the hero's alone with their thoughts (see _dialogueCamTarget / _selfCam).
   _selfSay(lines, onDone) {
-    this._speakLines("Me", portraitDataURL(this.player.variant ?? "a", "left"), lines, onDone);
+    this._selfCam = true;
+    this._speakLines("Me", portraitDataURL(this.player.variant ?? "a", "left"), lines, () => {
+      this._selfCam = false;
+      onDone?.();
+    });
   },
 
   // ---- purchase reflections -------------------------------------------------
@@ -563,7 +584,10 @@ export const narrativeMethods = {
     if (!target || !target.npc || this._npcChat) return;
     const npc = target.npc;
     const c = target.creature;
-    c.heading = Math.atan2(this.player.position.x - c.position.x, this.player.position.z - c.position.z);
+    // world position: the dojo master is nested in the positioned dojo group,
+    // so his local .position is dojo-relative (see _nearestTalkNpc)
+    c.getWorldPosition(_v);
+    c.heading = Math.atan2(this.player.position.x - _v.x, this.player.position.z - _v.z);
     target.chatting = true;
     this._npcChat = { target };
     // the hero walks up and squares off with them as the bubble opens (driven
@@ -582,6 +606,11 @@ export const narrativeMethods = {
       return this._npcSayLines(npc, intro);
     }
     if (firstMeeting) this._npcMet.add(npc.id); // no intro line for them, but they've now been met
+    // biggest news first: if the player just pulled off something notable
+    // underground (felled a boss, hit a new deepest floor), the townsfolk lead
+    // with it — one reaction per person per deed (see _takeNpcDeed)
+    const deed = this._takeNpcDeed(npc);
+    if (deed) return this._npcSayLines(npc, [deed]);
     // small talk keyed to the town's day/night clock: pick the bucket for the
     // current hour (admin can pin it via debugHour), then cycle its five lines.
     // A per-bucket line index keeps the greeting fresh within a time of day and
@@ -604,8 +633,47 @@ export const narrativeMethods = {
       const wish = npcWishLine(npc);
       return this._npcSayLines(npc, wish ? [reflection, wish] : [reflection]);
     }
+    // on a notable calendar day (a holiday, or the day-of-the-week flavour) the
+    // very first chat with someone leads with an occasion greeting; after that,
+    // and on ordinary days, they fall back to the usual time-of-day small talk.
+    const occId = this.debugOccasion !== undefined && this.debugOccasion !== null
+      ? this.debugOccasion
+      : activeOccasion()?.id || null;
+    if (occId && target._occGreeted !== occId) {
+      const occLine = npcOccasionLine(npc, occId);
+      if (occLine) {
+        target._occGreeted = occId;
+        return this._npcSayLines(npc, [occLine]);
+      }
+    }
     const line = lines[target._lineIdx % lines.length];
     this._npcSayLines(npc, [line]);
+  },
+
+  // Record a fresh player deed for the townsfolk to gossip about — felling a
+  // boss, reaching a new deepest floor, etc. Keyed by the current run day so it
+  // goes stale after the trip home; `data` carries the {boss}/{place}/{floor}
+  // context the lines fill in. Only the latest, biggest news survives: a fresh
+  // higher-priority deed (a boss kill) is never bumped by a lesser one (a new
+  // depth) on the same run, so a descent right after a kill doesn't bury it.
+  recordPlayerDeed(id, data = {}) {
+    if (!id) return;
+    const prev = this._recentDeed;
+    if (prev && this.day - prev.day <= 1 && (DEED_PRIORITY[prev.id] || 0) > (DEED_PRIORITY[id] || 0)) return;
+    this._recentDeed = { id, day: this.day, reactedBy: new Set(), ...data };
+  },
+
+  // Consume this townsperson's reaction to the latest deed, if there's one they
+  // haven't already remarked on and it's still fresh (this run day, or the next
+  // one). One-shot per person: each resident mentions a given deed only once,
+  // then falls back to ordinary chatter.
+  _takeNpcDeed(npc) {
+    const d = this._recentDeed;
+    if (!d || !npc?.id) return null;
+    if (this.day - d.day > 1) { this._recentDeed = null; return null; }
+    if (d.reactedBy.has(npc.id)) return null;
+    d.reactedBy.add(npc.id);
+    return npcDeedLine(npc, d.id, d);
   },
 
   // Cycle one or more bubbles through the dialogue bar in a townsperson's voice,
@@ -633,6 +701,57 @@ export const narrativeMethods = {
     this._npcChat = null;
     this._talkApproach = null;
     this.hud.hideSpeak();
+  },
+
+  // ---- the town builder ------------------------------------------------------
+  // Hire the foreman by the ruined row: he offers to raise a house on the
+  // cheapest run-down lot, justified by the extra custom a new family brings.
+  // Uses the same in-world dialogue bar as every other townsperson, with one
+  // reply that asks whether to pay; then he walks over and builds it (see
+  // builder.js + game-economy _dispatchBuilder).
+  _builderPrompt() {
+    const b = this.shop && this.shop.builder;
+    if (!b) return;
+    const name = b.npc?.name ?? "The Builder";
+    // busy mid-job → a quick line rather than the offer
+    if (b.state !== "idle") {
+      return this._speakLines(name, b.portrait, ["Can't stop now — this one's not done yet!"]);
+    }
+    // the cheapest lot not yet paid for (townRestored flips the moment it's paid)
+    let idx = -1, best = Infinity;
+    this.shop.lots.forEach((lot, i) => {
+      if (this.townRestored[i] || lot.restored) return;
+      if (lot.cost < best) { best = lot.cost; idx = i; }
+    });
+    if (idx < 0) {
+      return this._speakLines(name, b.portrait, ["Whole street's standing tall now — grand work, eh?"]);
+    }
+    const lot = this.shop.lots[idx];
+    const what = lot.kind === "ruin" ? "that old ruin" : "that empty plot";
+    const line1 = `Pay for the timber on ${what} and I'll raise a proper home on it.`;
+    const line2 = "More families in town means more folk through your shop door.";
+    // can't afford it yet → just the pitch and a nudge to come back with the gold
+    if (this.gold < lot.cost) {
+      return this._speakLines(name, b.portrait, [line1, line2, `Come back when you've saved ${lot.cost}g.`]);
+    }
+    const askToPay = (text) => {
+      this.audio.pickup?.();
+      this.hud.speak({
+        name, portrait: b.portrait, text,
+        choices: [
+          { label: `${icon("coin")} Pay ${lot.cost}g`, fn: () => { this.hud.hideSpeak(); this._dispatchBuilder(idx); } },
+          { label: "Not now", fn: () => this.hud.hideSpeak() },
+        ],
+      });
+    };
+    // the full two-bubble pitch plays once; after that he cuts straight to the ask
+    if (b.pitched) return askToPay(line1);
+    b.pitched = true;
+    this.audio.pickup?.();
+    this.hud.speak({
+      name, portrait: b.portrait, text: line1, cta: "▸ next",
+      onAdvance: () => askToPay(line2),
+    });
   },
 
   // The optional epilogue: the player just funded their first home (their own
