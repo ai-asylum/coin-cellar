@@ -140,6 +140,7 @@ export default defineConfig({
         lab: resolve(__dirname, "lab.html"),
         admin: resolve(__dirname, "admin/index.html"),
         editor: resolve(__dirname, "editor.html"),
+        cooking: resolve(__dirname, "cooking.html"),
       },
     },
   },
