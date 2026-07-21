@@ -11,8 +11,9 @@ pipeline.
 
 | Role | System | Modules |
 | --- | --- | --- |
-| Player, co-op partner, customers, street passersby | **Kenney Blocky GLB** | `assets.js`, `blocky.js`, `portrait.js` |
+| Player, co-op partner, lobby avatars, townsfolk/customers | **Kenney Blocky GLB** | `assets.js`, `blocky.js`, `portrait.js` |
 | Dungeon monsters | **SDF blob-bake** | `species.js`, `sdf.js`, `bake.js`, `creature.js`, `animator.js` |
+| Farm animals (admin-only, unused in game) | **Voxel rigs** | `voxel/` |
 
 ---
 
@@ -44,7 +45,8 @@ Wraps a cloned GLB model + a Three.js `AnimationMixer`:
 
 Renders blocky characters to **PNG data URLs** via an offscreen WebGL renderer, for
 the Recettear-style flanking portraits in the haggle UI. Cached per `variant|side`
-so each portrait renders once.
+so each portrait renders once. (The one authored portrait exception: the uncle's
+sepia bust, `public/characters/uncle-portrait.png`, used by his note in the FTUE.)
 
 ---
 
@@ -114,6 +116,17 @@ bone count is a genuinely different mesh:
 // dungeon.js — skitter cache key includes legsN
 return skitterSpec({ key: `e_sk${tier}_${legsN}_${seed % 5}`, seed, legsN, ... });
 ```
+
+---
+
+## Part C — Voxel rigs (`chargen/voxel/`, not in the game)
+
+A third, self-contained pipeline ported from another project: voxel-modelled
+farm animals (cow, pig, piglet, sheep, chicken) with procedural
+quadruped/biped-avian rigs and a `MotionRunner`. It's rendered only by the
+**Farm tab** of the admin catalogue (`farmViewer.js`) — nothing in the game
+uses it. Treat it as a parked experiment (a farming loop candidate) until a
+feature claims or deletes it.
 
 ## Where to look next
 

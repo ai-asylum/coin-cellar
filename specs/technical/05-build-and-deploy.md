@@ -1,109 +1,98 @@
 # 05 — Build & Deploy
 
-Coin Cellar builds with **Vite** into a fully static bundle. No server-side runtime
-is required to play (co-op uses PeerJS's public broker only for the WebRTC
-handshake).
+Coin Cellar builds with **Vite** into a fully static bundle. The game runs
+without any server of its own (PeerJS's public broker handles co-op
+signaling; Supabase Realtime and PostHog are optional side services; the
+cooking prototype talks to its own Supabase project).
 
-## Prerequisites
-
-- **Node.js** (with npm).
-
-## Install
+## Install & scripts
 
 ```bash
 npm install
 ```
 
-Installs the three dependencies: `three`, `peerjs`, `vite`.
-
-## Scripts (`package.json`)
-
 | Command | What it does |
 | --- | --- |
 | `npm run dev` | Vite dev server at `http://localhost:5173` |
 | `npm run build` | Production build → `dist/` |
-| `npm run preview` | Serve the built `dist/` locally to sanity-check |
+| `npm run preview` | Serve the built `dist/` locally |
+
+Dependencies: `three`, `peerjs`, `@supabase/supabase-js`, `posthog-js`,
+`@capacitor/core` + `@capacitor/android` (dev: `vite`, `@capacitor/cli`).
 
 ### During development
 
-- Game: `http://localhost:5173/`
-- Creature lab: `http://localhost:5173/lab.html`
-- Admin catalogue: `http://localhost:5173/admin/`
+- Game: `/` · Creature lab: `/lab.html` · Admin: `/admin/` ·
+  **Editor:** `/editor.html` · **Cooking:** `/cooking.html`
 
 ## Vite configuration (`vite.config.js`)
 
-Key settings:
+- **`base: "./"`** — relative asset paths, hostable from any subdirectory.
+- **Multi-page build** — five rollup inputs: `index.html`, `lab.html`,
+  `admin/index.html`, `editor.html`, `cooking.html`.
+- `build.target: "es2020"`; dev server `host: true` (LAN-testable on a real
+  phone), HMR disabled.
+- **Three dev-only middleware endpoints** let the tools write design data
+  back to disk (GET serves, POST validates + pretty-prints):
+  - `/api/layout` → `src/game/layout.json` (editor Overworld/Cave tabs)
+  - `/api/dungeon-tuning` → `src/game/dungeon-tuning.json` (editor Dungeon tab)
+  - `/api/combat-settings` → `src/game/combat-settings.json` (cheat panel)
 
-- **`base: "./"`** — emits **relative** asset paths so the build runs from any
-  subdirectory or a static file host without rewriting URLs.
-- **Multi-page `build.rollupOptions.input`** — three entry HTML files:
-  - `index.html` (game)
-  - `lab.html` (creature lab)
-  - `admin/index.html` (admin catalogue)
-- **`build.target: "es2020"`**.
-- Dev server: `host: true` (LAN-accessible, useful for testing on a real phone),
-  HMR disabled.
-
-Because it's multi-page, `npm run build` produces `dist/index.html`,
-`dist/lab.html`, and `dist/admin/index.html`, all sharing chunked JS.
+  These exist only in `npm run dev` — production builds ship the JSON as
+  static data.
 
 ## Static assets (`public/`)
 
-Everything in `public/` is copied verbatim into the build root:
+Copied verbatim into the build root: 18 Kenney character GLBs + textures
+(CC0), 47 UI icons, 34 item icons, 43 decor billboards, 19 dungeon-kit
+GLTFs, 11 music MP3s, and `sw.js` (a runtime-cache service worker,
+registered in PROD only).
 
-- `public/characters/` — 18 Kenney GLB models + textures (+ CC0 license file).
-- `public/icons/` — 47 UI mask icons.
-- `public/items/` — 25 merchandise color icons.
+## Analytics
 
-These are referenced at runtime by relative URL; with `base: "./"` they resolve
-correctly wherever the build is hosted.
+PostHog (`src/core/analytics.js`) initializes for the **game page only**
+(lab/admin/editor/cooking never import it): EU cloud, public key in source,
+autocapture + pageviews on. Custom events: `game_started`,
+`dungeon_entered`, `returned_home`, `item_sold` (haggled or instant),
+`ftue_step`, `ftue_completed`, `npc_talk`.
 
-## Deploying
+## Deploying — Vercel
 
-The `dist/` folder is a plain static site. Host it on anything:
-
-- GitHub Pages, Netlify, Vercel (static), Cloudflare Pages, S3+CloudFront, or any
-  static file server.
-- No environment variables, no secrets, no build-time backend.
-
-### Current deployment — Vercel
-
-The game is deployed on **Vercel** and lives at:
-
-- **Production:** <https://coin-cellar.vercel.app/>
-
-Details:
-
-- **Project name:** `coin-cellar` (Vercel account/team scope). The local checkout
-  is linked to it via `.vercel/project.json` (holds the `projectId` / `orgId`).
-- **Production domain:** `coin-cellar.vercel.app` is the project's single
-  production domain, so every production deploy is auto-aliased to it. The legacy
-  `shop-slop.vercel.app` domain (from the project's former name) has been removed
-  and must **not** be re-added.
-- **Ship a release:**
+- **Production:** <https://coin-cellar.vercel.app/> (project `coin-cellar`;
+  the local checkout links via `.vercel/project.json`). The legacy
+  `shop-slop.vercel.app` domain was removed and must **not** be re-added.
+- Ship a release:
 
 ```bash
 vercel --prod
 ```
 
-  Vercel runs `npm run build` and serves `dist/`. On success it aliases the new
-  deployment to `coin-cellar.vercel.app` automatically — no manual alias step.
+Vercel runs `npm run build` and serves `dist/`, auto-aliasing to the
+production domain. (No CI deploy workflow — Vercel's own Git integration.)
 
-### Testing on a phone locally
+## Android — Capacitor
 
-Since the game is mobile-first, test touch controls on a real device:
+`capacitor.config.json`: appId `com.coincellar.app`, webDir `dist`. The web
+build is wrapped as a WebView asset:
+
+```bash
+npm run build
+npx cap sync android   # android/ is gitignored; recreate with `npx cap add android`
+```
+
+A prebuilt `coin-cellar-debug.apk` sits at the repo root for sideloading.
+
+## GitHub Actions
+
+One workflow, `store-assets.yml` (manual dispatch): generates store
+creatives/icon via the shared `ai-asylum/game-kit` pipeline (Scenario). No
+build/test CI.
+
+## Testing on a phone locally
 
 ```bash
 npm run dev   # host:true exposes it on your LAN
 ```
 
-Then open `http://<your-machine-lan-ip>:5173/` on the phone (same Wi-Fi). For co-op
-across the internet you don't need anything extra — PeerJS handles NAT traversal
-via its public broker/STUN.
-
-## Notes & caveats
-
-- **PeerJS public broker dependency:** co-op signaling relies on PeerJS's public
-  server being reachable. For a hardened deployment you'd point PeerJS at your own
-  broker; the game logic itself stays serverless.
-- **No analytics/telemetry** are wired into the build by default.
+Open `http://<your-lan-ip>:5173/` on the phone. Co-op across the internet
+needs nothing extra — PeerJS handles NAT traversal.

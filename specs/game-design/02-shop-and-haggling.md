@@ -1,100 +1,104 @@
 # 02 — Shop & Haggling
 
-The shop is where merchandise becomes gold. It's a small room (`SHOP` = 13 × 11
-world units) with display furniture, a street of ambient pedestrians outside, a
-trapdoor down to the cellar, and a bed for sleeping. Logic lives in
-`src/game/shop.js`.
+The shop is where merchandise becomes gold — and it mostly runs itself.
+**Plain tables sell at sticker price automatically; the fancy vitrine is where
+the haggle minigame lives.** Logic spans `src/game/shop.js` (room + lighting),
+`shop-build.js` (furniture), `shop-customers.js` (shopper AI), `shop-data.js`
+(tuning), and `game-economy.js` (the money).
 
 ## Stocking the shop
 
-- **11 display slots:** 4 tables × 2 slots + 3 vitrine (window-sill) slots.
-- Open the **bag** and tap an item to place it on an open slot; only stocked items
-  are browsable by customers.
-- Inventory is capped at **10** carried items, so shelf space and bag space both
-  pressure what you keep vs. sell.
+- **13 display slots** when fully built: 5 plain tables × 2 slots + the
+  **fancy vitrine** × 3 slots.
+- Only **table 0 is free** at the start. Each further table costs **200g** to
+  repair; the vitrine costs **1,000g** — shelf capacity is a gold sink (see
+  [Economy](04-economy-and-progression.md)).
+- Stock flows: dungeon bag → storeroom (auto-deposited on returning home) →
+  tables, via the store panel. The bag carries 10; the storeroom is uncapped.
 
-## Customers
+## Customers are the townsfolk
 
-Customers arrive in **waves** — a short burst of shoppers, then a lull —
-up to `MAX_CUSTOMERS = 4` at once. Each is drawn from a weighted pool of four
-**archetypes** that differ in how much markup they tolerate and how likely they
-are to actually make an offer.
+There are no anonymous shoppers: every customer is a **named resident**
+recruited off the street (`shop-customers.js`), haggling in character every
+visit. Their archetype is fixed by their personality:
 
-| Archetype | Weight | Pay tolerance (× base) | Offer chance | Vibe |
-| --- | --- | --- | --- | --- |
-| Cheapskate | 3 | 1.02 – 1.18 | 50% | Wants a bargain |
-| Regular | 5 | 1.10 – 1.40 | 62% | The bread-and-butter buyer |
-| Wealthy | 2 | 1.30 – 1.75 | 74% | Pays up for nice things |
-| Collector | 1 | 1.50 – 2.20 | 88% | Rare, deep pockets |
+| Archetype | Pay tolerance (× base) | Offer chance | Vibe |
+| --- | --- | --- | --- |
+| Cheapskate | 1.02 – 1.18 | 50% | Wants a bargain |
+| Regular | 1.10 – 1.40 | 62% | Bread-and-butter buyer |
+| Wealthy | 1.30 – 1.75 | 74% | Pays up for nice things |
+| Collector | 1.50 – 2.20 | 88% | Deep pockets |
 
-When a buyer browses and settles on an item, they roll a hidden **`maxPay`** =
-`base × random(lo..hi)` within their tolerance band. Pricier goods tug harder at
-wealthier archetypes (plus personal-taste noise), so a Collector eyeing a Lost
-Crown is where the big money lives.
+- Customers arrive in a **steady trickle**, up to `MAX_CUSTOMERS = 6` at once,
+  and only while something is stocked.
+- **The town's population is the throttle:** the spawn interval is
+  `max(1.8, 5.5 − 0.5 × townPop)` seconds — every rebuilt house literally
+  quickens foot traffic. Rebuilding also weights the crowd toward the new
+  resident's archetype (lots house Regulars up to Collectors).
+- A browser eyes 1–3 stocked items with ~18–28s of patience, with
+  personal-taste pull from their personality's `taste` table.
 
-### Sellers (reverse haggle)
+### Two kinds of sale
 
-**30%** of shoppers (`SELLER_CHANCE = 0.3`) arrive as **sellers**: they carry an
-item to offload onto you. They'll accept anything at or above a hidden floor —
-**`minSell` = 45–75% of the item's base value**. Buying low from a seller and
-re-shelving it to sell high is a major profit lever. The item they bring is drawn
-from a loot tier scaled to how deep into the campaign you are.
+- **Plain table pick → instant sale** at 100% of base value. No interaction —
+  the shop earns while you dive.
+- **Vitrine pick → the counter queue.** The customer lines up at the counter
+  and the **haggle** begins. Prized goods belong in the vitrine; commodity
+  goods belong on tables.
+
+### Sellers (reverse haggle) — currently disabled
+
+The buy-from-a-customer flow (hidden `minSell` = 45–75% of base,
+`SELLER_CHANCE = 0.3`) is fully implemented but **switched off** — every
+shopper currently arrives as a buyer (`mode = "buy"` hardcoded in
+`shop-customers.js`). The grades below are kept for when it returns.
 
 ## The haggle minigame
 
-Haggling is a nerve game against the customer's hidden number. You name a price;
-they grade it. Push too hard and you burn a strike; three strikes and they storm
-out.
+A nerve game against the customer's hidden `maxPay = base × random(lo..hi)`.
+You name a price; they grade it. Overshoot and they counter-offer and you burn
+a strike; **three strikes and they storm out**.
 
-### Selling to a buyer
-
-You want to land as close **under** `maxPay` as possible.
+### Selling (vitrine)
 
 | Grade | Condition | Result |
 | --- | --- | --- |
-| **Perfect** | price ≥ 92% of `maxPay` (and ≤ it) | Best payout, feeds the combo chain, extra juice |
+| **Perfect** | price ≥ 92% of `maxPay` (and ≤ it) | Best payout, feeds the combo chain |
 | **Good** | price ≥ 75% of `maxPay` | Solid sale |
-| **Cheap** | accepted, but below Good | Sale at a low grade |
-| **Strike** | price **>** `maxPay` | Rejected; 3 strikes → customer leaves |
+| **Cheap** | accepted, below Good | You left money on the counter |
+| **Strike** | price > `maxPay` | Counter-offer; 3 strikes → "Forget it!" |
 
-A **Perfect Deal** chains a **combo** — consecutive perfect sales build a streak
-with escalating audio/visual payoff.
+Consecutive Perfects chain a **combo** with escalating audio/visual payoff.
 
-### Buying from a seller
-
-You want to land as close **above** `minSell` as possible (pay as little as they'll
-accept).
+### Buying (when sellers return)
 
 | Grade | Condition |
 | --- | --- |
 | **Perfect** | price ≤ 110% of `minSell` |
 | **Good** | price ≤ 135% of `minSell` |
-| **Fair** | above that but still accepted |
+| **Fair** | above that, still accepted |
 
 ## Customer AI
 
-Customers path around furniture on a baked nav grid using A*. Their behavior is a
-small state machine:
+Customers path around furniture on a baked nav grid using A*
+(`shop-pathfinding.js`). Behavior is a small state machine:
 
 ```
-street → enter → roam / goto / look → want (buyer) | offer (seller)
-                                     → haggling → happy | leave
+street stroll → enter → browse (1–3 items) → pick
+      → plain table: auto-sell · vitrine: queue at counter → haggle
+      → happy | leave (patience out, struck out, nothing appealed)
 ```
 
-- **roam/goto/look:** wander the shop, inspect stocked slots they haven't seen.
-- **want / offer:** a buyer commits to a favourite item; a seller presents theirs.
-- **haggling:** the deal sheet is live (auto-opened in single-player; manual in
-  co-op).
-- **happy / leave:** a completed deal or a walk-off (out of patience, struck out,
-  or nothing appealed).
+Around the sale, the NPC dialogue systems kick in: arrival lines on the way
+over, and **purchase reflections** afterwards (loved it / impulse buy / too
+pricey / passed) — see [Town, NPCs & Building](09-town-npcs-and-building.md).
 
 ## Presentation
 
 The haggle UI is Recettear-styled: customer and shopkeeper **portraits** flank
-the deal sheet (rendered from the Kenney character models — see
-[Character Generation](../technical/02-character-generation.md)), with
-mood faces reflecting the archetype and how the deal is going. Sales fire coin/
-ka-ching SFX and floating gold numbers; perfects get a special flourish.
+the deal sheet (rendered from the Kenney models — see
+[Character Generation](../technical/02-character-generation.md)), with mood
+faces per archetype. Sales fire coin/ka-ching SFX and floating gold numbers;
+Perfects get the flourish.
 
-See [Economy & Progression](04-economy-and-progression.md) for item values and how
-shop income maps onto the debt schedule.
+Item values and what drops where: [Economy & Progression](04-economy-and-progression.md).

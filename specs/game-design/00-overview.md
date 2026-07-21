@@ -3,68 +3,80 @@
 ## Elevator pitch
 
 **Coin Cellar** is a mobile-first, co-op **dungeon-crawling shopkeeper** game.
-Run a little item shop that happens to sit on top of a monster-filled cellar.
-By day you stock display tables and **haggle** customers as close to their hidden
-pay limit as you dare. By night you dive seeded procedural floors for the loot
-you'll sell tomorrow. Every third day the merchant Guild collects on an
-escalating debt — pay all five installments and the deed is yours; miss one and
-you lose the shop.
+You inherit a shut shop, a dying town, and a cave with four monster-filled
+dungeons under it. Dive the cellar for loot, shelve it, sell it — plain goods
+sell themselves off the tables, prized goods get **haggled** at the counter as
+close to the customer's hidden pay limit as you dare — then pour the gold back
+into the town: repair tables, rebuild ruined houses, and watch the townsfolk
+(your customers) move back in.
 
-The co-op twist: one player minds the shop while the other dives. Gold, stock,
-and debt are all shared.
+There is **no debt, no timer, and no game over**. The world runs on the
+player's real clock — morning light at breakfast, lamplight at night, holiday
+greetings on actual holidays. The pressure is appetite, not a deadline.
 
-> **North star:** *Recettear: An Item Shop's Tale.* "Capitalism, ho!"
+The co-op twist: one player minds the shop while the other dives. Gold and
+stock are shared.
+
+> **Roots:** *Recettear: An Item Shop's Tale* ("Capitalism, ho!") and
+> *Moonlighter* for the dive/deal spine — drifted toward *Animal Crossing* in
+> temperament: a cozy, no-fail town you keep coming back to.
 
 ## Design pillars
 
-1. **Two verbs, one economy.** *Dive* (get merchandise) and *Deal* (turn it into
-   gold) are separate skill loops that feed the same wallet. Neither works alone:
-   loot is worthless unstocked, and an empty dungeon starves the shop.
-2. **Haggle as a minigame, not a menu.** Selling is a nerve game against a hidden
-   number — push for a *Perfect Deal*, or play safe. The tension is reading the
-   customer, not clicking "sell."
-3. **Readable risk.** Every enemy attack **telegraphs** before it can hurt you.
-   Death is a setback (lose half your gold), not a wipe. Dungeon depth trades
-   danger for shinier loot tiers.
-4. **Debt as a metronome.** The Guild's every-third-day collection paces the
-   whole campaign, converting "I made some gold" into "am I on track?"
-5. **Cheap on the device, rich on screen.** No shadow maps, capped pixel ratio,
-   procedural audio, and blob-shadow sprites keep it smooth on phones while a
-   toon+rim+outline look keeps it charming.
-6. **Zero-asset where possible.** Dungeon layouts, item props, floor textures,
-   monsters, and all sound are generated at runtime. (Human characters use a CC0
-   art pack — see [Character Generation](../technical/02-character-generation.md).)
+1. **Three verbs, one wallet.** *Dive* (get merchandise), *Deal* (turn it into
+   gold), *Build* (turn gold into a livelier town — which means more and
+   richer customers). Each loop feeds the next; none works alone.
+2. **Haggle as a minigame, not a menu.** Vitrine sales are a nerve game
+   against a hidden number — push for a *Perfect Deal* or play safe. Plain
+   tables sell at sticker so the shop runs itself when you'd rather be
+   diving.
+3. **Readable risk.** Every enemy attack **telegraphs** before it can hurt
+   you. Death costs the bag you were carrying, never your gold — and the
+   first dungeon is a true safe zone where the clerk carries you home, haul
+   intact.
+4. **The world keeps your hours.** Lighting, NPC small talk, and seasonal
+   occasions key off the real system clock; dungeon shortcuts stay open for
+   three real hours. The game meets the player's day instead of imposing one.
+5. **Cheap on the device, rich on screen.** No shadow maps, capped pixel
+   ratio, blob-shadow sprites, instanced walls — smooth on phones, with a
+   toon+rim+outline look that keeps it charming.
+6. **Procedural where it counts.** Dungeon floors, item props, monsters, and
+   textures are generated at runtime; humans use a CC0 art pack. (See
+   [Character Generation](../technical/02-character-generation.md).)
 
 ## Target platform & audience
 
-- **Platform:** Web browser, **mobile-first** (touch), also playable on desktop.
-- **Delivery:** Fully static build (`vite build` → `dist/`), hostable anywhere.
-- **Session length:** A day's shop phase runs ~160 seconds; a full 15-day
-  campaign is a short sitting. Pick-up-and-play friendly.
-- **Audience:** Fans of cozy-but-tense shop sims and light action roguelites;
+- **Platform:** Web browser, **mobile-first portrait** (touch), also playable
+  on desktop; packaged for **Android via Capacitor**.
+- **Delivery:** Static Vite build, deployed on Vercel.
+- **Session shape:** open-ended drop-in sessions — a dive, a few sales, a
+  rebuild, done. The 3-hour shortcut window gives return visits a natural
+  rhythm.
+- **Audience:** fans of cozy shop sims and light action roguelites;
   couch/remote co-op pairs.
 
 ## The player fantasy
 
-You are a scrappy shopkeeper-adventurer in debt. The fantasy blends two power
-trips: the **merchant** who fleeces a collector for triple base value with a
-perfect pitch, and the **diver** who dodges a brute's overhead slam and walks
-out with a Dawn Gem. The game is at its best when the same run swings between
-both — a great haggle funds a deeper dive, which funds the next debt payment.
-
-## References & inspiration
-
-- **Recettear: An Item Shop's Tale** — the core loop, haggle grades, debt pressure.
-- **Moonlighter** — dungeon-by-night / shop-by-day structure.
-- Classic top-down action-RPG combat (telegraph → dodge → punish) for the dive.
+You are the **heir**. An uncle you never met left you a shop at the end of the
+road, and the FTUE's bookends frame everything after: *"Let's go see what you
+left me"* → *"So that's what you really left me."* The fantasy blends three
+power trips: the **merchant** who reads a Collector perfectly, the **diver**
+who steps off the Broodmother's pounce ring and walks out with a Dawn Gem, and
+the **founder** who watches a family move into a house they paid for. See
+[FTUE: What He Left](08-ftue-script-inheritance.md).
 
 ## Scope snapshot (current build)
 
-- 15-day debt campaign with 5 escalating payments; optional endless mode after.
-- 25 merchandise items across 4 value tiers.
-- 6 enemy kinds with distinct behaviors across 5+ floor mixes.
-- 4 customer archetypes, buy **and** sell (reverse-haggle) customers.
-- 1–2 players (single-player auto-haggles; co-op is manual, host-authoritative).
-- Three entry points: the game, a **creature lab**, and an **admin catalogue**.
+- **4 themed dungeons × 3 floors**, a boss crowning each; 18 enemy kinds.
+- **36 items** across 4 value tiers, including gear (swords equippable today;
+  bows/staves/armor held back for balance).
+- **17 named townsfolk** with personalities, first-meeting intros, time-of-day
+  small talk, purchase reflections, and real-calendar holiday greetings.
+- **13 display slots** (5 tables + a haggle vitrine), unlocked by repair.
+- **8 rebuildable house lots** (100g → 9,500g) that repopulate the town.
+- **1–2 players** (PeerJS co-op) plus a Supabase-backed shared-world lobby
+  (presence, friends, chat).
+- Entry points beyond the game: a **creature lab**, an **admin catalogue**,
+  a **world editor**, and a standalone **cooking prototype**.
 
 See the [Core Loop](01-core-loop.md) next.

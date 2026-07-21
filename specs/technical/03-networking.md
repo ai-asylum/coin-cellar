@@ -1,123 +1,88 @@
-# 03 — Networking (Co-op)
+# 03 — Networking
 
-Co-op is **2-player, peer-to-peer over WebRTC** via PeerJS, with **no server of
-our own** (PeerJS's public broker is used only for signaling/handshake). The model
-is **host-authoritative**. Implementation: `src/net/coop.js` + the message handler
-`onNetMessage()` in `src/game/game.js`.
+Two independent wires:
 
-The player-facing design is in [Co-op](../game-design/05-coop.md); this document is
-the protocol/implementation view.
+1. **Co-op** — 2-player, peer-to-peer WebRTC via PeerJS (public broker for
+   signaling only), **host-authoritative**. `src/net/coop.js` + the
+   `onNetMessage()` switch in `src/game/game-net.js`.
+2. **Shared-world lobby** — Supabase Realtime presence + broadcast.
+   `src/net/lobby.js`. Social only; no gameplay state crosses it.
 
-## Connection model
+The player-facing design is in [Co-op](../game-design/05-coop.md).
 
-- **Signaling:** PeerJS public broker.
-- **Transport:** a single reliable `DataConnection` (WebRTC data channel).
-- **Named presence:** each player registers a persistent peer under their own
-  display name, slugged to bare alphanumerics and namespaced with the peer-id
-  prefix `coincellar-friend-`.
-  - `goOnline(name)`: `new Peer("coincellar-friend-" + slugName(name))`, then
-    listens for incoming connections.
-  - Two players sharing a slug collide on the broker (names should be unique).
-- **Teleport invites:** the **host invites** a friend from the shop; the friend
-  accepts to become the guest.
-  - Host: `peer.connect("coincellar-friend-" + slugName(friend))`, then sends
-    `{ t: "tpInvite", from }`.
-  - Guest replies `{ t: "tpAccept" }` (only allowed above ground) or
-    `{ t: "tpDecline" }`.
-  - After the handshake, the active connection carries the normal game traffic.
-- **Capacity:** exactly one guest — an invite while already in a session is
-  auto-declined.
+## Co-op connection model
 
-```
-Host (in shop)                    Friend (must be above ground to accept)
- │  invite(name) → connect        │
- │──────── tpInvite ─────────────▶│  onTpInvite() → prompt
- │◀──────── tpAccept ─────────────│  acceptInvite()
- │  onPeerJoined()  ──welcome──▶  │  onJoinedHost()
- │  ◀── intents ── / ── snapshots ─▶
-```
+- **Signaling:** PeerJS public broker; transport is one reliable
+  `DataConnection`.
+- **Named presence:** each player registers a persistent peer under their
+  display name, slugged and prefixed `coincellar-friend-`. Duplicate slugs
+  collide on the broker — names should be unique.
+- **Teleport invites:** host `connect()`s a friend's peer and sends
+  `tpInvite`; the friend answers `tpAccept` (blocked while diving) or
+  `tpDecline`. After the handshake the same connection carries game traffic.
+- **Capacity:** exactly one guest; invites mid-session are auto-declined.
 
 ## Roles & authority
 
-- **Host** simulates the authoritative world: day timer, wallet (gold), customers,
-  enemies, dungeon `(floor, seed)`. Only the host persists the save.
-- **Guest** sends **intents** ("I want to hit / take / buy / sell / dive") and
-  renders **snapshots** the host broadcasts. It never decides outcomes itself.
-
-Node identity: `newId()` prefixes IDs with `h` (host) or `g` (guest) so IDs never
-collide across the two clients.
+The **host** simulates the authoritative world — wallet, customers, enemies,
+bosses, dungeon `(floor, seed)`, shortcut timers, town restores — and alone
+persists the save. The **guest** sends intents and renders snapshots. IDs are
+prefixed `h`/`g` so they never collide.
 
 ## Tick & bandwidth
 
-- Position/state is broadcast on a throttle: `_sendT = 0.09s` → **~11 Hz**.
-- Floats are rounded to 2 decimals (`r2()`) before sending to shrink payloads.
-- Host only sends enemy/customer snapshots for **dirty** entities — those marked
-  via `trackEnemy()` / `trackCustomer()` since the last flush — not the whole world
-  every tick.
+- Positions broadcast on a `0.09s` throttle (~**11 Hz**), floats rounded to
+  2 decimals; guests interpolate between snapshots (`sampleSnaps`).
+- Enemy (`eSnap`) and customer (`cSnap`) snapshots only cover **dirty**
+  entities marked since the last flush.
 
 ## Message catalogue
 
-Every message is a plain object with a `t` (type) tag. Roughly grouped:
+Every message is `{ t, ... }`. Representative, not exhaustive — the canonical
+list is the `switch (msg.t)` in `game-net.js`:
 
-### Both directions
+**Handshake:** `tpInvite` / `tpAccept` / `tpDecline` / `welcome`.
 
-| `t` | Payload | Meaning |
-| --- | --- | --- |
-| `p` | `x, z, h, area, atk, dead` | Per-tick player transform + flags |
+**Both directions:** `p` (per-tick transform + flags), `atk` (a discrete
+swing with heading + finisher flag), `chat`.
 
-### Host → guest (authoritative broadcasts)
+**Host → guest:** `state` (gold, hp, day…) · `inv` (bag **and stash**) ·
+`stock`/`stockAll` · `tables` (repairs) · `floor` (authoritative
+`n`+`seed`+`hole`) · `dungeonReset` · `shortcut` (mouth expiry) · `gateOpen` ·
+`eSnap`/`eHurt`/`eDie`/`eDel` · `bossTel` (boss telegraph replay: countdown +
+ground marks) · `cSnap`/`custAdd`/`custWant`/`custState`/`custDel` ·
+`drop`/`dropTake` · `proj` · `chest` · `useFx`.
 
-| `t` | Meaning |
-| --- | --- |
-| `welcome` | Initial handshake / peer bootstrap |
-| `state` | Shared game state (gold, day, phase, hp, debt…) |
-| `inv` | Full inventory sync |
-| `stockAll` / `stock` | Shop shelf contents |
-| `eSnap` | Batched enemy snapshot: `[id, kind, seed, tier, x, z, h, hp]` |
-| `eHurt` / `eDie` / `eDel` | Enemy damaged / died / removed |
-| `cSnap` | Batched customer snapshot: `[id, seed, x, z, h, state]` |
-| `custAdd` / `custWant` / `custState` / `custDel` | Customer lifecycle |
-| `floor` | Authoritative floor to build: `n` (floor #) + `seed` |
-| `dungeonReset` | Dispose the dungeon (e.g. on sleep) |
-| `drop` / `dropTake` | Loot drop spawned / claimed |
-| `proj` | Projectile spawned |
-| `chest` | Chest opened (authoritative) |
-
-### Guest → host (intents / requests)
-
-| `t` | Meaning |
-| --- | --- |
-| `pHurt` | Guest took damage (host applies to shared HP) |
-| `hit` | Guest hit an enemy |
-| `take` / `dropTake` | Guest grabbed a drop |
-| `chestReq` | Request to open a chest |
-| `stockReq` / `unstockReq` / `swapReq` | Shelf manipulation requests |
-| `useReq` / `dropReq` | Use / drop an inventory item |
-| `sale` | Guest completed a sell haggle (`custId, sold, price, grade`) |
-| `buy` | Guest completed a buy haggle (`custId, bought, price, grade`) |
-| `delveReq` | Request to enter the dungeon |
-| `stairsReq` | Request to descend |
-
-> The catalogue above is representative, not exhaustive — the canonical list is the
-> `switch (msg.t)` in `onNetMessage()` (`game.js`) and the `send({ t: … })` calls
-> throughout `game.js`, `shop.js`, and `dungeon.js`.
+**Guest → host (intents):** `pHurt` · `hit` · `take` · `chestReq` ·
+`gateReq` · `dSmash` (prop smash; host rolls the forage) · `delveReq` ·
+`stairsReq` · `stockReq`/`unstockReq`/`swapReq` · `useReq`/`dropReq` ·
+`equipReq`/`unequipReq` (gear from the shared pool) · `pack` (storeroom→bag) ·
+`depositReq` (bag→storeroom) · `storeReq`/`takeReq` (single-item moves) ·
+`sale` / `buy` (completed haggles).
 
 ## Determinism is the glue
 
-The dungeon is fully reproducible from `(floor, seed)`, and creatures/customers are
-reproducible from their seeds. That's why the network only ships **small facts**
-(seeds, IDs, positions, outcomes) rather than geometry — both clients build the
-same world locally from the same seeds. See
-[Character Generation](02-character-generation.md#determinism--caching) and
-[Engine & Rendering](01-engine-and-rendering.md#utilities).
+Dungeons are reproducible from `(floor, seed)` — and the seed is `daySeed()`,
+shared by construction — while creatures and customers are reproducible from
+their own seeds. The wire ships **small facts** (seeds, IDs, positions,
+outcomes), never geometry. See
+[Character Generation](02-character-generation.md#determinism--caching).
+
+## The shared-world lobby (`net/lobby.js`)
+
+- Hardcoded Supabase project (`irhxoslymcxbeendjcuj.supabase.co`, publishable
+  key in source); Realtime channel per zone: `coincellar:cave` or
+  `coincellar:hole:<day>:<k>`.
+- **8 Hz** broadcast of `p` positions (id, x, z, heading, floor, atk, dead)
+  plus `chat` (140-char cap); presence tracks `{name}`.
+- Rendered as ghost avatars with name tags (`_updateLobbyPlayers` in
+  `game-net.js`). Chat sends to **both** wires — co-op partner and lobby.
+- Because layouts are day-seeded, lobby ghosts in a dungeon zone stand in the
+  same rooms you see.
 
 ## Lifecycle & failure
 
-- On `conn.close` (or `leave()`), both sides reset (`_onClose()` →
-  `onPeerLeft()`), clearing host/guest flags and the game connection — but the
-  named presence peer stays online, so you remain reachable for future invites.
-- Because authority and the save both live on the **host**, a host disconnect ends
-  the authoritative session; a guest disconnect leaves the host able to continue
-  solo.
-- Errors decoding a message are caught and logged (`net msg failed`) without
-  tearing down the connection.
+- On close/leave both sides reset flags but keep their named presence peer
+  online — you stay reachable for future invites.
+- Host disconnect ends the authoritative session; guest disconnect leaves the
+  host solo. Message decode errors are logged, never fatal.

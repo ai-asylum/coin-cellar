@@ -1,8 +1,15 @@
 # Playable Ad — 10 Flow Ideas
 
+> **Note (2026-07):** written before the no-debt pivot. Flow #3 ("Rent is
+> due") and the debt framing below no longer match the shipped game — there
+> is no debt, landlord, or 3-hit combo any more. The haggle-, loot-, and
+> narrative-led flows (#1, #2, #4, #6, #7, #9, #10) remain valid; an ad can
+> still *invent* urgency the game doesn't have, but that's a marketing choice
+> to make knowingly.
+
 Short report on candidate flows for a Coin Cellar playable ad. Goal: show the
-base mechanics (dive for loot, haggle it into gold, debt pressure) in ~30–45
-seconds without losing the user.
+base mechanics (dive for loot, haggle it into gold) in ~30–45 seconds without
+losing the user.
 
 ## Ground rules (apply to every flow)
 

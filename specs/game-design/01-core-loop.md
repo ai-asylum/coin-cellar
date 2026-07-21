@@ -1,110 +1,82 @@
 # 01 — Core Loop
 
-The game director (`src/game/game.js`) drives a repeating **day → night → dive →
-sleep** cycle, gated by the Guild's debt calendar.
+There is no day timer, no debt calendar, and no fail state. The shop is always
+open, the world's light follows the player's **real clock**, and the loop is
+paced by appetite and the 3-hour dungeon-shortcut window rather than a
+schedule. The director is `src/game/game.js`, split across `game-*.js` mixins.
 
-## The phases
-
-The game tracks a `phase` of either `"day"` or `"night"`, plus a `playerArea` of
-either `"shop"` or `"dungeon"`. These are independent: you can be in the dungeon
-during the day phase, though the intended rhythm is dive at night.
+## The loop
 
 ```
-┌──────────── MORNING ────────────┐
-│ full heal → reset day timer      │
-│ collect debt if a due day        │
-│ fresh dungeon seed for the day   │
-└──────────────┬───────────────────┘
-               ▼
-┌──────────────── DAY (phase="day") ──────────────┐
-│ shop is open · customers arrive in waves         │
-│ stock tables, haggle sells, buy from sellers     │
-│ day timer counts down from 160s                  │
-└──────────────┬───────────────────────────────────┘
-               ▼ (timer hits 0 → nightfall)
-┌──────────── NIGHT (phase="night") ──────────────┐
-│ customers leave · shop closes                    │
-│ choose: dive the cellar, or sleep               │
-└──────────────┬───────────────────────────────────┘
-               ▼
-┌──────────────── DUNGEON (optional) ─────────────┐
-│ procedural floors · combat · loot · descend      │
-│ return home via the entrance portal any time     │
-└──────────────┬───────────────────────────────────┘
-               ▼ (walk to the bed)
-┌──────────────── SLEEP ──────────────────────────┐
-│ "good night" recap sheet (day's stats)           │
-│ dungeon disposed · day++ · back to MORNING        │
-└──────────────────────────────────────────────────┘
+┌────────────── TOWN (always open) ─────────────────┐
+│ stock tables from the storeroom                    │
+│ plain tables sell at sticker · vitrine haggles     │
+│ talk to townsfolk · hire the builder · repair      │
+└──────────────┬─────────────────────────────────────┘
+               ▼ (walk to the cave, pick a mouth)
+┌────────────── DIVE ───────────────────────────────┐
+│ seeded floors, bottom → top · fight · loot · chest │
+│ every 3rd floor: boss arena (Brass Key gate)       │
+│ boss kill → next dungeon + 3h cave shortcut        │
+└──────────────┬─────────────────────────────────────┘
+               ▼ (up-stairs → confirm)
+┌────────────── RETURN ─────────────────────────────┐
+│ bag whooshes into the storeroom · full heal        │
+│ back to the street — sell, build, dive again       │
+└────────────────────────────────────────────────────┘
 ```
 
-## Timing
+Three sub-loops feed one wallet:
 
-- **Day length:** `DAY_LEN = 160` seconds (the shop phase timer). In co-op the
-  host owns this clock; guests display the host's value.
-- **Nightfall:** when the day timer reaches 0, the phase flips to `"night"`,
-  customers are dismissed, and the trapdoor/bed become the meaningful actions.
-- **New day:** advancing happens on **sleep** (walk to the bed), not automatically
-  at midnight. This lets a player keep diving into the night before turning in.
+- **Deal:** merchandise → gold (see [Shop & Haggling](02-shop-and-haggling.md)).
+- **Dive:** gold's raw material (see [Dungeon & Combat](03-dungeon-and-combat.md)).
+- **Build:** gold → more shelf slots and more townsfolk, i.e. more customers
+  (see [Town, NPCs & Building](09-town-npcs-and-building.md)).
 
-## The calendar & debt
+## Real time, not game time
 
-The day counter (`day`, starting at 1) is the campaign clock. Payments are due on
-fixed days:
+- **Lighting is the clock.** Sky, fog, lamps, and god-ray tints interpolate a
+  24-hour palette off the system clock (`sampleDayClock` in `shop.js`) —
+  morning looks like morning. Underground is always torchlit.
+- **NPCs keep your hours.** Small talk keys off morning / afternoon / evening
+  / night buckets, and holiday **occasions** (New Year, Valentine's, Easter,
+  Halloween, Christmas, weekends…) fire on the real calendar
+  (`npc-data.js`).
+- **Music follows.** Town/shop/menu themes have morning/day/night variants.
+- **Shortcuts are wall-clock.** A cave mouth unsealed by beating the boss
+  above it stays open for **3 real hours** (`SHORTCUT_TTL_MS`), then relocks.
+  This is the only timer in the game, and it's an *invitation* to return, not
+  a punishment.
 
-| Due on day | Amount |
-| --- | --- |
-| 3 | 180g |
-| 6 | 450g |
-| 9 | 1,100g |
-| 12 | 2,400g |
-| 15 | 5,200g |
+## What `day` means now
 
-On the morning of a due day the Guild collects. If you can't pay, it's **game
-over**. Clearing all five is **victory** (with an optional endless continue).
-Details in [Economy & Progression](04-economy-and-progression.md).
+`this.day` is a **run counter** — it bumps on each fresh solo delve and feeds
+dungeon variety. It is not displayed and gates nothing. Dungeon layouts are
+seeded by `daySeed()` (a UTC-day seed), so everyone diving on the same
+calendar day sees the same floors — and co-op peers agree for free.
 
 ## Start of run
 
-New game state (from `game.js`):
+New game state (`game.js`):
 
-- **Day** 1, **phase** `"day"`
-- **Gold** 100
-- **HP** 6 / 6
-- **Inventory** `caveshroom, caveshroom, herb, potion, wsword` (bag cap 10)
-- **Debt index** 0 (next due: day 3)
-
-## Morning housekeeping
-
-Each morning the director:
-
-1. Restores HP to full.
-2. Resets the day timer to `DAY_LEN`.
-3. Runs debt collection if the day matches the next installment.
-4. Resets the **daily recap tally** (`today`) — gold earned, deals made, deepest
-   floor reached, etc.
-5. Ensures a **fresh dungeon seed** so the first dive of the day is a new layout.
-   (The previous day's dungeon is disposed on sleep.)
-
-## The dungeon is per-day
-
-The cellar is regenerated each day. When you sleep, `dungeon.dispose()` runs and
-the next dive rolls a fresh seed. You can descend multiple floors within one
-night, but you can't "save your spot" across days — each new day is a fresh
-crawl from floor 1.
+- **Gold** 100 · **HP** 6/6 hearts · bag `caveshroom, meat` (cap 10)
+- **Storeroom** (stash) empty, uncapped — only the carried bag is limited
+- **Equipment** empty (unarmed halves damage until a sword is equipped)
+- One free display table; everything else awaits repair
+- Shortcut mouths: only the Rat Warren open
+- A fresh save starts the ["What He Left" FTUE](08-ftue-script-inheritance.md)
 
 ## Death mid-loop
 
-Dying in the dungeon doesn't end the run. You're carried home, lose **half your
-gold**, HP is restored, and you respawn in the shop. See
-[Dungeon & Combat](03-dungeon-and-combat.md).
+Dying never ends anything (see [Dungeon & Combat](03-dungeon-and-combat.md)):
+floors 1–3 are a safe zone (the clerk carries you home, bag intact); deeper,
+the carried bag is lost. Gold is never taxed. You respawn in the shop at full
+HP.
 
 ## Single-player vs co-op pacing
 
-- **Single-player:** the shop **auto-haggles** — when a customer settles at a
-  spot, the haggle sheet pops open on its own with a short breather between deals,
-  so you never have to walk over. This keeps a solo player from having to be in
-  two places at once.
-- **Co-op:** the manual walk-up flow is used instead (to avoid both clients
-  auto-opening the same customer). One player typically stays up top to work
-  customers while the other dives. See [Co-op](05-coop.md).
+- **Single-player:** plain tables auto-sell at sticker price, so the shop
+  earns while you dive; only vitrine sales (the haggles) want you behind the
+  counter.
+- **Co-op:** one shared wallet, bag, and storeroom. The natural split — one
+  keeps shop, one dives — is encouraged, not enforced. See [Co-op](05-coop.md).

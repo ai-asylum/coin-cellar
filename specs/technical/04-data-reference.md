@@ -1,202 +1,188 @@
 # 04 — Data Reference
 
-The authoritative source-of-truth tables, transcribed from the code. When a number
-here disagrees with the code, **the code wins** — cross-check against the cited
-files.
+Source-of-truth tables, transcribed from the code. When a number here
+disagrees with the code, **the code wins** — cross-check the cited files.
+Note that `GEN`, `GEN_BY_FLOOR`, `HOLE_THEMES`, `DUNGEON_MIX`, `ENEMY_KINDS`,
+and `BOSSES` can be overlaid at load by `dungeon-tuning.json` (tuned in the
+editor), and combat by `combat-settings.json`.
 
-## Game constants (`src/game/game.js`)
+## Game constants (`src/game/game.js` & friends)
 
 | Constant | Value | Meaning |
 | --- | --- | --- |
-| `DAY_LEN` | `160` | Seconds in the shop (day) phase |
-| `START_INV` | `caveshroom, caveshroom, herb, potion, wsword` | Starting bag |
-| `SAVE_KEY` | `"coincellar_save_v1"` | `localStorage` key |
-| `LEVEL_INVULN` | `1.8` | Damage-immunity seconds on entering a floor |
-| — start gold | `100` | |
-| — start HP | `6 / 6` | |
-| — inventory cap | `10` | `invCap` |
-| — crit chance | `0.18` | `_critChance` |
-| — dodge dash speed | `13` | `_dashSpeed` |
+| `START_INV` | `caveshroom, meat` | Starting bag |
+| start gold | 100 | |
+| `BASE_MAXHP` | 6 | Hearts (gear can raise) |
+| `invCap` | 10 | Bag cap (storeroom `stash` is uncapped) |
+| `_critChance` | 0.18 | + `critBonus` from gear |
+| `_dashDur` / `_dashSpeed` | 0.24s / 13 | Dodge dash |
+| strike damage | `4 × dmgMul` (unarmed ×0.5) | Doubled on crit |
+| `SHORTCUT_TTL_MS` | 3h | Cave-mouth unseal window |
+| `SAFE_ZONE_FLOOR` | 3 | KO on floors 1–3 keeps the bag |
+| `LEVEL_INVULN` | 1.8s | Arrival grace per floor |
+| `SAVE_KEY` | `"coincellar_save_v1"` | |
+| `MAX_CUSTOMERS` | 6 | Concurrent shoppers |
+| `SELLER_CHANCE` | 0.3 | *(disabled — buyers only for now)* |
 
-### Debt schedule (`DEBT`)
+## Items (`src/game/items.js` → `ITEMS`, 36 entries)
 
-| Due day | Amount |
-| --- | --- |
-| 3 | 180 |
-| 6 | 450 |
-| 9 | 1,100 |
-| 12 | 2,400 |
-| 15 | 5,200 |
+`base` = haggle value · `heal` = hearts · `equip` = gear stats · `quest` =
+FTUE prop (no price, stripped from resumed saves).
 
-## Items (`src/game/items.js` → `ITEMS`)
-
-25 items. `base` = value haggling revolves around. `heal` = hearts restored when
-used as a consumable (blank = not consumable). `icon` = key into
-`src/core/icons.js` / `public/items/`. Each also gets its `id` set to its key.
-
-| id | Name | icon | base | tier | heal |
+| id | Name | base | tier | heal | notes |
 | --- | --- | --- | --- | --- | --- |
-| `caveshroom` | Cave Mushroom | caveshroom | 8 | 1 | 1 |
-| `jelly` | Slime Jelly | jelly | 12 | 1 | — |
-| `herb` | Moon Herb | herb | 16 | 1 | 1 |
-| `bread` | Honey Bread | bread | 14 | 1 | 2 |
-| `wsword` | Pine Sword | sword | 28 | 1 | — |
-| `potion` | Red Potion | potion | 34 | 2 | 4 |
-| `ring` | Copper Ring | ring | 48 | 2 | — |
-| `dagger` | Fang Dagger | dagger | 60 | 2 | — |
-| `lantern` | Wisp Lantern | lantern | 75 | 2 | — |
-| `amulet` | Silver Amulet | amulet | 105 | 3 | — |
-| `ssword` | Steel Sword | swords | 140 | 3 | — |
-| `tome` | Spell Tome | tome | 170 | 3 | — |
-| `gem` | Dawn Gem | gem | 260 | 4 | — |
-| `fang` | Dragon Fang | fang | 340 | 4 | — |
-| `crown` | Lost Crown | crown | 450 | 4 | — |
-| `mushroom` | Wild Mushroom | mushroom | 10 | 1 | 1 |
-| `meat` | Roast Meat | meat | 18 | 1 | 2 |
-| `egg` | Griffon Egg | egg | 40 | 2 | — |
-| `key` | Brass Key | key | 52 | 2 | — |
-| `bomb` | Blast Bomb | bomb | 44 | 2 | — |
-| `shield` | Kite Shield | shield | 120 | 3 | — |
-| `bell` | Gold Bell | bell | 150 | 3 | — |
-| `feather` | Phoenix Feather | feather | 160 | 3 | — |
-| `hourglass` | Chrono Hourglass | hourglass | 300 | 4 | — |
-| `star` | Star Shard | star | 380 | 4 | — |
+| `caveshroom` | Cave Mushroom | 8 | 1 | 1 | |
+| `crystal` | Crystal | 6 | 1 | — | smashed stones |
+| `jelly` | Slime Jelly | 12 | 1 | — | |
+| `herb` | Moon Herb | 16 | 1 | 1 | |
+| `bread` | Honey Bread | 14 | 1 | 2 | |
+| `wsword` | Pine Sword | 28 | 1 | — | sword, dmg ×1.0 |
+| `mushroom` | Wild Mushroom | 10 | 1 | 1 | |
+| `meat` | Roast Meat | 18 | 1 | 2 | |
+| `rathide` | Rat Hide | 6 | 1 | — | cave rats |
+| `flower` | Flower | 6 | 1 | 1 | forage |
+| `berries` | Berries | 7 | 1 | 1 | forage |
+| `nuts` | Nuts | 9 | 1 | 1 | forage |
+| `potion` | Red Potion | 34 | 2 | 4 | |
+| `ring` | Copper Ring | 48 | 2 | — | crit +0.12 |
+| `dagger` | Fang Dagger | 60 | 2 | — | sword, dmg ×0.85 |
+| `lantern` | Wisp Lantern | 75 | 2 | — | |
+| `egg` | Griffon Egg | 40 | 2 | — | |
+| `key` | Brass Key | 52 | 2 | — | opens boss gates |
+| `shopkey` | Shop Key | 0 | 2 | — | quest |
+| `unclenote` | Uncle's Note | 0 | 2 | — | quest |
+| `bomb` | Blast Bomb | 44 | 2 | — | |
+| `bow` | Hunter's Bow | 95 | 2 | — | bow: projDmg 3, cd 0.34, spd 15 |
+| `boots` | Swift Boots | 110 | 2 | — | speed +0.2, dodgeCd −0.25 |
+| `amulet` | Silver Amulet | 105 | 3 | — | crit +0.08, gold +0.2 |
+| `ssword` | Steel Sword | 140 | 3 | — | sword, dmg ×1.7 |
+| `tome` | Spell Tome | 170 | 3 | — | staff: projDmg 9, cd 0.55, pierce, splash |
+| `shield` | Kite Shield | 120 | 3 | — | block 0.35 |
+| `bell` | Gold Bell | 150 | 3 | — | |
+| `feather` | Phoenix Feather | 160 | 3 | — | |
+| `staff` | Oak Staff | 165 | 3 | — | staff: projDmg 6, cd 0.6, pierce |
+| `armor` | Steel Chestplate | 185 | 3 | — | maxHp +4 |
+| `gem` | Dawn Gem | 260 | 4 | — | |
+| `hourglass` | Chrono Hourglass | 300 | 4 | — | |
+| `fang` | Dragon Fang | 340 | 4 | — | |
+| `star` | Star Shard | 380 | 4 | — | |
+| `crown` | Lost Crown | 450 | 4 | — | |
 
-> Note: `wsword` and `ssword` reuse the `sword` / `swords` icon keys. All items
-> also have a tiny procedural toon **prop mesh** (built from Three.js primitives in
-> `items.js` `makers`), cloned on demand via `itemMesh(id)`.
+- `EQUIP_DROPS` (boss-only): bow, staff, armor, boots, ssword, tome, shield,
+  amulet.
+- **Equipment slots** (`gear.js`): weapon, chest, shield, ring, boots.
+  `canEquip` currently accepts `type === "sword"` only; unarmed → `dmgMul ×0.5`.
 
-### Loot by tier (`LOOT_BY_TIER`)
+### Loot pools (`DUNGEON_LOOT`, indexed by dungeon)
 
-Index = dungeon tier (index 0 is empty). Tiers overlap so lower items keep dropping.
-
-| Tier | Items |
-| --- | --- |
-| 1 | caveshroom, jelly, herb, bread, wsword, mushroom, meat |
-| 2 | jelly, herb, potion, ring, dagger, lantern, egg, key, bomb |
-| 3 | potion, ring, amulet, ssword, tome, lantern, shield, bell, feather |
-| 4 | amulet, tome, gem, fang, crown, ssword, hourglass, star |
-
-## Enemies (`src/game/dungeon.js` → `ENEMY_KINDS`)
-
-| kind | hp | dmg | speed | aggro | gold | behavior | windup | reach / band |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `skitter` | 2 | 1 | 2.9 | 7 | 3–8 | swarm | 0.28 | reach 1.05 |
-| `slime` | 4 | 1 | 1.9 | 6 | 4–10 | lunge | 0.50 | reach 1.5 |
-| `goblin` | 5 | 1 | 3.0 | 8 | 8–16 | strafe | 0.34 | reach 1.35 |
-| `wisp` | 3 | 1 | 3.2 | 9 | 6–12 | caster | 0.55 | band 4.5–7.5 |
-| `archer` | 4 | 1 | 2.7 | 10 | 10–20 | archer | 0.42 | band 5–9 |
-| `brute` | 12 | 2 | 1.6 | 7 | 25–45 | slam | 0.72 | reach 2.4 |
-
-Projectile foes: `wisp` (projSpeed 6.0, color `0xb98cff`), `archer` (projSpeed
-10.5, color `0x8fe0ff`). Each kind's `make(seed, tier)` builds its SDF creature via
-a `species.js` factory (see [Character Generation](02-character-generation.md)).
-
-> `gold` ranges are defined per kind, but design intent is that income comes from
-> **selling looted merchandise**, not kills. See
-> [Economy & Progression](../game-design/04-economy-and-progression.md).
-
-### Floor mixes (`FLOOR_MIX`)
-
-Selected by `min(tier, FLOOR_MIX.length - 1)`. Enemy count per floor =
-`4 + floorN + random(0..2)`.
-
-| Tier index (1-based depth) | Enemy pool |
-| --- | --- |
-| 1 | skitter, slime |
-| 2 | skitter, slime, goblin |
-| 3 | slime, goblin, wisp, archer |
-| 4 | goblin, wisp, archer, brute |
-| 5+ | goblin, archer, wisp, brute, brute |
-
-## Dungeon generation constants (`src/game/dungeon.js`)
-
-| Constant | Value | Meaning |
+| Dungeon | Common | Rare |
 | --- | --- | --- |
-| `DUNGEON_ORIGIN` | `(200, 0, 0)` | World offset for the dungeon group |
-| `CELL` | `2.4` | Cell size (m) |
-| grid | 17 × 15 | Cells per floor |
-| rooms | 5–8 | Non-overlapping rooms |
-| chests | 1–2 | Per floor |
-| `IMP_DECAY` | `0.0012` | Per-second knockback/impulse decay base |
+| 0 Rat Warren | meat, bread, caveshroom, crystal, jelly, egg | wsword, ring, fang |
+| 1 Flooded Deep | jelly, crystal, egg, potion | lantern, feather, gem |
+| 2 Bone Hollow | fang, bomb, key, ring, crystal | bell, ssword, crown |
+| 3 Gloom Drain | potion, crystal, gem, feather | star, hourglass, crown |
 
-## Customers (`src/game/shop.js`)
+Rare chance: kills `0.12 + 0.06 × localFloor` (0 on entry floors); chests
+`0.22 + 0.18 × localFloor`. Kill drop rate 0.6; 65% of drops are the kind's
+signature `loot`.
 
-### Archetypes (`ARCHETYPES`)
+### Forage & smash (`decor.js`)
 
-`lo`/`hi` = pay tolerance multiplier on base; `w` = spawn weight; `buy` = chance to
-make an offer after browsing. `moods` = the mood face used in the haggle UI.
+| Source | Chance | Drops |
+| --- | --- | --- |
+| Dungeon mushrooms | 0.6 | mushroom, caveshroom, herb |
+| Dungeon dead trees | 0.5 | herb, mushroom |
+| Dungeon stones | 0.55 | crystal |
+| Meadow flowers/bushes/trees/mushrooms | per `FIELD_FORAGE` | flower, berries, nuts, mushroom, herb |
 
-| Name | moods | lo | hi | w | buy |
+## Dungeon structure (`src/game/dungeon-data.js`)
+
+| Constant | Value |
+| --- | --- |
+| `N_DUNGEONS` / `FLOORS_PER_DUNGEON` / `MAX_DEPTH` | 4 / 3 / 12 |
+| Boss floors | 3, 6, 9, 12 (`isBossFloor: f % 3 === 0`) |
+| Mouth entry floors | 1 / 4 / 7 / 10 |
+| `DUNGEON_ORIGIN` / `CAVE_ORIGIN` | (200,0,0) / (−200,0,200) |
+| `CELL` | 2.4 |
+| Grid | 18 × 32 (boss floors 18 × 40), portrait-tall, entrance bottom → exit top |
+| Rooms | `8 + min(4, ⌊f/2⌋) + rand(0..2)` |
+| Corridors | 2-wide L-shapes, Prim's MST + 1–2 loops |
+| Enemies/floor | `4 + f + rand(0..2)`, rolling cap `6 + 2f` |
+| Chests/floor | 1–2; boss-key chest guaranteed on boss floors, else 40% |
+| Enemy HP scale | `+⌊tier × 0.7⌋`, tier = `min(floor, 5) − 1` |
+
+### Enemies (`ENEMY_KINDS`, 18 + boss)
+
+See [Dungeon & Combat](../game-design/03-dungeon-and-combat.md#enemies) for
+the full bestiary table (hp/dmg/speed/behavior/windup per kind) and
+`DUNGEON_MIX` rosters. Projectile kinds: wisp 3.8 `0xb98cff`, archer 6.5
+`0x8fe0ff`, gravewisp 5.2 `0xffe9a8`, gloomcaster 5.5 `0xd48cff`, boss 3.6
+`0xff7a4d`.
+
+### Bosses (`BOSSES` + `bossDefFor` scaling)
+
+Base defs: Broodmother 58hp/2.25spd (pounce), Drowned Maw 92/1.25 (deluge,
+10-orb bursts), Ogre King 70/1.7 (base kind), Sovereign 62/2.0 (blink).
+Scaling by hole `h`: hp ×(1+0.5h), +1 dmg from h≥2, speed ×(1+0.07h), windup
+×(1−0.07h), pace ×(1−0.09h), enrage pack 3+h, burst 8+h. Enrage at half HP.
+
+## Customers (`shop-data.js` / `shop.js`)
+
+| Archetype | moods | lo | hi | w | buy |
 | --- | --- | --- | --- | --- | --- |
 | Cheapskate | faceRoll | 1.02 | 1.18 | 3 | 0.50 |
 | Regular | faceHappy | 1.10 | 1.40 | 5 | 0.62 |
 | Wealthy | faceMonocle | 1.30 | 1.75 | 2 | 0.74 |
 | Collector | faceStar | 1.50 | 2.20 | 1 | 0.88 |
 
-### Shop constants
+- Spawn interval `max(1.8, 5.5 − 0.5 × townPop)`s (± 30% jitter); NPC
+  archetype fixed by personality (`archetypeForNpc`).
+- Buyer rolls `maxPay = base × random(lo..hi)`.
+- Grades — sell: Perfect ≥ 0.92·maxPay, Good ≥ 0.75, else Cheap; overshoot =
+  strike, 3 strikes ends the deal. Buy (disabled): Perfect ≤ 1.10·minSell,
+  Good ≤ 1.35, else Fair.
+- Display slots: 5 tables × 2 + vitrine × 3 = **13** (table 0 free; repairs
+  200g, vitrine 1,000g).
 
-| Constant | Value | Meaning |
-| --- | --- | --- |
-| `SHOP.W` × `SHOP.D` | 13 × 11 | Shop room size (world units) |
-| `MAX_CUSTOMERS` | 4 | Concurrent shoppers |
-| `SELLER_CHANCE` | 0.3 | Fraction who arrive to **sell** to you |
-| display slots | 11 | 4 tables × 2 + 3 vitrine |
+## Town (`layout.json`, `npc-data.js`)
 
-- **Buyer** rolls hidden `maxPay = base × random(lo..hi)`.
-- **Seller** rolls hidden `minSell = round(base × random(0.45..0.75))` (45–75% of
-  base), item drawn from a tier scaled by `game.day`.
-
-### Haggle grades
-
-Selling to a buyer (target: land just under `maxPay`):
-
-| Grade | Condition |
-| --- | --- |
-| Perfect | price ≥ 92% of `maxPay` |
-| Good | price ≥ 75% of `maxPay` |
-| Cheap | accepted, below Good |
-| Strike | price > `maxPay` (3 strikes → leaves) |
-
-Buying from a seller (target: land just over `minSell`):
-
-| Grade | Condition |
-| --- | --- |
-| Perfect | price ≤ 110% of `minSell` |
-| Good | price ≤ 135% of `minSell` |
-| Fair | above that, still accepted |
-
-## Characters (`src/chargen/assets.js`)
-
-- 18 Kenney variants: `character-a` … `character-r` (+ matching
-  `Textures/texture-{a-r}.png`).
-- `variantForSeed(seed)` = `CHAR_VARIANTS[seed % 18]`.
-- `HARD_SEED` (debug) pins all customers to one variant when non-zero.
+- 8 lots: 100 / 700 / 1,200 / 1,800 / 3,000 / 4,500 / 7,000 / 9,500 g;
+  resident archetype indices 1,1,2,2,2,3,3,3 (Regular → Collector).
+- 17 NPCs (variants b–r), 17 personalities; `reserved`: nib, mayor.
+- `TIMES_OF_DAY`: morning 5–11 / afternoon 11–17 / evening 17–21 / night.
+- `OCCASIONS`: newyear, valentines, easter (computed), halloween, christmas,
+  weekend, monday, friday.
 
 ## Save format
 
-`localStorage["coincellar_save_v1"]` holds a JSON object:
+`localStorage["coincellar_save_v1"]` (host-only in co-op):
 
-```json
-{
-  "day": 1,
-  "gold": 100,
-  "inv": ["caveshroom", "caveshroom", "herb", "potion", "wsword"],
-  "debtIdx": 0
-}
-```
+| Key | Meaning |
+| --- | --- |
+| `day` | Run counter |
+| `gold` | Wallet |
+| `inv` / `stash` | Bag / storeroom item ids |
+| `stock` | Shelf contents by slot (null = empty) |
+| `shortcutUntil` | Epoch-ms relock time per cave mouth |
+| `bossBeaten` / `deepestEver` | Deed records |
+| `equipment` | `{weapon, chest, shield, ring, boots}` |
+| `town` | bool[] — lots rebuilt |
+| `tables` | bool[] — tables repaired |
+| `npcMet` | NPC ids already introduced |
 
-In co-op only the **host** writes the save.
+On load: bag merges into stash (runs resume in the shop), quest items and
+unknown ids are dropped, invalid weapons re-arm `wsword`. Also:
+`coincellar_name` (display name), `coincellar_friends` (friends list),
+`ss_mute` (audio), `coin-cellar-cooking-v1` (the cooking prototype's own
+save).
 
-## Audio persistence
-
-`localStorage["ss_mute"]` — mute toggle (`src/core/audio.js`).
-
-## Asset counts (`public/`)
+## Assets (`public/`)
 
 | Category | Count | Path |
 | --- | --- | --- |
-| UI mask icons | 47 | `public/icons/*.png` |
-| Item color art | 25 | `public/items/*.png` |
-| Character GLBs | 18 | `public/characters/character-{a-r}.glb` |
-| Character textures | 18 | `public/characters/Textures/texture-{a-r}.png` |
+| UI mask icons | 47 | `icons/` |
+| Item color art | 34 | `items/` |
+| Character GLBs + textures | 18 + 18 (+ uncle portrait) | `characters/` |
+| Music | 11 MP3s | `music/` |
+| Decor billboards | 43 | `decor/` |
+| Dungeon kit | 19 GLTFs | `dungeon/` |
