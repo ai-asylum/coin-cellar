@@ -22,7 +22,7 @@ import { persistenceMethods, SAVE_KEY, NAME_KEY } from "./game-persistence.js";
 import { netMethods } from "./game-net.js";
 import { uiMethods } from "./game-ui.js";
 import { narrativeMethods } from "./game-narrative.js";
-import { combatMethods, AUTOAIM_RANGE } from "./game-combat.js";
+import { combatMethods, AUTOAIM_RANGE, DASH_DUR, DASH_SPEED } from "./game-combat.js";
 import { combat, attackMode, ATTACK_MODES } from "./combat-settings.js";
 import { economyMethods } from "./game-economy.js";
 import { dungeonFlowMethods } from "./game-dungeon-flow.js";
@@ -96,8 +96,10 @@ export class Game {
     // keeps the hero drawn solid for the whole dash i-frame window (which
     // outlasts the lunge motion) so the flicker never bites at the dash's tail
     this._dashSolidT = 0;
-    this._dashDur = 0.24;
-    this._dashSpeed = 13;
+    // baseline shape; _dodge re-derives both per launch (auto-lunge mode
+    // carries its own lungeTime/lungeDist knobs)
+    this._dashDur = DASH_DUR;
+    this._dashSpeed = DASH_SPEED;
     this._dashDX = 0;
     this._dashDZ = 0;
     // when a dash auto-aims onto a foe, the hero *looks* fully at it (a stronger
@@ -603,7 +605,7 @@ export class Game {
     }
     if (mode === "autodash" && underground && !sheetBlocked &&
         this._dashT < 0 && this._dashWindT < 0 && this._dodgeCd <= 0 &&
-        this._nearestEnemyWithin(combat.autodash.range || 2.4, 0, 0, -2)) {
+        this._nearestEnemyWithin(combat.autodash.range || 3.0, 0, 0, -2)) {
       attackPress = true; // no button — a foe in range triggers the strike
     }
     // "Auto strike": like autodash (no button, foe-in-range triggers) but it
@@ -628,9 +630,10 @@ export class Game {
     if (attackPress && !sheetBlocked) {
       if ((mode === "strikeInPlace" || mode === "joystickButton") && underground) this._strikeInPlace();
       else this._dodge(swipeDir);
-      // autodash holds off re-triggering for its configured beat (never shorter
-      // than the dash's own recovery, which _dodge already set)
-      if (mode === "autodash") this._dodgeCd = Math.max(this._dodgeCd, combat.autodash.cooldown || 0.6);
+      // autodash holds off re-triggering for its configured beat COUNTED FROM
+      // THE END OF THE SWING (hence + lunge duration — _dodge just set _dashDur
+      // for this launch), never shorter than the dash's own recovery
+      if (mode === "autodash") this._dodgeCd = Math.max(this._dodgeCd, (combat.autodash.cooldown || 0.8) + this._dashDur);
     }
 
     // wound up on a locked foe: rooted while the shoulders coil back, then the

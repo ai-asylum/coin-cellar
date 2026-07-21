@@ -1,8 +1,11 @@
 {
   "attackMode": "strikeInPlace",
   "autodash": {
-    "range": 2.4,
-    "cooldown": 0.6
+    "range": 3.0,
+    "cooldown": 0.8,
+    "lungeTime": 0.16,
+    "lungeDist": 0.9,
+    "knockback": 3
   },
   "joystickButton": {
     "range": 3.2

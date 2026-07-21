@@ -35,6 +35,9 @@ export const COMBAT_SLIDERS = {
   autodash: [
     { key: "range", label: "Trigger range", min: 1, max: 5, step: 0.1 },
     { key: "cooldown", label: "Cooldown (s)", min: 0.2, max: 1.5, step: 0.05 },
+    { key: "lungeTime", label: "Lunge time (s)", min: 0.1, max: 0.4, step: 0.01 },
+    { key: "lungeDist", label: "Lunge travel", min: 0.5, max: 2.5, step: 0.05 },
+    { key: "knockback", label: "Knockback (units)", min: 0, max: 4, step: 0.1 },
   ],
   // joystickButton has no knobs of its own: it fires the strike-in-place attack,
   // and both the button-appears reach and the swing reach are governed by the
@@ -54,7 +57,10 @@ export const COMBAT_SLIDERS = {
 // partial/older file still boots with every knob present.
 const DEFAULTS = {
   attackMode: "strikeInPlace",
-  autodash: { range: 2.4, cooldown: 0.6 },
+  // lungeTime/lungeDist shape the auto-lunge's burst; knockback is the DISTANCE
+  // (world units) a struck foe travels, converted to an impulse where applied.
+  // The cooldown counts from the end of the swing, not the trigger.
+  autodash: { range: 3.0, cooldown: 0.8, lungeTime: 0.16, lungeDist: 0.9, knockback: 3 },
   joystickButton: { range: 3.2 },
   strikeInPlace: { range: 2.2, cooldown: 0.7, windup: 0.5 },
   swipe: { flick: 1.1, range: 3.2 },

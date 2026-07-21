@@ -7,7 +7,7 @@ import { BOSS_ATK_WINDUP, BOSS_ATK_GLOW } from "./dungeon-data.js";
 const IMP_DECAY = 0.0012; // per-second base for impulse/knockback friction
 // an impulse of v decays to a total travel of v / -ln(IMP_DECAY); invert that so
 // a lunge can be aimed to land a chosen distance away instead of a fixed speed
-const LEAP_K = -Math.log(IMP_DECAY);
+export const LEAP_K = -Math.log(IMP_DECAY);
 
 const _d = new THREE.Vector3();
 const _v = new THREE.Vector3();

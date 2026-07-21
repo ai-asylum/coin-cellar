@@ -10,6 +10,7 @@ import { weaponMesh } from "./gear.js";
 import { icon } from "../core/icons.js";
 import { combat } from "./combat-settings.js";
 import { DUNGEON_ORIGIN } from "./dungeon-data.js";
+import { LEAP_K } from "./dungeon-ai.js";
 
 // per-call scratch vectors (duplicated from game.js — these are transient)
 const _v = new THREE.Vector3();
@@ -40,6 +41,14 @@ const AUTOAIM_FACE_HOLD = 0.28;
 // — even a foe dead ahead gets a wind-back-and-snap instead of no turn at all.
 const DASH_WINDUP = 0.12;
 const DASH_WINDBACK = 0.55; // ~31° past the foe's bearing
+// Baseline lunge shape for every mode except auto-lunge (which carries its own
+// lungeTime/lungeDist knobs in combat.autodash). Exported so game.js seeds the
+// instance fields from the same numbers.
+export const DASH_DUR = 0.24;
+export const DASH_SPEED = 13;
+// The dash eases out (game.js scales speed by 0.35 + 0.65·k as k falls 1→0),
+// so total travel = speed × dur × the profile's average factor.
+const DASH_EASE_AVG = 0.35 + 0.65 / 2;
 
 export const combatMethods = {
   // Offset to the nearest living foe within `range` that sits inside the dash's
@@ -98,6 +107,16 @@ export const combatMethods = {
   // around into the lunge — the wind-up is what makes the turn readable.
   _dodge(dir = null) {
     if (this._dashT >= 0 || this._dashWindT >= 0 || this._dodgeCd > 0 || this._respawnT >= 0 || this.gameOver) return;
+    // Auto-lunge mode strikes with its own tuned burst; every other mode keeps
+    // the baseline dash. Set per launch so a live mode/slider change in the
+    // admin panel shapes the very next lunge.
+    if (combat.attackMode === "autodash") {
+      this._dashDur = combat.autodash.lungeTime ?? 0.16;
+      this._dashSpeed = (combat.autodash.lungeDist ?? 0.9) / (DASH_EASE_AVG * this._dashDur);
+    } else {
+      this._dashDur = DASH_DUR;
+      this._dashSpeed = DASH_SPEED;
+    }
     // `dir` (a {x,y}) overrides the stick — used by the swipe attack mode, which
     // dashes in the flicked direction rather than the current steer.
     const mv = dir || this.input.move;
@@ -228,9 +247,14 @@ export const combatMethods = {
       return;
     }
     if (this.playerArea !== "dungeon" || !this.dungeon.active) return;
-    this.dungeon.dashHit(this.player, this._dashDmg, this, {
-      crit: this._dashCrit, hitIds: this._dashHitIds, reach,
-    });
+    const opts = { crit: this._dashCrit, hitIds: this._dashHitIds, reach };
+    // Auto-lunge knockback is authored as a travel DISTANCE (world units);
+    // dashHit's `knock` is an impulse multiplier (base impulse 4·knock, which
+    // travels impulse/LEAP_K under the dungeon's friction) — convert here.
+    if (combat.attackMode === "autodash") {
+      opts.knock = ((combat.autodash.knockback ?? 3) * LEAP_K) / 4;
+    }
+    this.dungeon.dashHit(this.player, this._dashDmg, this, opts);
   },
 
   // Strike-in-place attack mode: no lunge. The hero plants, turns toward the
