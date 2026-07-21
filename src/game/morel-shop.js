@@ -16,6 +16,7 @@ export function buildMorelShop(shop) {
   const cz = authored.x;
   const g = new THREE.Group();
   g.position.set(cx, BUILDING_LIFT, cz);
+  g.rotation.y = Math.PI; // turn the open front toward the bottom of the screen
   shop.group.add(g);
   shop._morelShopGroup = g;
 
@@ -23,7 +24,7 @@ export function buildMorelShop(shop) {
     minX: cx - MOREL_SHOP_HW, maxX: cx + MOREL_SHOP_HW,
     minZ: cz - MOREL_SHOP_HD, maxZ: cz + MOREL_SHOP_HD,
   };
-  const frontZ = -MOREL_SHOP_HD; // entrance faces up-screen, toward the cave
+  const frontZ = -MOREL_SHOP_HD; // local front; group rotation turns it down-screen
   const backZ = MOREL_SHOP_HD;
   const wallH = 2.45;
 
@@ -56,11 +57,11 @@ export function buildMorelShop(shop) {
     wall(returnW, wallH, 0.24, sx * (doorHalf + returnW / 2), wallH / 2, frontZ);
 
   shop.colliders.push(
-    { x: cx, z: cz + MOREL_SHOP_HD, hw: MOREL_SHOP_HW, hd: 0.22 },
+    { x: cx, z: cz - MOREL_SHOP_HD, hw: MOREL_SHOP_HW, hd: 0.22 },
     { x: cx - MOREL_SHOP_HW, z: cz, hw: 0.22, hd: MOREL_SHOP_HD },
     { x: cx + MOREL_SHOP_HW, z: cz, hw: 0.22, hd: MOREL_SHOP_HD },
-    { x: cx - (doorHalf + returnW / 2), z: cz - MOREL_SHOP_HD, hw: returnW / 2, hd: 0.22 },
-    { x: cx + (doorHalf + returnW / 2), z: cz - MOREL_SHOP_HD, hw: returnW / 2, hd: 0.22 },
+    { x: cx - (doorHalf + returnW / 2), z: cz + MOREL_SHOP_HD, hw: returnW / 2, hd: 0.22 },
+    { x: cx + (doorHalf + returnW / 2), z: cz + MOREL_SHOP_HD, hw: returnW / 2, hd: 0.22 },
   );
 
   // Front posts and a green canvas awning make the upward-facing entrance read
@@ -99,17 +100,43 @@ export function buildMorelShop(shop) {
   roof.add(ridge);
   g.add(roof);
 
-  // Mushroom wares: shallow crates and chunky cap/stem primitives.
+  // A pair of warm mushroom lamps over the back display. Their real lights join
+  // the shop's day/night lighting system; the glowing caps remain readable by day.
+  for (const sx of [-1, 1]) {
+    const lamp = new THREE.Group();
+    const bracket = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.55, 8), dark);
+    bracket.position.y = 0.28;
+    lamp.add(bracket);
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 0.28, 10), plaster);
+    stem.position.y = -0.12;
+    lamp.add(stem);
+    const cap = new THREE.Mesh(
+      new THREE.SphereGeometry(0.25, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: 0xffbd68 }),
+    );
+    cap.position.y = 0.04;
+    lamp.add(cap);
+    const light = new THREE.PointLight(0xffb45c, 0, 6, 1.7);
+    light.position.y = -0.05;
+    lamp.add(light);
+    shop.lampLights.push(light);
+    lamp.position.set(sx * 1.35, 1.85, backZ - 0.2);
+    g.add(lamp);
+  }
+
+  // Mushroom wares: shallow crates and chunky cap/stem primitives, pushed
+  // against the back wall so the entrance and Morel's counter space stay clear.
+  const displayZ = backZ - 0.55;
   for (const sx of [-1, 1]) {
     const crate = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.45, 0.72), timber);
-    crate.position.set(sx * 1.45, 0.38, frontZ + 0.55);
+    crate.position.set(sx * 1.45, 0.38, displayZ);
     g.add(crate);
     for (let i = 0; i < 3; i++) {
       const stem = new THREE.Mesh(
         new THREE.CylinderGeometry(0.045, 0.06, 0.2, 8),
         makeToonMaterial({ color: 0xeadfc5, rim: 0 }),
       );
-      stem.position.set(sx * 1.45 + (i - 1) * 0.25, 0.7, frontZ + 0.52);
+      stem.position.set(sx * 1.45 + (i - 1) * 0.25, 0.7, displayZ);
       g.add(stem);
       const cap = new THREE.Mesh(
         new THREE.SphereGeometry(0.13, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2),
@@ -137,13 +164,22 @@ export function buildMorelShop(shop) {
   sign.position.set(MOREL_SHOP_HW + 0.25, 0, frontZ);
   g.add(sign);
 
-  const doorPos = new THREE.Vector3(cx, 0, cz + frontZ - 0.65);
-  const doorInside = new THREE.Vector3(cx, 0, cz + frontZ + 0.75);
-  const morelHome = new THREE.Vector3(cx, 0, cz + 0.75);
+  const doorPos = new THREE.Vector3(cx, 0, cz - frontZ + 0.65);
+  const doorInside = new THREE.Vector3(cx, 0, cz - frontZ - 0.75);
+  const morelHome = new THREE.Vector3(cx, 0, cz - 0.75);
+  // With the entrance turned away from the road, Morel routes around the east
+  // wall instead of trying to walk home through the solid back wall.
+  const returnPath = [
+    new THREE.Vector3(cx + MOREL_SHOP_HW + 0.8, 0, cz - MOREL_SHOP_HD - 0.7),
+    new THREE.Vector3(cx + MOREL_SHOP_HW + 0.8, 0, cz + MOREL_SHOP_HD + 0.7),
+    doorPos.clone(),
+    doorInside.clone(),
+    morelHome.clone(),
+  ];
 
   return {
     group: g, rect, roof, roofMats, roofA: 1,
-    doorPos, doorInside, morelHome,
+    doorPos, doorInside, morelHome, returnPath,
   };
 }
 

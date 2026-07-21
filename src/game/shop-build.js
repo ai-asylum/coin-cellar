@@ -608,8 +608,7 @@ export const buildMethods = {
     // colliders join the list here, before forage rejects against them).
     this.dojo = buildDojo(this);
 
-    // Morel's little mushroom shop sits across the road from the cave, with
-    // its open front facing back toward the cave.
+    // Morel's little mushroom shop sits across the road from the cave.
     this.morelShop = buildMorelShop(this);
 
     // the town builder: an always-present foreman who waits by the ruined lots

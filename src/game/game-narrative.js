@@ -310,7 +310,7 @@ export const narrativeMethods = {
       const m = this.shop.morel;
       this.shop.doorHeld = true; // hold the shopfront open for his exit
       setTimeout(() => this._speakLines(m?.npc.name ?? "Morel", m?.portrait, MOREL_STOCKED_LINES, () => {
-        if (m) morelWalk(this.shop, [this.shop.doorInside, this.shop.doorPos, m.home], () => {
+        if (m) morelWalk(this.shop, [this.shop.doorInside, this.shop.doorPos, ...m.returnPath], () => {
           this.shop.doorHeld = false;
         });
         if (!this.net.connected) setTimeout(() => this.shop.spawnScriptedCustomer(), 3500);
@@ -636,6 +636,7 @@ export const narrativeMethods = {
   _morelReminder() {
     const m = this.shop.morel;
     if (!m || !this._morelIntroDone) return;
+    this._beginNpcPrompt(m);
     m.state = "talk";
     this.player.heading = Math.atan2(
       m.creature.position.x - this.player.position.x,
@@ -651,6 +652,7 @@ export const narrativeMethods = {
   _morelPrompt() {
     const m = this.shop.morel;
     if (!m) return;
+    this._beginNpcPrompt(m);
     let idx = -1, best = Infinity;
     this.shop.tables.forEach((t, i) => {
       if (!t.repaired && t.cost < best) { best = t.cost; idx = i; }
@@ -660,18 +662,21 @@ export const narrativeMethods = {
     }
     const table = this.shop.tables[idx];
     const what = table.fancy ? "a fancy glass case" : "another shelf";
-    if (this.gold < table.cost) {
-      return this._speakLines(m.npc.name, m.portrait, [
-        `I've got ${what} in the cart. ${table.cost}g and it's yours.`,
-        `You don't have enough coin. Come back when you have ${table.cost}g.`,
-      ]);
-    }
     this.audio.pickup?.();
     this.hud.speak({
       name: m.npc.name, portrait: m.portrait,
       text: `I've got ${what} in the cart. ${table.cost}g and it's yours.`,
       choices: [
-        { label: `${icon("coin")} Pay ${table.cost}g`, fn: () => { this.hud.hideSpeak(); this._repairTable(idx); } },
+        { label: `${icon("coin")} Pay ${table.cost}g`, fn: () => {
+          this.hud.hideSpeak();
+          if (this.gold < table.cost) {
+            this.audio.deny();
+            return this._speakLines(m.npc.name, m.portrait, [
+              `You don't have enough coin. Come back when you have ${table.cost}g.`,
+            ]);
+          }
+          this._repairTable(idx);
+        } },
         { label: "Not now", fn: () => this.hud.hideSpeak() },
       ],
     });
@@ -800,6 +805,22 @@ export const narrativeMethods = {
   },
 
   // ---- chatting with the townsfolk ------------------------------------------
+  // Purchase/job prompts are still NPC conversations even though they don't use
+  // the ambient chatter path. Register their speaker as the active chat target
+  // so the shared dialogue camera frames the same player/NPC two-shot.
+  _beginNpcPrompt(target) {
+    if (!target?.creature) return;
+    target.creature.getWorldPosition(_v);
+    target.creature.heading = Math.atan2(
+      this.player.position.x - _v.x,
+      this.player.position.z - _v.z);
+    this.player.heading = Math.atan2(
+      _v.x - this.player.position.x,
+      _v.z - this.player.position.z);
+    target.chatting = true;
+    this._npcChat = { target };
+  },
+
   // Strike up a conversation with a shopper or passer-by. Their body pauses and
   // faces the player (see shop-customers: the `chatting` flag), and the dialogue
   // bar shows their name and a single line — a fresh one each time you talk,
@@ -936,6 +957,7 @@ export const narrativeMethods = {
   _builderPrompt() {
     const b = this.shop && this.shop.builder;
     if (!b) return;
+    this._beginNpcPrompt(b);
     const name = b.npc?.name ?? "The Builder";
     // busy mid-job → a quick line rather than the offer
     if (b.state !== "idle") {

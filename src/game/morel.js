@@ -36,6 +36,7 @@ export function buildMorel(shop) {
     creature,
     portrait: portraitDataURL(MOREL_VARIANT, "left"),
     home: { x: home.x, z: home.z },
+    returnPath: shop.morelShop?.returnPath ?? [home],
     homeHeading,
     state: "idle", // idle | walk | talk
     path: null, pathIdx: 0, pathT: 0, onArrive: null,

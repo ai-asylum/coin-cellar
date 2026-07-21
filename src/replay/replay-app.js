@@ -59,6 +59,7 @@ class ReplayReviewer {
     this.activeCueIndex = -1;
     this.loadToken = 0;
     this._projection = new THREE.Vector3();
+    this._nextProjection = new THREE.Vector3();
     this._wire();
     this.engine.onTick(() => this._renderWorldMarkers());
   }
@@ -256,15 +257,64 @@ class ReplayReviewer {
     });
     if (this.footstepToggle.checked) {
       const end = Math.max(this.video.duration || 0, this.timeline.at(-1)?.time || 0);
-      for (let time = 0; time <= end; time += 30) {
+      const steps = [];
+      for (let time = 0; time <= end; time += 1) {
         const sample = nearestSample(this.timeline, time);
         if (!sample) continue;
+        const key = `${sample.area}:${sample.floor ?? ""}:${sample.x}:${sample.z}`;
+        steps.push({ key, sample, time });
+      }
+
+      const groups = new Map();
+      steps.forEach((step, index) => {
+        let group = groups.get(step.key);
+        if (!group) {
+          group = { ...step, firstIndex: index, times: [], count: 0 };
+          groups.set(step.key, group);
+        }
+        group.count += 1;
+        if (step.time % 30 === 0) group.times.push(step.time);
+      });
+
+      for (const group of groups.values()) {
+        let next = null;
+        for (let index = group.firstIndex + 1; index < steps.length; index++) {
+          if (steps[index].key !== group.key) {
+            next = steps[index];
+            break;
+          }
+        }
         const el = document.createElement("button");
         el.className = "replay-world-marker footstep";
-        el.innerHTML = `<time>${formatTimecode(time)}</time>👣`;
-        el.addEventListener("click", () => this.seek(time));
+        const firstTimestamp = group.times[0];
+        const lastTimestamp = group.times.at(-1);
+        const timestampLabel = group.times.length > 1
+          ? `${formatTimecode(firstTimestamp)}–${formatTimecode(lastTimestamp)}`
+          : formatTimecode(firstTimestamp);
+        const timestamps = group.times.length
+          ? `<time data-time="${firstTimestamp}">${timestampLabel}</time>`
+          : "";
+        el.innerHTML = `${timestamps}<span class="footstep-glyph" aria-hidden="true">👣</span>`;
+        el.title = group.count > 1
+          ? `${formatTimecode(group.time)} — ${group.count} seconds at this position`
+          : formatTimecode(group.time);
+        el.style.setProperty("--footstep-opacity", Math.min(0.95, 0.3 + group.count * 0.13));
+        el.addEventListener("click", () => this.seek(group.time));
+        el.querySelectorAll("time").forEach((timeEl) => {
+          timeEl.addEventListener("click", (event) => {
+            event.stopPropagation();
+            this.seek(Number(timeEl.dataset.time));
+          });
+        });
         this.overlay.appendChild(el);
-        this.markers.push({ el, sample, time, cueIndex: -1, type: "footstep" });
+        this.markers.push({
+          el,
+          sample: group.sample,
+          nextSample: next?.sample || null,
+          time: group.time,
+          cueIndex: -1,
+          type: "footstep",
+        });
       }
     }
     this._renderWorldMarkers();
@@ -291,7 +341,19 @@ class ReplayReviewer {
       marker.el.style.display = "block";
       marker.el.style.left = `${((this._projection.x + 1) / 2) * rect.width}px`;
       marker.el.style.top = `${((1 - this._projection.y) / 2) * rect.height}px`;
-      marker.el.classList.toggle("active", marker.cueIndex === this.activeCueIndex);
+      marker.el.classList.toggle("active",
+        marker.type === "cue" && marker.cueIndex === this.activeCueIndex);
+
+      if (marker.type === "footstep" && marker.nextSample &&
+          marker.nextSample.area === marker.sample.area &&
+          marker.nextSample.floor === marker.sample.floor) {
+        this._nextProjection.set(marker.nextSample.x, 0.12, marker.nextSample.z)
+          .project(this.engine.camera);
+        const dx = this._nextProjection.x - this._projection.x;
+        const dy = this._projection.y - this._nextProjection.y;
+        const angle = Math.atan2(dy, dx) + Math.PI / 2;
+        marker.el.style.setProperty("--footstep-angle", `${angle}rad`);
+      }
     }
   }
 
@@ -340,7 +402,7 @@ function reviewerHtml() {
         <input id="replay-tester-id" placeholder="#00000000" aria-label="Playtest ID" />
         <button id="replay-connect">Link PostHog</button>
         <label>Offset <input id="replay-offset" type="number" step="0.5" value="0" />s</label>
-        <label><input id="replay-footsteps" type="checkbox" /> 30s footsteps</label>
+        <label><input id="replay-footsteps" type="checkbox" /> Footsteps</label>
         <div id="replay-status">Choose a PlaytestCloud folder to begin. Press \` for the game admin panel.</div>
       </div>
       <div id="replay-video-wrap"><video id="replay-video" controls preload="metadata"></video></div>
