@@ -12,6 +12,29 @@ The five tutorial beats and all their triggers are shared with the old
 script (`exit → shop → stock → sell → delve`); only the fiction, dialogue,
 and guide texts changed.
 
+> **Revised 2026-07-21 — the Morel fetch quest.** Scenes 1–3 stand; from the
+> first step inside the shop the flow is new (see `FTUE_SCRIPT.md`, the
+> source of truth). What changed:
+> - **The shop starts with zero shelves.** No amber floor outlines, no
+>   pay-to-repair interact. The first shelf is Morel's payment for the
+>   mushroom errand; further shelves are bought by talking to him in town.
+> - **The letter is back on the critical path.** It waits on the bare shop's
+>   counter, repeats the bag lesson, and delivers its two original lines.
+>   Morel (a mushroom-mad regular) is not visible outside beforehand. Once the
+>   player dismisses the final line he appears just inside the shop door, walks
+>   to less than a stride from the hero, and faces them for the first order.
+> - **The first dive happens mid-FTUE** as a fetch: floor 1 grows glowing
+>   mushroom clusters, its chest tops the basket up, and a shut trapdoor
+>   seals the way deeper until the FTUE is done. Rats only, this shallow.
+> - **Morel remains talkable while the order is live.** Every repeat
+>   conversation gets the same impatient nudge: *"Your uncle would be in the
+>   cave already..."*
+> - **The first sale is wordless and post-FTUE:** a lone villager wanders
+>   in and buys the stocked mushroom at sticker price.
+> - Beats: `exit → shop → fetch → forage → trade → stock`; `ftue_completed`
+>   fires at the send-off. The note/table beats below this line describe the
+>   2026-07-15 flow and are kept as design history.
+
 ---
 
 ## The story in one paragraph
@@ -137,14 +160,13 @@ rats potter about. Control unlocks.*
 The village opens up below; half the houses are dark. Banner: `The end of
 the road`.*
 
-> **ME** — So that's the town? Smaller than I thought.
-
 **→ GUIDE:** `Inspect` *(arrow on the shop door)*
 
 - **Trigger:** walking into the cave's daylight gap — unchanged.
-- The ruins carry the town's history; the hero's one line only carries the
-  disappointment. The guide arrow says "Inspect" rather than naming the shop
-  as theirs — the player discovers what the building is by walking up to it.
+- No spoken line: the banner and the guide arrow carry the beat (the road
+  line was cut as redundant — the ruins already carry the town's history).
+  The guide arrow says "Inspect" rather than naming the shop as theirs —
+  the player discovers what the building is by walking up to it.
 
 ### Scene 3 — The Shopfront
 
@@ -192,9 +214,11 @@ read from the bag (`Read`).*
   inside; the pickup is plain proximity, like floor loot; the reading is
   the note row's `Read` action in the bag.
 - The shut doors make the moment private — the town waits outside while the
-  heir reads. Reading consumes the note, reopens the doors for business,
-  and *only then* moves the haul to the storeroom: "fill the tables" lands
-  first, then the goods to do it with appear.
+  heir reads. Reading consumes the note and *only then* moves the haul to
+  the storeroom: "fill the tables" lands first, then the goods to do it
+  with appear. The doors stay shut until the first table is stocked — they
+  swing open for the first shopper, and unlock for the heir once that sale
+  lands.
 - The key beat taught the bag with a label; the note beat repeats it without
   one — the second rep is the test.
 - Line one is the loop; line two is the *want* — the uncle vouching for the
@@ -220,8 +244,8 @@ first time:*
 >
 > **ME** — But first, let's do some restocking!
 
-**→ GUIDE:** `To the cave — dive for more loot` *(arrow down the road, then
-`Dive here for more loot` on the pit once inside)*
+**→ GUIDE:** `Dive deeper for better goods` *(arrow down the road, then the
+same text on the pit once inside)*
 
 - **Trigger:** the scripted shopper's purchase lands (`_autoSell`) — unchanged.
 - **Teaches:** stock → customer → coin, zero mechanical burden. Haggling still
@@ -389,8 +413,9 @@ Same dialogue; the two artifact beats became things the player *does*:
   the usual loot juice (float + fly-to-bag), landing at the top of the bag
   list like the key did.
 - **Deposit deferral:** the pack no longer empties on crossing the
-  threshold — the haul moves to the storeroom only after the note is read,
-  and the doors reopen then too.
+  threshold — the haul moves to the storeroom only after the note is read.
+  The doors reopen later still: for the scripted shopper once the first
+  table is stocked, and for the heir once that sale lands.
 - Admin jumps reset/skip all the new state. Runtime-verified with a
   48-check Playwright drive: freeze on/off at both beats, attention cue
   with and without label, Use/Read rows, doors closing behind and

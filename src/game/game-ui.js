@@ -258,7 +258,7 @@ export const uiMethods = {
     const rows = this.inventory
       .map((id, i) => {
         const it = ITEMS[id];
-        // quest props (the shop key, the note): no price, no Use/Drop — only
+        // bagged quest props (the shop key and letter): no price or Drop — only
         // the story action the FTUE wires up right now, if any
         if (it.quest) {
           const act = this._questBagAction(id);
@@ -587,50 +587,84 @@ export const uiMethods = {
     const el = document.createElement("div");
     el.id = "admin-panel";
     el.innerHTML = `
-      <div class="admin-head"><b>${icon("tools")} Admin</b><span>press \` to close</span></div>
-      <div class="admin-grid">
-        <button data-a="g100">${icon("coin")} +100g</button>
-        <button data-a="g1k">${icon("coin")} +1000g</button>
-        <button data-a="heal">${icon("heart")} Full heal</button>
-        <button data-a="maxhp">${icon("plus")} +1 heart</button>
-        <button data-a="god">${icon("shield")} God: <b>${this.godMode ? "ON" : "off"}</b></button>
-        <button data-a="godrays">${icon("sun")} God rays: <b>${godraysEnabled() ? "ON" : "off"}</b></button>
-        <button data-a="fillbag">${icon("bag")} Fill bag</button>
-        <button data-a="stockshelves">${icon("box")} Stock shelves</button>
-        <button data-a="clearbag">${icon("trash")} Empty bag</button>
-        <button data-a="delve">${icon("hole")} Dive</button>
-        <button data-a="floor">${icon("arrowDown")} Next floor</button>
-        <button data-a="tpexit">${icon("hole")} TP to exit</button>
-        <button data-a="key">${itemIcon("key")} Give key</button>
-        <button data-a="kill">${icon("skull")} Kill enemies</button>
-        <button data-a="npcdbg">${icon("people")} NPC debug: <b>${this.npcDebug ? "ON" : "off"}</b></button>
-        <button data-a="reset" class="danger">${icon("recycle")} Wipe save</button>
-      </div>
-      <div class="admin-head"><b>${icon("swords")} Combat input</b><span id="admin-combat-status"></span></div>
-      <div id="admin-combat">${this._combatPanelHtml()}</div>
-      <div class="admin-head"><b>${icon("sun")} Time of day</b><span id="admin-clock-val">${this.debugHour == null ? "live" : _fmtHour(this.debugHour)}</span></div>
-      <div class="admin-gradient" style="background:linear-gradient(90deg, ${dayClockStops()})">
-        <div class="admin-gradient-mark" id="admin-clock-mark" style="left:${((this.debugHour == null ? _realHour() : this.debugHour) / 24) * 100}%"></div>
-      </div>
-      <div class="admin-slider">
-        <input type="range" id="admin-clock" min="0" max="24" step="0.25" value="${this.debugHour == null ? _realHour() : this.debugHour}">
-        <button data-a="clocklive">Live</button>
-      </div>
-      <div class="admin-head"><b>${icon("speak")} Occasion</b><span>townsfolk greeting</span></div>
-      <div class="admin-slider">
-        <select id="admin-occasion">
-          <option value=""${this.debugOccasion == null ? " selected" : ""}>Live${_liveOccasionLabel()}</option>
-          ${OCCASIONS.map((o) => `<option value="${o.id}"${this.debugOccasion === o.id ? " selected" : ""}>${esc(o.label)}</option>`).join("")}
-        </select>
-      </div>
-      <div class="admin-head"><b>${icon("crown")} FTUE jump</b><span>load a tutorial step</span></div>
-      <div class="admin-grid">
-        <button data-a="tut:cave">${icon("swords")} 1 · Cave</button>
-        <button data-a="tut:road">${icon("home")} 2 · Road</button>
-        <button data-a="tut:stock">${icon("box")} 3 · Stock</button>
-        <button data-a="tut:sell">${icon("speak")} 4 · Sell</button>
-        <button data-a="tut:delve">${icon("hole")} 5 · Dive</button>
-      </div>
+      <div class="admin-head admin-title"><b>${icon("tools")} Admin</b><span>press \` to close</span></div>
+      <details class="admin-section">
+        <summary class="admin-head"><b>${icon("heart")} Player</b></summary>
+        <div class="admin-grid">
+          <button data-a="g100">${icon("coin")} +100g</button>
+          <button data-a="g1k">${icon("coin")} +1000g</button>
+          <button data-a="heal">${icon("heart")} Full heal</button>
+          <button data-a="maxhp">${icon("plus")} +1 heart</button>
+          <button data-a="god">${icon("shield")} God: <b>${this.godMode ? "ON" : "off"}</b></button>
+        </div>
+      </details>
+      <details class="admin-section">
+        <summary class="admin-head"><b>${icon("bag")} Inventory &amp; shop</b></summary>
+        <div class="admin-grid">
+          <button data-a="fillbag">${icon("bag")} Fill bag</button>
+          <button data-a="stockshelves">${icon("box")} Stock shelves</button>
+          <button data-a="clearbag">${icon("trash")} Empty bag</button>
+        </div>
+      </details>
+      <details class="admin-section">
+        <summary class="admin-head"><b>${icon("hole")} Dungeon</b></summary>
+        <div class="admin-grid">
+          <button data-a="delve">${icon("hole")} Dive</button>
+          <button data-a="floor">${icon("arrowDown")} Next floor</button>
+          <button data-a="tpexit">${icon("hole")} TP to exit</button>
+          <button data-a="key">${itemIcon("key")} Give key</button>
+          <button data-a="kill">${icon("skull")} Kill enemies</button>
+        </div>
+      </details>
+      <details class="admin-section">
+        <summary class="admin-head"><b>${icon("sun")} World &amp; debug</b></summary>
+        <div class="admin-grid">
+          <button data-a="freezeNoclip">${icon("pause")} Freeze + noclip: <b>${this.debugFreezeNoclip ? "ON" : "off"}</b></button>
+          <button data-a="godrays">${icon("sun")} God rays: <b>${godraysEnabled() ? "ON" : "off"}</b></button>
+          <button data-a="npcdbg">${icon("people")} NPC debug: <b>${this.npcDebug ? "ON" : "off"}</b></button>
+        </div>
+      </details>
+      <details class="admin-section">
+        <summary class="admin-head"><b>${icon("swords")} Combat input</b><span id="admin-combat-status"></span></summary>
+        <div id="admin-combat">${this._combatPanelHtml()}</div>
+      </details>
+      <details class="admin-section">
+        <summary class="admin-head"><b>${icon("sun")} Time &amp; town</b></summary>
+        <div class="admin-control-label"><b>Time of day</b><span id="admin-clock-val">${this.debugHour == null ? "live" : _fmtHour(this.debugHour)}</span></div>
+        <div class="admin-gradient" style="background:linear-gradient(90deg, ${dayClockStops()})">
+          <div class="admin-gradient-mark" id="admin-clock-mark" style="left:${((this.debugHour == null ? _realHour() : this.debugHour) / 24) * 100}%"></div>
+        </div>
+        <div class="admin-slider">
+          <input type="range" id="admin-clock" min="0" max="24" step="0.25" value="${this.debugHour == null ? _realHour() : this.debugHour}">
+          <button data-a="clocklive">Live</button>
+        </div>
+        <div class="admin-control-label"><b>Occasion</b><span>townsfolk greeting</span></div>
+        <div class="admin-slider">
+          <select id="admin-occasion">
+            <option value=""${this.debugOccasion == null ? " selected" : ""}>Live${_liveOccasionLabel()}</option>
+            ${OCCASIONS.map((o) => `<option value="${o.id}"${this.debugOccasion === o.id ? " selected" : ""}>${esc(o.label)}</option>`).join("")}
+          </select>
+        </div>
+      </details>
+      <details class="admin-section">
+        <summary class="admin-head"><b>${icon("crown")} FTUE jump</b><span>load a tutorial step</span></summary>
+        <div class="admin-grid">
+          <button data-a="tut:cave">${icon("swords")} 1 · Cave opening</button>
+          <button data-a="tut:road">${icon("home")} 2 · Road to shop</button>
+          <button data-a="tut:shopfront">${itemIcon("key")} 3 · Shopfront key</button>
+          <button data-a="tut:fetch">${icon("scroll")} 4 · Empty shop</button>
+          <button data-a="tut:forage">${icon("bag")} 5 · Forage floor</button>
+          <button data-a="tut:trade">${icon("speak")} 6a · Return basket</button>
+          <button data-a="tut:stock">${icon("box")} 6b · Stock shelf</button>
+          <button data-a="tut:delve">${icon("hole")} 7 · Send-off</button>
+        </div>
+      </details>
+      <details class="admin-section admin-danger-section">
+        <summary class="admin-head"><b>${icon("recycle")} Save data</b></summary>
+        <div class="admin-grid">
+          <button data-a="reset" class="danger">${icon("recycle")} Wipe save</button>
+        </div>
+      </details>
       <div class="admin-hints">keys: <b>WASD</b> move · <b>Shift/RMB</b> dash-attack · <b>E/Space</b> interact · <b>B</b> bag · <b>C</b> friends · <b>M</b> mute</div>
     `;
     this.hud.root.appendChild(el);
@@ -822,6 +856,12 @@ export const uiMethods = {
         this.godMode = !this.godMode;
         this.hud.toast(`God mode ${this.godMode ? "ON" : "off"}`);
         break;
+      case "freezeNoclip": {
+        this.debugFreezeNoclip = !this.debugFreezeNoclip;
+        const b = this.adminEl?.querySelector('[data-a="freezeNoclip"] b');
+        if (b) b.textContent = this.debugFreezeNoclip ? "ON" : "off";
+        break;
+      }
       case "godrays": {
         const on = setGodraysEnabled(!godraysEnabled());
         this.hud.toast(`${icon("sun")} God rays ${on ? "ON" : "off"}`);
@@ -953,12 +993,16 @@ export const uiMethods = {
     this._cine = null;
     this._doorScene = false;
     this._ftueFreeze = false;
-    this._noteSpawned = false;
-    this._notePicked = false;
-    this._noteRead = false;
-    this._removeNoteProp();
+    this._sceneCam = false;
+    this._letterSpawned = false;
+    this._letterPicked = false;
+    this._letterRead = false;
+    this._removeLetterProp();
+    this._morelIntroDone = false;
+    this._morelTradeDone = false;
     this.hud.clearBagAttention();
     this.shop.doorLocked = false;
+    this.shop.doorHeld = false;
     this.gold = 100;
     this.hud.setGold(this.gold, false);
     for (const c of [...this.shop.customers]) this.shop._removeCustomer(c);
@@ -966,8 +1010,29 @@ export const uiMethods = {
     this.stash.length = 0;
     for (const s of this.shop.slots) if (s.item) this.shop.unstockSlot(s);
     this._syncStock();
+    // shelves back to unbuilt (the FTUE's opening state); steps that need the
+    // gifted shelf re-open it below
+    this.tablesRepaired = this.tablesRepaired.map(() => false);
+    for (const t of this.shop.tables) { t.repaired = false; this.shop._applyTableState(t); }
+    // Morel back at his patch, mid-scene walks dropped
+    const morel = this.shop.morel;
+    if (morel?.creature) {
+      morel.state = "idle";
+      morel.path = null;
+      morel.onArrive = null;
+      morel.creature.position.set(morel.home.x, 0, morel.home.z);
+      morel.creature.heading = morel.homeHeading;
+      morel.creature.visible = true;
+    }
+    // park Morel just inside the door, waiting on his basket (post-intro state)
+    const morelInside = () => {
+      if (!morel?.creature) return;
+      const o = this.shop.shopOrigin;
+      morel.creature.position.set(
+        (this.shop.doorInside.x + o.x) / 2, 0, (this.shop.doorInside.z + o.z) / 2);
+    };
 
-    const wares = ["caveshroom", "meat", "jelly"]; // the cave haul
+    const wares = ["jelly", "rathide"]; // the cave haul
     const toShop = () => {
       if (this.playerArea !== "shop") {
         // climbing out of a delve first cleans up its state (bag, HP)
@@ -982,15 +1047,16 @@ export const uiMethods = {
       this.player.animator.prevPos.copy(this.player.position);
       this._snapCamera();
     };
-    // "inside the shop, key spent on the gates, note read, haul stowed" — the
-    // state most steps build on
+    // "inside the shop, key spent, Morel's order named" — the state the
+    // errand steps build on
     const insideSetup = (tut) => {
       toShop();
       this.tutorial = tut;
       this._doorScene = true;
-      this._noteSpawned = this._notePicked = this._noteRead = true;
-      this.shop.doorLocked = true; // stay shut through the stock step (see _tutAdvance)
-      this.stash = [...wares];
+      this._letterSpawned = true;
+      this._letterPicked = true;
+      this._letterRead = true;
+      this._morelIntroDone = true;
       this._syncInv();
     };
 
@@ -1017,20 +1083,78 @@ export const uiMethods = {
         this._tutHint();
         break;
 
-      case "stock":
-        insideSetup("stock");
+      case "shopfront":
+        // Scene 3 begins on the locked doorstep, immediately before the line
+        // that points the player to the inherited key in their bag.
+        toShop();
+        this.tutorial = "shop";
+        this.shop.doorLocked = true;
+        this.inventory = ["shopkey", ...wares];
+        this._syncInv();
+        this.player.position.copy(this.shop.doorPos);
+        this.player.animator.prevPos.copy(this.player.position);
+        this._snapCamera();
+        this._shopDoorScene();
+        break;
+
+      case "fetch":
+        // just inside the bare shop, one step from finding the counter letter;
+        // Morel does not appear indoors until it has been read
+        toShop();
+        this.tutorial = "fetch";
+        this._doorScene = true;
+        if (morel?.creature) morel.creature.visible = false;
+        this.inventory = [...wares];
+        this._syncInv();
+        this.player.position.copy(this.shop.doorInside);
+        this.player.animator.prevPos.copy(this.player.position);
+        this._snapCamera();
+        break;
+
+      case "forage":
+        // Morel's order named — standing at the cave pit, basket empty
+        insideSetup("forage");
+        this.inventory = [...wares];
+        this._syncInv();
+        morelInside();
+        this._enterCave();
+        this.player.position.copy(this.cave.descentPos).add(_v.set(0, 0, 1.6));
+        this.player.animator.prevPos.copy(this.player.position);
+        this._snapCamera();
         this._tutHint();
         break;
 
-      case "sell":
+      case "trade":
+        // back with the full basket; Morel waits by the counter
+        insideSetup("trade");
+        this.inventory = ["mushroom", "mushroom", "caveshroom", "meat", ...wares];
+        this._syncInv();
+        morelInside();
+        this._tutHint();
+        break;
+
+      case "stock":
+        // shelf delivered, haul stowed — one mushroom wants laying out
         insideSetup("stock");
-        this._stockFromStash(0); // advances stock -> sell + brings the shopper in
+        this._morelTradeDone = true;
+        this.tablesRepaired[0] = true;
+        this.shop.repairTable(0, true);
+        this.stash = ["mushroom", "meat", ...wares];
+        this._syncInv();
+        morelInside();
+        this._tutHint();
         break;
 
       case "delve":
-        // the send-off: sale done, arrow pointing down the road at the cave
-        // (the step completes on the first dive down a mouth)
+        // the send-off: shelf stocked, arrow pointing down the road at the
+        // cave (the step completes on the first dive down a mouth)
         insideSetup("delve");
+        this._morelTradeDone = true;
+        this.tablesRepaired[0] = true;
+        this.shop.repairTable(0, true);
+        this.stash = ["meat", ...wares];
+        this._syncInv();
+        this._stockFromStash(0);
         this._tutHint();
         break;
     }

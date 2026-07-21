@@ -4,7 +4,9 @@ import * as THREE from "three";
 import { viewport } from "./viewport.js";
 
 export class Engine {
-  constructor(mountEl) {
+  constructor(mountEl, opts = {}) {
+    this.mountEl = mountEl;
+    this.fitMount = !!opts.fitMount;
     this.renderer = new THREE.WebGLRenderer({
       antialias: window.devicePixelRatio < 2,
       powerPreference: "high-performance",
@@ -66,8 +68,9 @@ export class Engine {
   }
 
   resize() {
-    const w = viewport.w;
-    const h = viewport.h;
+    const rect = this.fitMount ? this.mountEl.getBoundingClientRect() : null;
+    const w = Math.max(1, Math.floor(rect?.width || viewport.w));
+    const h = Math.max(1, Math.floor(rect?.height || viewport.h));
     this.renderer.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();

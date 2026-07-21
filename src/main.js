@@ -7,9 +7,11 @@ import { loadCharacters } from "./chargen/assets.js";
 import { loadDungeonAssets } from "./game/dungeon-assets.js";
 import { icon } from "./core/icons.js";
 import { initAnalytics, track } from "./core/analytics.js";
+import { getPlayableTesterId } from "./core/playable-session.js";
 import { SAVE_KEY } from "./game/game-persistence.js";
 
-initAnalytics();
+const replayMode = new URLSearchParams(location.search).has("replay");
+if (!replayMode) initAnalytics();
 
 const app = document.getElementById("app");
 const hudRoot = document.getElementById("hud");
@@ -34,6 +36,58 @@ function hasSave() {
   } catch {
     return false;
   }
+}
+
+function playtestNotice() {
+  const hash = getPlayableTesterId();
+  if (!hash) return Promise.resolve();
+  return new Promise((resolve) => {
+    const el = document.createElement("div");
+    el.id = "playtest-notice";
+    el.innerHTML = `
+      <div class="playtest-number">playtest ${hash}</div>
+      <div class="playtest-instructions">
+        <span class="playtest-arrow" aria-hidden="true"></span>
+        <div class="playtest-copy">
+          <div>Please read this aloud before starting the playtest</div>
+          <button id="playtest-done">Done</button>
+        </div>
+      </div>`;
+    document.body.appendChild(el);
+    const positionArrow = () => {
+      const numberRect = el.querySelector(".playtest-number").getBoundingClientRect();
+      const copyRect = el.querySelector(".playtest-copy").getBoundingClientRect();
+      const arrow = el.querySelector(".playtest-arrow");
+      const copyX = copyRect.left + copyRect.width / 2;
+      const copyY = copyRect.top;
+      const targetX = numberRect.left + numberRect.width / 2;
+      const targetY = numberRect.top + numberRect.height / 2;
+      const rawDX = targetX - copyX, rawDY = targetY - copyY;
+      const rawLength = Math.hypot(rawDX, rawDY) || 1;
+      const ux = rawDX / rawLength, uy = rawDY / rawLength;
+      const gap = Math.min(48, rawLength / 3);
+      const startX = copyX + ux * gap;
+      const startY = copyY + uy * gap;
+      const endX = targetX - ux * gap;
+      const endY = targetY - uy * gap;
+      const dx = endX - startX, dy = endY - startY;
+      arrow.style.left = `${startX}px`;
+      arrow.style.top = `${startY}px`;
+      arrow.style.width = `${Math.hypot(dx, dy)}px`;
+      arrow.style.transform = `rotate(${Math.atan2(dy, dx)}rad)`;
+    };
+    requestAnimationFrame(positionArrow);
+    window.addEventListener("resize", positionArrow);
+    track("playtest_id_shown", {
+      tester_id: hash,
+      shown_timestamp_ms: Date.now(),
+    });
+    el.querySelector("#playtest-done").onclick = () => {
+      window.removeEventListener("resize", positionArrow);
+      el.remove();
+      resolve();
+    };
+  });
 }
 
 function startMenu() {
@@ -92,6 +146,11 @@ function confirmNewGame() {
 }
 
 async function boot() {
+  if (replayMode) {
+    const { bootReplay } = await import("./replay/replay-app.js");
+    await bootReplay({ app, hudRoot });
+    return;
+  }
   loadingScreen("Loading characters…");
   await loadCharacters((done, total) => {
     const sub = document.getElementById("load-sub");
@@ -114,6 +173,7 @@ async function boot() {
   window.__game = game; // debug/testing handle
 
   hudRoot.classList.add("title-hidden"); // keep the HUD out of the menu shot
+  await playtestNotice();
   await startMenu();
   track("game_started");
   hudRoot.classList.remove("title-hidden");

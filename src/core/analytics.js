@@ -11,6 +11,7 @@ const POSTHOG_KEY = "phc_qgZdvj7qXuXqgQhAdui4vpackVAUk4AymytrtRktL9cU";
 const POSTHOG_HOST = "https://eu.i.posthog.com";
 
 let ready = false;
+let contextProvider = null;
 
 export function initAnalytics() {
   if (ready) return;
@@ -33,10 +34,17 @@ export function initAnalytics() {
 export function track(event, props) {
   if (!ready) return;
   try {
-    posthog.capture(event, props);
+    const context = contextProvider?.() || {};
+    posthog.capture(event, { ...context, ...props });
   } catch {
     /* swallow — never let a stat break gameplay */
   }
+}
+
+// Supplies live game context (position, area, progression, etc.) to every
+// semantic event without making each gameplay module repeat the same fields.
+export function setAnalyticsContextProvider(provider) {
+  contextProvider = typeof provider === "function" ? provider : null;
 }
 
 export { posthog };

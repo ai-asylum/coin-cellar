@@ -18,12 +18,14 @@ npm install
 | `npm run preview` | Serve the built `dist/` locally |
 
 Dependencies: `three`, `peerjs`, `@supabase/supabase-js`, `posthog-js`,
+`tesseract.js` (local replay video OCR),
 `@capacitor/core` + `@capacitor/android` (dev: `vite`, `@capacitor/cli`).
 
 ### During development
 
 - Game: `/` · Creature lab: `/lab.html` · Admin: `/admin/` ·
-  **Editor:** `/editor.html` · **Cooking:** `/cooking.html`
+  **Editor:** `/editor.html` · **Cooking:** `/cooking.html` ·
+  **Playtest reviewer:** `/?replay`
 
 ## Vite configuration (`vite.config.js`)
 
@@ -41,6 +43,20 @@ Dependencies: `three`, `peerjs`, `@supabase/supabase-js`, `posthog-js`,
   These exist only in `npm run dev` — production builds ship the JSON as
   static data.
 
+- `/api/replay/posthog` is a fourth, read-only local endpoint used by
+  `?replay`. It proxies a tester-ID-filtered HogQL query so the personal API
+  key never reaches browser code. Start the server with:
+
+```bash
+POSTHOG_PERSONAL_API_KEY=phx_... \
+POSTHOG_PROJECT_ID=... \
+npm run dev
+```
+
+The project must be the Coin Cellar PostHog project receiving the
+`player_position_batch` events. The reviewer is intentionally local-only; the
+static production deployment has no query proxy.
+
 ## Static assets (`public/`)
 
 Copied verbatim into the build root: 18 Kenney character GLBs + textures
@@ -54,7 +70,9 @@ PostHog (`src/core/analytics.js`) initializes for the **game page only**
 (lab/admin/editor/cooking never import it): EU cloud, public key in source,
 autocapture + pageviews on. Custom events: `game_started`,
 `dungeon_entered`, `returned_home`, `item_sold` (haggled or instant),
-`ftue_step`, `ftue_completed`, `npc_talk`.
+`ftue_step`, `ftue_completed`, `npc_talk`, and, for `?playtest`,
+`playtest_id_shown` plus `player_position_batch`. `?replay` does not initialize
+PostHog and therefore cannot contaminate gameplay analytics.
 
 ## Deploying — Vercel
 

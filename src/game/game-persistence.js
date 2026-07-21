@@ -24,6 +24,7 @@ export const persistenceMethods = {
   },
 
   _save() {
+    if (this._replayMode) return;
     if (this.net.isGuest) return;
     try {
       localStorage.setItem(SAVE_KEY, JSON.stringify({

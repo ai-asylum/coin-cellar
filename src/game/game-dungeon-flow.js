@@ -26,9 +26,9 @@ export const dungeonFlowMethods = {
   // Commit to diving into cave mouth `id`: pack first if there's anything in
   // the storeroom worth carrying, otherwise straight down the hole.
   _delve(id = 0) {
-    // the guided first day holds the mouths shut until the FTUE has walked
-    // you through selling — the send-off's "delve" step is the first real trip
-    if (this.tutorial && this.tutorial !== "delve") {
+    // The mushroom fetch and the final send-off are the FTUE's two permitted
+    // descents. Every other onboarding step keeps the mouths unavailable.
+    if (this.tutorial && this.tutorial !== "fetch" && this.tutorial !== "delve") {
       this.hud.toast(`${icon("box")} Finish setting up shop first`);
       return;
     }
@@ -63,9 +63,12 @@ export const dungeonFlowMethods = {
     this._snapCamera();
     // the cave is the shared lobby now: strangers' avatars show up here
     this.lobby.join("cave");
-    // coming back for more loot: the trapdoor the hero shut behind them
-    // swings open ahead — the FTUE's last reveal, and nobody said a word
-    if (!this.cave.trapdoorOpen && (!this.tutorial || this.tutorial === "delve")) {
+    // coming back down: the trapdoor the hero shut behind them swings open
+    // ahead — wordless. During the FTUE it opens once Morel has named the
+    // errand (the fetch), and again for the send-off's first real dive.
+    const ftueOpen = (this.tutorial === "fetch" && this._morelIntroDone) ||
+      this.tutorial === "forage" || this.tutorial === "delve";
+    if (!this.cave.trapdoorOpen && (!this.tutorial || ftueOpen)) {
       this.cave.setTrapdoorOpen(true);
       this.audio.chest();
     }
@@ -94,7 +97,8 @@ export const dungeonFlowMethods = {
       this.audio.chest?.();
       setTimeout(() => this.hud.flyBagToStore(loot, () => this.audio.pickup?.()), 320);
     }
-    // the FTUE's first walk-out is a beat of its own (banner + the road line)
+    // the FTUE's first walk-out is a beat of its own (the banner; the guide
+    // arrow carries the player on to the shop)
     if (this.tutorial === "exit") this._onFtueCaveExit();
   },
 
@@ -134,7 +138,10 @@ export const dungeonFlowMethods = {
   // shares it. In PeerJS co-op the pair shares one dungeon: host generates,
   // guest requests.
   _enterHole(id) {
-    // the FTUE's send-off step completes on the first real descent
+    // FTUE: Morel's errand descends here ("fetch" completes into the guided
+    // forage) and so does the send-off's first real dive ("delve", which ends
+    // the tutorial) — whichever step is live advances
+    this._tutAdvance("fetch");
     this._tutAdvance("delve");
     const floor = id * FLOORS_PER_DUNGEON + 1;
     if (this.net.isGuest) {
@@ -149,10 +156,15 @@ export const dungeonFlowMethods = {
       this._enterDungeon();
       return;
     }
-    if (!this.dungeon.active || this.dungeon.floor !== floor) {
+    // the forage run gets the FTUE floor (guaranteed mushrooms, sealed way
+    // down) rebuilt fresh on every entry, so an early climb-out — or a
+    // player who ate the basket — always finds full clusters again; and a
+    // stale FTUE floor left over after the tutorial moved on regenerates too
+    const wantFtue = this.tutorial === "forage";
+    if (!this.dungeon.active || this.dungeon.floor !== floor || wantFtue || this.dungeon.ftue) {
       this.cellarHole = id;
       const seed = daySeed();
-      this.dungeon.generate(floor, seed);
+      this.dungeon.generate(floor, seed, false, wantFtue);
       this.net.send({ t: "floor", n: floor, seed, hole: id });
       this._syncState();
     }
@@ -439,7 +451,9 @@ export const dungeonFlowMethods = {
     this._floorDesync = false;
     this._pendingLead = null;
     this.lobby.join("cave"); // back in the shared lobby
-    this._depositBag();
+    // the FTUE forage run keeps the bag: Morel's basket is handed over in
+    // the shop, and the rest banks when he pays (see _morelTradeScene)
+    if (!this.tutorial) this._depositBag();
     // a trip back up patches you up — no day/night rest to do it any more
     this.hp = this.maxHp;
     this.hud.setHearts(this.hp, this.maxHp);
@@ -456,6 +470,9 @@ export const dungeonFlowMethods = {
     this.audio.stairs();
     this._snapCamera();
     this.hud.banner(`${icon("hole")} Back to the surface`, "", 1.4);
+    // surfacing with Morel's basket full moves the FTUE on to the trade;
+    // short a mushroom, the step holds and the arrows point back down
+    if (this._ftueBasket() >= 3) this._tutAdvance("forage");
     track("returned_home", { deepest: this.today?.deepest ?? 0, gold: this.gold });
     this._save();
   },
@@ -464,7 +481,8 @@ export const dungeonFlowMethods = {
   // boss floor (3/6/9) it's the boss's descent stairs, which also unseal the
   // cellar shortcut to the dungeon we're dropping into.
   _descend() {
-    if (this.tutorial) return; // tutorial cellar is a single floor
+    // the FTUE forage floor's way deeper sits under a shut trapdoor
+    if (this.tutorial || this.dungeon.ftue) return;
     if (this.dungeon.floor >= MAX_DEPTH) return; // 12 is the deepest there is
     if (this.net.isGuest) {
       // A floor behind the party? Take the stairs to catch up to where the

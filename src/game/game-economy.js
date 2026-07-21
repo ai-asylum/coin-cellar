@@ -65,7 +65,6 @@ export const economyMethods = {
     this.hud.float(_v.copy(drop.mesh.position).setY(1.2), `${itemIcon(it.icon)} ${it.name}`, "loot");
     // the loot flies across the screen into the backpack
     this.hud.flyToBag(_v.copy(drop.mesh.position).setY(0.8), itemIcon(it.icon));
-    this._tutAdvance("loot");
     this._refreshBagIfOpen(); // magneted in while the bag's open — keep the list live
     this._save();
   },
@@ -222,7 +221,6 @@ export const economyMethods = {
       this.today.bestCombo = Math.max(this.today.bestCombo, this.combo);
       this.gainGold(price, cust.creature.position);
       this._saleJuice(price, grade, cust.creature.position);
-      this._tutAdvance("sell");
       this._syncStock();
       this._save();
       track("item_sold", { price, grade, combo: this.combo, haggled: true });
@@ -252,7 +250,6 @@ export const economyMethods = {
     this.today.earned += price;
     this.gainGold(price, cust.creature.position);
     this._saleJuice(price, "good", cust.creature.position);
-    this._tutAdvance("sell");
     this._syncStock();
     this._save();
     track("item_sold", { price, grade: "good", combo: 0, haggled: false });
@@ -348,7 +345,7 @@ export const economyMethods = {
     this.today.spent += table.cost;
     this.shop.repairTable(i);
     this.tablesRepaired[i] = true;
-    this.hud.toast(`${icon("shop")} ${table.fancy ? "Vitrine" : "Shelf"} repaired!`);
+    this.hud.toast(`${icon("shop")} ${table.fancy ? "Vitrine" : "Shelf"} delivered!`);
     this._save();
     this._syncTables();
   },

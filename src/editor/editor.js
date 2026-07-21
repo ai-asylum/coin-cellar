@@ -137,11 +137,12 @@ function tagEditables() {
   // the street lampposts — pickable/movable like decor (authored pre-rotation coords)
   (shop.streetLamps || []).forEach((l, i) => { l.userData.edit = { type: "lamp", index: i }; });
   // whole buildings (grabbed in Buildings mode): the shop shell + interior, the
-  // cave mouth, and the dojo — each a group the game builds from layout.json's
+  // cave mouth, dojo and Morel shop — each built from layout.json's
   // `buildings` block
   if (shop.shopGroup) shop.shopGroup.userData.edit = { type: "building", key: "shop" };
   if (shop._caveMouthGroup) shop._caveMouthGroup.userData.edit = { type: "building", key: "cave" };
   if (shop._dojoGroup) shop._dojoGroup.userData.edit = { type: "building", key: "dojo" };
+  if (shop._morelShopGroup) shop._morelShopGroup.userData.edit = { type: "building", key: "morelShop" };
   // the dojo's contents (grabbed in Contents mode): the training dummies and
   // the resident master, authored in dojo-local coords
   if (shop.dojo) {
@@ -185,6 +186,7 @@ function ensureBuildings() {
   if (!b.shop) b.shop = { x: 0, z: 0 };
   if (!b.cave) b.cave = { x: 3, z: -18 };
   if (!b.dojo) b.dojo = { x: 2, z: -33 };
+  if (!b.morelShop) b.morelShop = { x: 23, z: -7 };
   if (!b.dojo.dummies) b.dojo.dummies = [{ x: -2.6, z: 0.4 }, { x: 0, z: 0.4 }, { x: 2.6, z: 0.4 }];
   if (!b.dojo.master) b.dojo.master = { x: -2.2, z: -2.5 };
   return b;
@@ -201,7 +203,8 @@ function selectionValid(sel) {
   }
   if (sel.type === "decor") return sel.index < layout.decor.length;
   if (sel.type === "lamp") return !!shop && sel.index < (shop.streetLamps?.length ?? 0);
-  if (sel.type === "building") return sel.key === "shop" || sel.key === "cave" || sel.key === "dojo";
+  if (sel.type === "building")
+    return sel.key === "shop" || sel.key === "cave" || sel.key === "dojo" || sel.key === "morelShop";
   if (sel.type === "dojoDummy") return sel.index < (layout.buildings?.dojo?.dummies?.length ?? 0);
   if (sel.type === "dojoMaster") return true;
   if (sel.type === "hill") return !!shop && sel.index < (shop._hillMeshes?.length ?? 0);
@@ -232,7 +235,10 @@ function selectedObject(sel = selection) {
   if (sel.type === "decor") return shop.decorSprites[sel.index] ?? null;
   if (sel.type === "lamp") return shop.streetLamps[sel.index] ?? null;
   if (sel.type === "building") {
-    return (sel.key === "shop" ? shop.shopGroup : sel.key === "dojo" ? shop._dojoGroup : shop._caveMouthGroup) ?? null;
+    return (sel.key === "shop" ? shop.shopGroup
+      : sel.key === "dojo" ? shop._dojoGroup
+      : sel.key === "morelShop" ? shop._morelShopGroup
+      : shop._caveMouthGroup) ?? null;
   }
   if (sel.type === "dojoDummy") return shop.dojo?.dummies[sel.index]?.group ?? null;
   if (sel.type === "dojoMaster") return shop.dojo?.master?.creature ?? null;
@@ -266,7 +272,11 @@ function selLabel(sel = selection) {
   }
   if (sel.type === "decor") return `decor ${sel.index + 1} (${layout.decor[sel.index]?.cat})`;
   if (sel.type === "lamp") return `lamppost ${sel.index + 1}`;
-  if (sel.type === "building") return sel.key === "shop" ? "shop building" : sel.key === "dojo" ? "dojo building" : "cave mouth";
+  if (sel.type === "building")
+    return sel.key === "shop" ? "shop building"
+      : sel.key === "dojo" ? "dojo building"
+      : sel.key === "morelShop" ? "Morel shop"
+      : "cave mouth";
   if (sel.type === "dojoDummy") return `dojo dummy ${sel.index + 1}`;
   if (sel.type === "dojoMaster") return "dojo master";
   if (sel.type === "hill") return `wall hill ${sel.index + 1}`;

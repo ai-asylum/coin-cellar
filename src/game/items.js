@@ -70,11 +70,11 @@ export const ITEMS = {
   // FTUE-only quest props. `quest` items show no price, offer only the story
   // action the FTUE wires up (see _questBagAction), and never survive into a
   // resumed save (see _load). The key rides in the bag from the wake-up to
-  // the shopfront and is consumed opening the gates; the note is picked off
-  // the first table and consumed by reading it.
+  // the shopfront and is consumed opening the gates. The letter is picked up
+  // from the counter, read from the bag, then consumed before Morel enters.
   shopkey:  { name: "Shop Key",         icon: "key",       base: 0,   tier: 2, quest: true,
     blurb: "uncle left it to me" },
-  unclenote:{ name: "Uncle's Note",     icon: "scroll",    base: 0,   tier: 2, quest: true,
+  unclenote:{ name: "Uncle's Letter",   icon: "scroll",    base: 0,   tier: 2, quest: true,
     blurb: "his handwriting" },
   bomb:     { name: "Blast Bomb",       icon: "bomb",      base: 44,  tier: 2 },
   shield:   { name: "Kite Shield",      icon: "shield",    base: 120, tier: 3,

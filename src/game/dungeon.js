@@ -6,7 +6,7 @@ import * as THREE from "three";
 import { makeToonMaterial, feedOccluder } from "../core/toon.js";
 import { makeLightShaft } from "../core/godrays.js";
 import { Creature } from "../chargen/creature.js";
-import { scatterDungeonDecor, disposeDecor } from "./decor.js";
+import { scatterDungeonDecor, placeDecorProp, disposeDecor } from "./decor.js";
 import { Projectiles } from "./projectile.js";
 import { rng, pick } from "../core/engine.js";
 import { DUNGEON_ORIGIN, MAX_DEPTH, isBossFloor, dungeonIndexFor, bossDefFor, ENEMY_KINDS, HOLE_THEMES, DEFAULT_THEME, FLOORS_PER_DUNGEON, floorMixFor, genFor } from "./dungeon-data.js";
@@ -52,13 +52,17 @@ export class Dungeon {
 
   /** Build floor n from a seed (deterministic — co-op peers share the seed).
    * `tutorial` swaps the maze for a single tiny room: no monsters, one chest —
-   * a gentle first delve that teaches loot → stairs without any combat. */
-  generate(floorN, seed, tutorial = false) {
+   * a gentle first delve that teaches loot → stairs without any combat.
+   * `ftue` marks the guided first forage (Morel's mushroom errand): a real
+   * floor, but with guaranteed mushroom clusters, every chest paying starter
+   * wares, and the way deeper sealed under a shut trapdoor. */
+  generate(floorN, seed, tutorial = false, ftue = false) {
     this.dispose();
     this.floor = floorN;
     this.seed = seed;
     this.active = true;
     this.tutorial = tutorial;
+    this.ftue = ftue;
     this.group.visible = true;
     const r = rng(seed + floorN * 7717);
 
@@ -288,11 +292,15 @@ export class Dungeon {
     this.hasDownStairs = hasDown;
     if (this.hasDownStairs) {
       // pit shaft + seated flight over the cut-out cell (shared with the cellar
-      // lobby's trapdoor mouths — see makeDescent)
-      const descent = makeDescent();
+      // lobby's trapdoor mouths — see makeDescent; flush under the FTUE lid)
+      const descent = makeDescent(ftue ? 0.02 : undefined);
       descent.position.copy(this.stairsPos);
       this.colliders.push(modelCollider(descent, DUNGEON_ORIGIN));
       this.group.add(descent);
+      // on the FTUE forage floor the way deeper sits sealed under a shut
+      // wooden lid — the cave trapdoor's twin, a promise for later (descent
+      // itself is guarded in _descend). Post-FTUE floors generate without it.
+      if (ftue) this.group.add(makeTrapdoorLid(this.stairsPos));
     }
 
     // up-stairs: the way back out. On normal floors they rise at the arrival
@@ -353,6 +361,25 @@ export class Dungeon {
           height: Math.min(1.6, pr.collider.h ?? 1), color: pr.color, radius,
           collider: pr.collider, // freed on smash so the spot stops blocking
         });
+      }
+    }
+
+    // The FTUE forage floor grows guaranteed mushroom clusters — a couple per
+    // room, hugging the walls like the scattered kind — so Morel's basket can
+    // never dead-end on an unlucky roll (their drops are guaranteed too while
+    // `ftue` is up — see _dropDecorLoot).
+    if (ftue) {
+      const near = (p, cell) => {
+        const c = cellPos(cell.x, cell.y);
+        return Math.abs(p.x - c.x) < 2 && Math.abs(p.z - c.z) < 2;
+      };
+      for (const room of rooms) {
+        for (const t of [0.25, 0.75]) {
+          const p = cellPos(room.x + 0.3 + t * (room.w - 1.6), room.y + (t < 0.5 ? 0.3 : room.h - 1.3));
+          if (near(p, this.entranceCell) || near(p, this.stairsCell)) continue;
+          const d = placeDecorProp(this.group, r, "mushrooms", p.x, p.z, { tint: theme.decor?.tint });
+          this.decor.push({ ...d, id: this.decor.length, wx: p.x + DUNGEON_ORIGIN.x, wz: p.z + DUNGEON_ORIGIN.z });
+        }
       }
     }
 
@@ -453,7 +480,8 @@ export class Dungeon {
     // earlier floors give it a chance so it can turn up on the way down. The
     // choice is derived from the seed alone, so co-op peers agree on it.
     this.keyChestId = -1;
-    const keyHere = !tutorial && (isBoss || rng(seed + 900 + floorN * 17)() < gen.keyChance);
+    // (never on the FTUE forage floor — its chests all pay starter wares)
+    const keyHere = !tutorial && !ftue && (isBoss || rng(seed + 900 + floorN * 17)() < gen.keyChance);
     if (keyHere) {
       if (isBoss && this.chests.length === 0) {
         // extremely unlucky roll left the arena floor chest-less — force one
@@ -850,6 +878,28 @@ const _v = new THREE.Vector3();
 
 // Re-export the public data API so existing import sites (game.js, admin.js,
 // cave.js) keep working unchanged after the split.
+// A shut wooden lid sealing a descent cell — the cave trapdoor's twin, but
+// static: it never opens, the floor just regenerates without it once the
+// FTUE is done. Sized to the cell so it seals the cut-out flush.
+function makeTrapdoorLid(pos) {
+  const lidMat = makeToonMaterial({ color: 0x6e4526, rim: 0 });
+  const trim = makeToonMaterial({ color: 0x4a2c17, rim: 0, polygonOffset: true });
+  const g = new THREE.Group();
+  const lidR = CELL / 2;
+  g.add(new THREE.Mesh(new THREE.BoxGeometry(lidR * 2, 0.12, lidR * 2), lidMat));
+  for (const px of [-0.62, 0, 0.62]) {
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.15, lidR * 2 - 0.16), trim);
+    bar.position.set(px, 0.06, 0);
+    g.add(bar);
+  }
+  const pull = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.03, 6, 14), trim);
+  pull.rotation.x = Math.PI / 2;
+  pull.position.set(0, 0.12, lidR * 0.7);
+  g.add(pull);
+  g.position.set(pos.x, 0.06, pos.z);
+  return g;
+}
+
 export {
   DUNGEON_ORIGIN, MAX_DEPTH, FLOORS_PER_DUNGEON, N_DUNGEONS, isBossFloor,
   dungeonIndexFor, bossDefFor, BOSS_ATK_GLOW, ENEMY_KINDS, DUNGEON_MIX,

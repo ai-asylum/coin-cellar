@@ -116,3 +116,59 @@ Prototype order:
 
 Avoid starting with #5 — best spectacle, biggest build cost; save it for a
 second wave once a trimmed ad build of the engine exists.
+
+---
+
+## PlaytestCloud → PostHog telemetry
+
+Appending `?playtest` to the game URL enables playtest telemetry and displays
+`playtest #00000000` in the top-left corner of a dedicated black instruction
+screen before the main menu. A large white arrow asks the tester to read the
+code aloud; a simple `DONE` button underneath advances to the normal menu. The
+same hash is sent to PostHog as `tester_id`, allowing a PlaytestCloud video to
+be matched to its analytics. The ID is an eight-character hash derived from the
+session-start timestamp in milliseconds and remains stable for that browser
+session.
+
+When the code appears, `playtest_id_shown` records `tester_id` and
+`shown_timestamp_ms`. The replay reviewer uses the video time at which OCR sees
+the code and this event as the clock anchor between video-relative time and
+PostHog's absolute timestamps.
+
+Player position is sampled once per second. Five samples are sent together
+every five seconds as one `player_position_batch` event to reduce PostHog event
+volume. Each batch stores five parallel arrays:
+
+- `player_x` — horizontal world coordinate.
+- `player_z` — the other ground-plane coordinate. Three.js uses X/Z for the
+  floor; Y is vertical and is not required to locate the player.
+- `area` — `shop`, `cave`, or `dungeon`.
+- `dungeon_floor` — the active floor, or `null` outside the dungeon. This is
+  required because dungeon floors can reuse coordinates.
+- `dungeon_seed` — deterministic generation seed for exact future floor
+  reconstruction; older recordings without it use a best-effort floor.
+- `tutorial_step` — preserves whether the recorded floor used FTUE generation.
+- `sample_timestamp_ms` — timestamp for each one-second sample. PostHog also
+  supplies the batch event timestamp automatically, but one timestamp is not
+  enough to distinguish all five samples.
+
+Every batch also stores the scalar `tester_id` and `sample_count`. Array indexes
+belong together: index 0 across every property describes the same position
+sample, through index 4.
+
+## Local replay reviewer
+
+Open `http://localhost:5173/?replay` while the Vite development server is
+running. The reviewer accepts either one playtest's video + VTT/TXT files or a
+root folder whose subfolders are separate PlaytestCloud sessions. It:
+
+1. OCRs the upper portion of frames from the first 30 seconds for
+   `playtest #XXXXXXXX`, with a manual ID field if OCR fails.
+2. Loads matching PostHog events through the local authenticated proxy.
+3. Shows a frozen, invincible game world on the left and the video plus a
+   scrollable timecode/transcript table on the right.
+4. Synchronizes video scrubbing, transcript selection, the player position,
+   floating transcript bubbles, and optional translucent 30-second footsteps.
+
+The backquote admin panel remains available. Replay mode does not connect to
+co-op, save progress, advance simulation time, or capture new analytics.

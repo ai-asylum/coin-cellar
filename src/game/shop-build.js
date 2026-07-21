@@ -7,7 +7,9 @@ import { makeLightShaft } from "../core/godrays.js";
 import { placeStreetDecor, decorSprite, DECOR, DECOR_BURST, FIELD_FORAGE } from "./decor.js";
 import { buildStreetTerrain } from "./street-terrain.js";
 import { buildDojo } from "./dojo.js";
+import { buildMorelShop, MOREL_SHOP_DEFAULT, MOREL_SHOP_HW, MOREL_SHOP_HD } from "./morel-shop.js";
 import { buildBuilder } from "./builder.js";
+import { buildMorel } from "./morel.js";
 import { SHOP, MAX_CUSTOMERS, BUILDING_LIFT } from "./shop-data.js";
 import { getLayout } from "./layout-store.js";
 import { rng, pick } from "../core/engine.js";
@@ -201,6 +203,9 @@ export const buildMethods = {
     this.colliders.push({ x: counterX, z: counterZ, hw: 0.4, hd: counterD / 2 });
     // where the shopkeeper stands to serve — behind the bar, by the register
     this.counterPos = new THREE.Vector3(counterX + 0.95, 0, regZ);
+    // clear patch of benchtop used by the FTUE letter. Keep a real world anchor
+    // rather than borrowing a shelf slot: the opening shop has no shelves now.
+    this.counterLetterPos = new THREE.Vector3(counterX, counterTopY + 0.06, counterZ);
 
     // a brass cash register at the front end of the bar
     const register = new THREE.Group();
@@ -289,7 +294,9 @@ export const buildMethods = {
         collider,
         cost: def.cost ?? 200,
         fancy: false,
-        repaired: ti === 0, // only the first shelf comes ready to stock
+        // every shelf starts unbuilt: the first is Morel's FTUE gift, the
+        // rest are bought from him (returning saves re-open theirs on load)
+        repaired: false,
         slots: [],
         interactPos: offV(tx, tz, 1.05, 0, yaw),
       };
@@ -545,10 +552,12 @@ export const buildMethods = {
     // particular sits over the cobbled road band once _applyShopOffset moves it.
     const sb = getLayout().buildings?.shop ?? { x: 0, z: 0 };
     const dd = getLayout().buildings?.dojo ?? { x: 2, z: -33 };
+    const md = getLayout().buildings?.morelShop ?? MOREL_SHOP_DEFAULT;
     const buildingFootprints = [
       { x: sb.x, z: sb.z, hw: SHOP.W / 2, hd: SHOP.D / 2 },       // shop
       { x: this._cavePre.x, z: this._cavePre.z, hw: 2.2, hd: 3.8 }, // cave mound + apron
       { x: dd.x, z: dd.z, hw: 4.0, hd: 5.0 },                      // dojo hall
+      { x: md.x, z: md.z, hw: MOREL_SHOP_HD + 0.5, hd: MOREL_SHOP_HW + 0.5 }, // Morel shop
       ...this.lots.map((l) => ({ x: l.collider.x, z: l.collider.z, hw: l.collider.hw, hd: l.collider.hd })),
     ];
     const terrain = buildStreetTerrain(g, {
@@ -599,15 +608,24 @@ export const buildMethods = {
     // colliders join the list here, before forage rejects against them).
     this.dojo = buildDojo(this);
 
+    // Morel's little mushroom shop sits across the road from the cave, with
+    // its open front facing back toward the cave.
+    this.morelShop = buildMorelShop(this);
+
     // the town builder: an always-present foreman who waits by the ruined lots
     // and, for a fee, walks over and raises a house on the cheapest one. Built
     // after the lots + rotation so his home spot averages their world stand
     // points (see buildBuilder / updateBuilder).
     this.builder = buildBuilder(this);
 
-    // scatter destructible forage (blossoms, berry bushes, nut saplings,
-    // mushrooms) across the walkable meadow — smashable for edible loot, just
-    // like the cellar's decor. Runs last so it can reject against every finished
+    // Morel, the mushroom-and-shelf fellow: runs the FTUE's fetch quest from
+    // the inherited shop, then returns to his own mushroom shop across the road
+    // (see buildMorel / updateMorel + game-narrative _morelPrompt).
+    this.morel = buildMorel(this);
+
+    // scatter collectible forage (blossoms, berry bushes, nut saplings,
+    // mushrooms) across the walkable meadow — gathered by walking through it,
+    // like the cellar's forage. Runs last so it can reject against every finished
     // collider (walls, lots, cave, hills, dojo) and the settled walkable bounds.
     this._buildForage();
   },
@@ -664,6 +682,7 @@ export const buildMethods = {
     for (const c of this._shopColliders) shiftC(c);
     shiftC(this._doorCollider);
     shiftV(this.counterPos);
+    shiftV(this.counterLetterPos);
     shiftV(this.doorPos);
     shiftV(this.doorInside);
     for (const q of this.queueSpots) shiftV(q);
@@ -707,6 +726,7 @@ export const buildMethods = {
     for (const c of this.colliders) rotC(c);
     rotC(this._doorCollider); // joins the list after the nav bake
     rotV(this.counterPos);
+    rotV(this.counterLetterPos);
     for (const q of this.queueSpots) rotV(q);
     rotV(this.doorPos);
     rotV(this.doorInside);
@@ -842,15 +862,15 @@ export const buildMethods = {
   },
 
   // ---- meadow forage ---------------------------------------------------------
-  // Freckle the walkable fields around town with destructible scenery — flower
-  // clumps, berry bushes, nut saplings and mushrooms — each smashable with a
-  // dash for edible loot (see Shop.smashForage / decor.FIELD_FORAGE). Runs in
+  // Freckle the walkable fields around town with collectible scenery — flower
+  // clumps, berry bushes, nut saplings and mushrooms — each harvested on contact
+  // for edible loot (see Shop.collectForage / decor.FIELD_FORAGE). Runs in
   // post-rotation WORLD space (after _rotateTown), rejecting any spot on the
   // paved street, inside the shop footprint, over a collider (walls, lots, cave,
   // hills) or crowding another prop, so props only ever land out on open grass.
   _buildForage() {
     this.forageProps = [];
-    this.drops = []; // ground loot dropped by smashed forage (see Shop.update)
+    this.drops = []; // ground loot dropped by collected forage (see Shop.update)
     const r = rng(0x5A1AD5);
     const cats = Object.keys(FIELD_FORAGE);
     const totalW = cats.reduce((s, c) => s + FIELD_FORAGE[c].weight, 0);
@@ -880,6 +900,7 @@ export const buildMethods = {
       if (inRect(x, z, street)) continue; // off the road
       if (inRect(x, z, br, 1.2)) continue; // clear of the building
       if (this.dojo && inRect(x, z, this.dojo.rect, 0.6)) continue; // clear of the dojo
+      if (this.morelShop && inRect(x, z, this.morelShop.rect, 0.6)) continue; // clear of Morel's shop
       if (hitsCollider(x, z, 0.9)) continue; // not inside a wall / lot / hill / cave
       if (this.forageProps.some((p) => Math.abs(p.x - x) < 1.6 && Math.abs(p.z - z) < 1.6)) continue;
       const cat = rollCat();

@@ -27,6 +27,8 @@ import { combat, attackMode, ATTACK_MODES } from "./combat-settings.js";
 import { economyMethods } from "./game-economy.js";
 import { dungeonFlowMethods } from "./game-dungeon-flow.js";
 import { setLayout } from "./layout-store.js";
+import { setAnalyticsContextProvider, track } from "../core/analytics.js";
+import { getPlayableTesterId, isPlayableSession } from "../core/playable-session.js";
 import layoutData from "./layout.json";
 
 // The game builds the town from the bundled layout (the overworld editor —
@@ -57,7 +59,8 @@ export class Game {
     // Attract mode: build the whole town but hold off the real session so the
     // title screen can show the hero strolling around behind the menu (Animal
     // Crossing-style). startPlay() drops it and boots the game for real.
-    this._titleAttract = !!opts.titleAttract;
+    this._replayMode = !!opts.replayMode;
+    this._titleAttract = !this._replayMode && !!opts.titleAttract;
     this.net = new Coop(this);
     this.particles = new Particles(engine.scene);
     this.slash = new SlashArc(engine.scene);
@@ -132,6 +135,7 @@ export class Game {
     this._floorDesync = false;
     this._pendingLead = null; // { n, seed, hole } — where to catch up to
     this.godMode = false;
+    this.debugFreezeNoclip = false;
     this.debugHour = null; // admin time-of-day override (0–24); null = real clock
     this.debugOccasion = null; // admin calendar-occasion override (id); null = real date
     this._adminOpen = false;
@@ -178,15 +182,15 @@ export class Game {
     // the FTUE's scripted opening cinematic (see _updateCaveIntro)
     this._cine = null;
 
-    this._load();
+    if (!this._replayMode) this._load();
 
     // Friends: a display name (so friends can find us on the broker) plus the
     // list of names we've saved. If we already have a name, hop online right
     // away so invites can land.
-    this.playerName = localStorage.getItem(NAME_KEY) || "";
-    this.friends = this._loadFriends();
+    this.playerName = this._replayMode ? "" : localStorage.getItem(NAME_KEY) || "";
+    this.friends = this._replayMode ? [] : this._loadFriends();
     // hold off going online until the player actually starts (see startPlay)
-    if (this.playerName && !this._titleAttract) this.net.goOnline(this.playerName);
+    if (!this._replayMode && this.playerName && !this._titleAttract) this.net.goOnline(this.playerName);
 
     // running tally of this session's trading (loot/sales/spend) for stats
     this.today = this._freshDayStats();
@@ -206,10 +210,12 @@ export class Game {
       if (lot) this.townResidents.push(lot.resident);
     });
     // size the repaired-tables flags to the shop's tables (padding shorter saved
-    // arrays), keep the first shelf always open, and restore any bought repairs
+    // arrays) and restore any bought repairs. Any existing save keeps the first
+    // shelf open (also the safety net for saves abandoned mid-FTUE); a fresh
+    // game starts shelf-less — the first shelf is Morel's gift.
     while (this.tablesRepaired.length < this.shop.tables.length) this.tablesRepaired.push(false);
     this.tablesRepaired.length = this.shop.tables.length;
-    this.tablesRepaired[0] = true;
+    if (this._hadSave) this.tablesRepaired[0] = true;
     this.tablesRepaired.forEach((done, i) => { if (done) this.shop.repairTable(i, true); });
     // now the tables exist and any bought repairs are replayed, put the saved
     // shelf stock back out on display (see _load / _restoreStock)
@@ -233,6 +239,12 @@ export class Game {
     this.player.holdItem(weaponMesh(this.equipment.weapon));
     engine.scene.add(this.player);
     this._recomputeStats();
+    this._playableAnalytics = isPlayableSession();
+    this._testerId = getPlayableTesterId();
+    this._analyticsSampleT = 0;
+    this._analyticsPositionSampleT = POSITION_SAMPLE_SECONDS;
+    this._analyticsPositionBatch = [];
+    setAnalyticsContextProvider(() => this._analyticsState());
     this.player.animator.onFootstep = (pos, k) => {
       this.audio.step();
       this.particles.burst(pos, { color: 0x9a8f80, n: 1, speed: 0.4, up: 0.5, gravity: 2, life: 0.35, size: 0.7 });
@@ -267,9 +279,91 @@ export class Game {
     this._wireHud();
     this._initFullscreenGate();
     this.input.onKey = (code) => this._handleKey(code);
-    if (this._titleAttract) this._beginTitleAttract();
+    if (this._replayMode) this._beginReplayMode();
+    else if (this._titleAttract) this._beginTitleAttract();
     else this._beginShop(true);
     engine.onTick((dt, t) => this.update(dt, t));
+  }
+
+  _beginReplayMode() {
+    this.godMode = false;
+    this.paused = false;
+    this.tutorial = null;
+    this._cine = null;
+    this._ftueFreeze = false;
+    this.cave.setTrapdoorOpen(true, true);
+    this.player.mesh.visible = true;
+    this.player.position.copy(this.shop.playerSpawn);
+    this.player.animator.prevPos.copy(this.player.position);
+    this.shop.group.visible = true;
+    this.cave.group.visible = false;
+    this.dungeon.group.visible = false;
+    this._snapCamera();
+  }
+
+  // Drive the frozen review world from a normalized telemetry sample.
+  setReplaySample(sample) {
+    if (!this._replayMode || !sample) return;
+    const area = sample.area === "dungeon" || sample.area === "cave" ? sample.area : "shop";
+    const floor = Number(sample.floor) || 1;
+    const seed = Number(sample.seed) || REPLAY_FALLBACK_SEED;
+    const areaChanged = this.playerArea !== area;
+    const floorChanged = area === "dungeon" &&
+      (!this.dungeon.active || this.dungeon.floor !== floor || this.dungeon.seed !== seed);
+    if (floorChanged) this.dungeon.generate(floor, seed, false, sample.tutorial === "forage");
+    this.playerArea = area;
+    this.shop.group.visible = area === "shop";
+    this.cave.group.visible = area === "cave";
+    this.dungeon.group.visible = area === "dungeon";
+    this.player.position.set(sample.x, 0, sample.z);
+    this.player.animator.prevPos.copy(this.player.position);
+    this._syncReplayShopRoof();
+    this._updateReplayCamera(areaChanged || floorChanged);
+  }
+
+  _updateReplayCamera(snap = false) {
+    const p = this.player.position;
+    if (this.playerArea === "dungeon" || this.playerArea === "cave") {
+      this.engine.camTarget.set(p.x, 0, p.z - DUNGEON_LOOKAHEAD);
+      this.engine.camOffset.copy(_camDungeon);
+    } else {
+      const zone = this.shop.zoneCenter(p);
+      const street = !zone ? this.shop.streetCenter(p) : null;
+      this.engine.camTarget.set(zone?.cx ?? street?.cx ?? p.x, 0, zone?.cz ?? street?.cz ?? p.z);
+      this.engine.camOffset.copy(zone ? fitShopCamera(this.engine.camera.aspect, this.shop) : this.shop.camStreetOffset);
+    }
+    if (snap) this.engine.camera.position.copy(this.engine.camTarget).add(this.engine.camOffset);
+  }
+
+  _syncReplayShopRoof() {
+    if (!this.shop?.roof) return;
+    const p = this.player.position;
+    const rect = this.shop.buildingRect;
+    const inside = this.playerArea === "shop" &&
+      p.x > rect.minX - 0.3 && p.x < rect.maxX + 0.3 &&
+      p.z > rect.minZ - 0.3 && p.z < rect.maxZ + 0.3;
+    this.shop.inBuilding = inside;
+    this.shop._roofA = inside ? 0 : 1;
+    this.shop.roof.visible = !inside;
+    for (const mat of this.shop._roofMats || []) mat.opacity = inside ? 0 : 1;
+    for (const wall of this.shop.nearCameraWalls || []) wall.visible = !inside;
+  }
+
+  _updateFrozenNoclip(dt, elapsed) {
+    const focusedInReviewer = this._replayMode && document.activeElement?.closest?.("#replay-panel");
+    const mv = this.input.move;
+    const moving = !focusedInReviewer && !this._adminOpen && (mv.x || mv.y);
+    if (moving) {
+      const p = this.player.position;
+      const speed = 3.7 * (this.stats.speedMul || 1);
+      p.x += mv.x * speed * dt;
+      p.z += mv.y * speed * dt;
+      this.player.heading = Math.atan2(mv.x, mv.y);
+      this.player.update(dt, elapsed);
+    }
+    this._syncReplayShopRoof();
+    this._updateReplayCamera();
+    this.hud.update();
   }
 
   // ---- title attract (menu backdrop) ---------------------------------------
@@ -391,6 +485,10 @@ export class Game {
   // ================================================================ loop
   update(dt, elapsed) {
     this.input.update();
+    if (this.debugFreezeNoclip) {
+      this._updateFrozenNoclip(dt, elapsed);
+      return;
+    }
     if (this._titleAttract) {
       this.audio.setMood("menu"); // calm title-screen theme behind the menu
       this._updateTitleAttract(dt, elapsed);
@@ -431,6 +529,19 @@ export class Game {
     this._updateCaveTravel();
     this._updateFtue();
     this._updateTutGuide();
+    if (this._playableAnalytics) {
+      this._analyticsPositionSampleT -= dt;
+      if (this._analyticsPositionSampleT <= 0) {
+        this._analyticsPositionSampleT = POSITION_SAMPLE_SECONDS;
+        this._samplePlayablePosition();
+      }
+    } else {
+      this._analyticsSampleT -= dt;
+      if (this._analyticsSampleT <= 0) {
+        this._analyticsSampleT = ANALYTICS_SAMPLE_SECONDS;
+        track("player_state_sampled");
+      }
+    }
     this.hud.update();
     this.net.update(dt);
     this.lobby.update(dt);
@@ -692,6 +803,12 @@ export class Game {
     const colliders = this.playerArea === "shop" ? this.shop.playerColliders
       : this.playerArea === "cave" ? this.cave.colliders : this.dungeon.colliders;
     this.collide(c.position, c.radius * 0.8, colliders);
+    // Environmental forage is gathered by contact, not by attacking it.
+    if (!sheetBlocked) {
+      if (this.playerArea === "shop") this.shop.collectForage(c.position);
+      else if (this.playerArea === "dungeon" && this.dungeon.active)
+        this.dungeon.collectDecor(c.position);
+    }
     if (this.playerArea === "shop") {
       // town-wide fence: walls (colliders) do the real containment; this just
       // keeps the player on the ground across the shop, its rooms and the street
@@ -730,7 +847,7 @@ export class Game {
       }
     }
 
-    // the same floor-loot magnet works out on the meadow: forage smashed off the
+    // the same floor-loot magnet works out on the meadow: forage gathered from the
     // fields (blossoms, berries, nuts, mushrooms) is pulled in and pocketed.
     if (this.playerArea === "shop" && this.shop.drops &&
         performance.now() >= (this._pickupSuppressT || 0)) {
@@ -765,7 +882,7 @@ export class Game {
     const inDungeon = this.playerArea === "dungeon";
     const hasInteract = !!act.label;
     // out in the open meadow (no interact in reach, not indoors) the button
-    // doubles as a forage dash so touch players can smash the fields too.
+    // doubles as a traversal dash through the fields.
     const fieldDash = !hasInteract && this.playerArea === "shop" && !this.shop.inBuilding;
     if (mode === "joystickButton") {
       // Everything the player can do rides ONE pulsing button at the stick's
@@ -989,7 +1106,8 @@ export class Game {
     // silent during the FTUE's shop half, and the first stays silent while its
     // trapdoor is still shut
     if (this.playerArea === "cave") {
-      const tutBlocks = this.tutorial && this.tutorial !== "delve";
+      const tutBlocks = this.tutorial &&
+        this.tutorial !== "fetch" && this.tutorial !== "delve";
       if (!tutBlocks) {
         for (const hole of this.cave.holes) {
           _v.copy(hole.pos);
@@ -1014,6 +1132,23 @@ export class Game {
           return { label: "moneyfly", hint: "Buy", fn: () => this._buyFrom(head), focus, color: 0x8fe0ff };
         }
       }
+      // Morel repeats his cave nudge whenever the player talks to him after
+      // receiving the mushroom order. Once the FTUE is over he becomes the
+      // shelf fellow and offers the next unbuilt display.
+      const morel = this.shop.morel;
+      const morelOrderLive = this._morelIntroDone &&
+        (this.tutorial === "fetch" || this.tutorial === "forage" || this.tutorial === "trade");
+      if (morelOrderLive && morel?.creature && morel.state === "idle" &&
+          p.distanceTo(morel.creature.position) < 1.9) {
+        const focus = _focus.copy(morel.creature.position).setY(0.06).clone();
+        return { label: "speak", hint: "Talk", fn: () => this._morelReminder(), focus, color: 0x9ad0ff };
+      }
+      if (!this.tutorial && morel?.creature && morel.state === "idle" &&
+          p.distanceTo(morel.creature.position) < 1.9 &&
+          this.shop.tables.some((t) => !t.repaired)) {
+        const focus = _focus.copy(morel.creature.position).setY(0.06).clone();
+        return { label: "speak", hint: "Buy shelf", fn: () => this._morelPrompt(), focus, color: 0x66ff9e };
+      }
       // the town builder: step up to the foreman waiting by the ruined row to
       // hire him to raise the next house (cheapest first). Unlike the old direct
       // restore, the offer shows even when short on gold (the choice sheet spells
@@ -1027,34 +1162,14 @@ export class Game {
         }
       }
       // display tables: walk up to a slot to stock it. A stocked slot offers a
-      // swap / take-back; an empty one takes stock from the storeroom. A table
-      // still awaiting repair offers to buy the fix instead (all but the first
-      // shelf, and the fancy vitrine, start broken — see Shop.repairTable).
+      // swap / take-back; an empty one takes stock from the storeroom. An
+      // unbuilt table is invisible scenery — new shelves are bought from
+      // Morel (see _morelPrompt), not from a walk-up repair prompt.
       const slot = this._tableSlotTarget();
       if (slot) {
         const table = slot.table;
         if (table && !table.repaired) {
-          // Hold back the repair UI until the FTUE is done: a brand-new player
-          // shouldn't be nudged to fix shelves before they've closed their first
-          // sale. Until then a broken table just reads as scenery (no prompt,
-          // no glow). Returning players (tutorial null) see it as usual.
-          // The prompt always spells out the price — even when short on gold
-          // (like the builder / boss gate) so the player knows what to save for;
-          // _repairTable toasts "Not enough gold" if they try before they can.
-          if (!this.tutorial) {
-            const i = this.shop.tables.indexOf(table);
-            const afford = this.gold >= table.cost;
-            return {
-              label: "coin",
-              hint: `Repair ${table.cost}g`,
-              fn: () => this._repairTable(i),
-              // no ground ring for tables — the whole table glows white instead
-              // (see Shop.highlightTable); the hint text floats above the top.
-              focus: _focus.copy(table.group.position).setY(1.35).clone(),
-              color: afford ? 0x66ff9e : 0xff9d5c,
-              glowTable: table,
-            };
-          }
+          // nothing here — the spot reads as bare floor until Morel delivers
         } else {
           // during the FTUE a placed item is locked in — no swap or take-back,
           // so the player can't undo the one stock they were guided through
@@ -1105,8 +1220,9 @@ export class Game {
         if (_v.distanceTo(p) < 1.5) return { label: "home", hint: "Go up", fn: () => this._returnHomePrompt(), focus: _v.clone().setY(0.06), color: 0x8fd0ff };
       }
       // the down-stairs press on (absent on boss floors — the way deeper there
-      // is the stairs the boss leaves behind)
-      if (this.dungeon.hasDownStairs) {
+      // is the stairs the boss leaves behind; sealed shut under the FTUE
+      // forage floor's trapdoor — no prompt, the lid says it all)
+      if (this.dungeon.hasDownStairs && !this.dungeon.ftue) {
         _v.copy(this.dungeon.stairsPos).add(DUNGEON_ORIGIN);
         if (_v.distanceTo(p) < 1.5) return { label: "arrowDown", hint: "Descend", fn: () => this._descend(), focus: _v.clone().setY(0.06), color: 0xff8a3d };
       }
@@ -1186,8 +1302,13 @@ export class Game {
   _shopPick(clientX, clientY) {
     const shop = this.shop;
     if (!shop) return null;
-    const local = viewport.toLocal(clientX, clientY);
-    _ndc.set((local.x / viewport.w) * 2 - 1, -((local.y / viewport.h) * 2 - 1));
+    const canvasRect = this.engine.renderer.domElement.getBoundingClientRect();
+    const local = this.engine.fitMount
+      ? { x: clientX - canvasRect.left, y: clientY - canvasRect.top }
+      : viewport.toLocal(clientX, clientY);
+    const width = this.engine.fitMount ? canvasRect.width : viewport.w;
+    const height = this.engine.fitMount ? canvasRect.height : viewport.h;
+    _ndc.set((local.x / width) * 2 - 1, -((local.y / height) * 2 - 1));
     this._ray.setFromCamera(_ndc, this.engine.camera);
 
     // candidate roots paired with what they represent; we intersect them all
@@ -1272,16 +1393,7 @@ export class Game {
     if (target.type === "slot") {
       const slot = target.slot;
       const table = slot.table;
-      if (table && !table.repaired) {
-        if (this.tutorial) return null; // repair UI stays hidden during the FTUE
-        // preview the price whether or not it's affordable (amber when short)
-        return {
-          hint: `Repair ${table.cost}g`,
-          focus: _focus.copy(table.group.position).setY(1.35).clone(),
-          color: this.gold >= table.cost ? 0x66ff9e : 0xff9d5c,
-          glowTable: table,
-        };
-      }
+      if (table && !table.repaired) return null; // unbuilt shelves are scenery — see Morel
       if (slot.disabled) return null;
       // a placed item is locked in during the FTUE — no swap or take-back
       if (slot.item) return this.tutorial ? null : { hint: "Swap", focus: _focus.copy(slot.pos).clone(), color: 0xff9d5c };
@@ -1316,12 +1428,7 @@ export class Game {
     if (target.type === "slot") {
       const slot = target.slot;
       const table = slot.table;
-      if (table && !table.repaired) {
-        // only offer the repair once the FTUE is done (matches the proximity
-        // gate in _contextAction)
-        if (!this.tutorial) this._repairTable(this.shop.tables.indexOf(table));
-        return;
-      }
+      if (table && !table.repaired) return; // unbuilt shelves are scenery — see Morel
       if (slot.disabled) return;
       if (slot.item) { if (!this.tutorial) this._replaceMenu(slot); }
       else if (this.stash.length > 0) this._placeMenu(slot);
@@ -1346,6 +1453,82 @@ export class Game {
   // Effective crit chance folds in the ring bonus.
   get _crit() {
     return this._critChance + (this.stats?.critBonus || 0);
+  }
+
+  // Playtest sessions retain one-second spatial detail while only
+  // spending one PostHog event per five samples.
+  _samplePlayablePosition() {
+    const p = this.player?.position;
+    if (!p) return;
+    const round = (n) => Math.round(n * 10) / 10;
+    this._analyticsPositionBatch.push({
+      timestamp: Date.now(),
+      x: round(p.x),
+      z: round(p.z),
+      area: this.playerArea,
+      floor: this.playerArea === "dungeon" ? this.dungeon?.floor ?? null : null,
+      seed: this.playerArea === "dungeon" ? this.dungeon?.seed ?? null : null,
+      tutorial: this.tutorial,
+    });
+    if (this._analyticsPositionBatch.length < POSITION_BATCH_SIZE) return;
+    const samples = this._analyticsPositionBatch.splice(0, POSITION_BATCH_SIZE);
+    track("player_position_batch", {
+      sample_timestamp_ms: samples.map((sample) => sample.timestamp),
+      player_x: samples.map((sample) => sample.x),
+      player_z: samples.map((sample) => sample.z),
+      area: samples.map((sample) => sample.area),
+      dungeon_floor: samples.map((sample) => sample.floor),
+      dungeon_seed: samples.map((sample) => sample.seed),
+      tutorial_step: samples.map((sample) => sample.tutorial),
+      sample_count: samples.length,
+    });
+  }
+
+  // Shared PostHog properties. Position is rounded to a tenth of a world unit:
+  // enough resolution for route/heatmap analysis without near-unique floats.
+  // The walkable ground plane is X/Z; Y is retained as the true vertical axis.
+  _analyticsState() {
+    const p = this.player?.position;
+    const round = (n) => Number.isFinite(n) ? Math.round(n * 10) / 10 : null;
+    const bagContents = [...(this.inventory || [])].sort();
+    const displayContents = (this.shop?.slots || [])
+      .map((slot) => slot.item)
+      .filter(Boolean)
+      .sort();
+    return {
+      player_x: round(p?.x),
+      player_y: round(p?.y),
+      player_z: round(p?.z),
+      area: this.playerArea,
+      dungeon_floor: this.playerArea === "dungeon" ? this.dungeon?.floor ?? null : null,
+      ...(this._testerId ? { tester_id: this._testerId } : {}),
+      hp: this.hp,
+      max_hp: this.maxHp,
+      gold: this.gold,
+      coins: this.gold,
+      bag_items: bagContents.length,
+      bag_capacity: this.invCap,
+      bag_full: bagContents.length >= this.invCap,
+      bag_contents: bagContents,
+      bag_unique_items: new Set(bagContents).size,
+      stash_items: this.stash?.length ?? 0,
+      stash_unique_items: new Set(this.stash || []).size,
+      display_items: displayContents.length,
+      display_contents: displayContents,
+      run_day: this.day,
+      tutorial_step: this.tutorial,
+      deepest_floor: this.deepestEver,
+      town_population: this.townPop?.() ?? 0,
+      shelves_repaired: this.tablesRepaired?.filter(Boolean).length ?? 0,
+      weapon: this.equipment?.weapon ?? null,
+      chest_armor: this.equipment?.chest ?? null,
+      shield: this.equipment?.shield ?? null,
+      ring: this.equipment?.ring ?? null,
+      boots: this.equipment?.boots ?? null,
+      attack_mode: attackMode(),
+      coop: !!this.net?.connected,
+      coop_role: !this.net?.connected ? "solo" : this.net.isGuest ? "guest" : "host",
+    };
   }
 
   // ================================================================ economy
@@ -1407,8 +1590,8 @@ export class Game {
     if (chat) {
       a = this.player.position;
       b = chat.getWorldPosition(_dialogueB);
-    } else if (this._noteCam || this._selfCam) {
-      a = b = this.player.position; // the hero, alone with the note or their thoughts
+    } else if (this._sceneCam || this._selfCam) {
+      a = b = this.player.position; // the hero, alone with their thoughts (or Morel's)
     } else return false;
     // focus on the midpoint of the two speakers, raised so the look point
     // (camTarget + 0.6, see Engine._updateCamera) lands around their faces
@@ -1733,6 +1916,12 @@ const PICKUP_COLLECT_R = 0.55;
 const PICKUP_PULL_MIN = 2.5;
 const PICKUP_PULL_ACCEL = 22;
 const PICKUP_PULL_MAX = 16;
+// A low-rate heartbeat for spatial occupancy and state analysis. Meaningful
+// gameplay events also receive the same context through the provider above.
+const ANALYTICS_SAMPLE_SECONDS = 30;
+const POSITION_SAMPLE_SECONDS = 1;
+const POSITION_BATCH_SIZE = 5;
+const REPLAY_FALLBACK_SEED = 19790417;
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();

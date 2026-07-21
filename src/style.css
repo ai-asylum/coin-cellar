@@ -107,6 +107,7 @@ button { font-family: inherit; cursor: pointer; }
   background: radial-gradient(ellipse at center, rgba(26, 16, 8, 0.62) 0%, rgba(26, 16, 8, 0) 72%);
   display: flex; flex-direction: column; align-items: center; gap: 12px;
 }
+.start-card .btn { width: 190px; }
 .start-new { font-size: 16px; padding: 10px 26px; }
 
 /* ---- new-game confirmation ---- */
@@ -126,6 +127,50 @@ button { font-family: inherit; cursor: pointer; }
 .ng-body { font-size: 15px; font-weight: 700; margin-bottom: 18px; }
 .ng-btns { display: flex; gap: 12px; justify-content: center; }
 .ng-btns .btn { flex: 1; }
+#playtest-notice {
+  position: fixed; inset: 0; z-index: 40;
+  color: #fff; background: #000;
+  font-family: Arial, Helvetica, sans-serif;
+}
+.playtest-number {
+  position: absolute;
+  top: calc(env(safe-area-inset-top) + 12px); left: 12px;
+  font: 700 clamp(24px, 4vw, 46px)/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.08em; white-space: nowrap;
+}
+.playtest-instructions {
+  position: absolute; inset: 0;
+  font-size: clamp(20px, 3.5vw, 42px); font-weight: 700;
+}
+.playtest-arrow {
+  position: absolute;
+  height: 4px;
+  background: #fff;
+  transform-origin: left center;
+  pointer-events: none;
+}
+.playtest-arrow::after {
+  content: "";
+  position: absolute; right: -1px; top: 50%;
+  width: 18px; height: 18px;
+  border-top: 4px solid #fff;
+  border-right: 4px solid #fff;
+  transform: translateY(-50%) rotate(45deg);
+}
+.playtest-copy {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex; flex-direction: column; align-items: center; gap: 18px;
+  width: min(320px, calc(100vw - 48px));
+  text-align: center;
+}
+#playtest-done {
+  padding: 10px 28px;
+  color: #fff; background: #000;
+  border: 2px solid #fff; border-radius: 0;
+  font: 700 18px/1 Arial, sans-serif;
+}
 .start-logo-img {
   position: absolute; top: calc(env(safe-area-inset-top) + 24px); left: 50%;
   transform: translateX(-50%);
@@ -403,6 +448,7 @@ button { font-family: inherit; cursor: pointer; }
   padding: 6px 15px; font-size: 19px; font-weight: 800; white-space: nowrap;
   box-shadow: 0 2px 0 var(--wood-dark), inset 0 1px 0 #fff7e4;
 }
+#tut-guide.no-text .tg-text { display: none; }
 #tut-guide .tg-arrow { width: 38px; height: 38px; }
 #tut-guide .tg-bob { display: block; width: 100%; height: 100%; }
 #tut-guide:not(.edge) .tg-bob { animation: tgbob 0.85s ease-in-out infinite; }
@@ -1232,9 +1278,41 @@ button { font-family: inherit; cursor: pointer; }
 .admin-slider.cslider { flex-direction: column; align-items: stretch; gap: 3px; margin-top: 6px; }
 .admin-slider.cslider label { font-size: 12px; font-weight: 800; color: var(--ink-soft); }
 .admin-slider.cslider label b { color: var(--gold); }
-.admin-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+.admin-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
 .admin-head b { font-size: 16px; }
 .admin-head span { font-size: 11px; color: var(--ink-soft); }
+.admin-title {
+  position: sticky; top: -12px; z-index: 2; margin: -12px -12px 10px; padding: 12px;
+  background: rgba(251, 238, 203, 0.96); border-bottom: 2px solid rgba(112, 65, 25, 0.28);
+  backdrop-filter: blur(4px);
+}
+.admin-title b { font-size: 17px; }
+.admin-section {
+  margin-top: 8px; padding: 10px;
+  background: rgba(255, 249, 229, 0.48);
+  border: 1px solid rgba(112, 65, 25, 0.25); border-radius: 12px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+.admin-section > summary.admin-head {
+  margin: 0; cursor: pointer; list-style: none; align-items: center; gap: 8px;
+  user-select: none;
+}
+.admin-section > summary.admin-head::-webkit-details-marker { display: none; }
+.admin-section > summary.admin-head b { flex: 1; }
+.admin-section > summary.admin-head::after {
+  content: "▸"; flex: 0 0 auto; color: var(--gold); font-size: 16px;
+  transition: transform 0.15s ease;
+}
+.admin-section[open] > summary.admin-head { margin-bottom: 8px; }
+.admin-section[open] > summary.admin-head::after { transform: rotate(90deg); }
+.admin-section > .admin-head b { font-size: 13px; text-transform: uppercase; letter-spacing: 0.45px; }
+.admin-danger-section { background: rgba(205, 87, 55, 0.08); border-color: rgba(168, 85, 47, 0.38); }
+.admin-control-label {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin: 9px 0 5px; font-size: 12px; color: var(--ink-soft);
+}
+.admin-control-label:first-of-type { margin-top: 0; }
+.admin-control-label span { font-size: 11px; }
 .admin-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .admin-grid button {
   pointer-events: auto;

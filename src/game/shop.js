@@ -15,6 +15,7 @@ import { pathMethods } from "./shop-pathfinding.js";
 import { customerMethods } from "./shop-customers.js";
 import { updateDojo, dojoHitDummies } from "./dojo.js";
 import { updateBuilder } from "./builder.js";
+import { updateMorel } from "./morel.js";
 
 // Scratch for the dialogue occluder: the chatting NPC's world position (they
 // ride the rotated shop group, so their local .position isn't world-space) and
@@ -145,13 +146,13 @@ export class Shop {
 
   // ------------------------------------------------------------ tables
   // Reflect a table's built/locked state: a built table shows its real fixture
-  // (correct materials) and usable slots; a locked one hides the fixture and
-  // shows only its glowing floor outline, marking where it'll go, slots off.
+  // (correct materials) and usable slots; a locked one is invisible scenery —
+  // new shelves come from Morel now, so the amber floor outline stays off.
   _applyTableState(table) {
     const broken = !table.repaired;
     table.meshes.forEach((m, k) => { m.material = table.origMats[k]; m.visible = !broken; });
     if (table.outline) {
-      table.outline.visible = broken;
+      table.outline.visible = false;
       table.outline.material.color.setHex(table.outline.userData.baseColor);
       table.outline.material.opacity = 0.42;
     }
@@ -231,17 +232,17 @@ export class Shop {
   }
 
   // ------------------------------------------------------------ meadow forage
-  // Smash every destructible forage prop within `reach` of `pos` (the dashing
-  // hero). Each pops in a leafy burst and may drop a bit of edible loot on the
-  // grass where it stood. Returns whether anything was hit. Runs client-side
-  // (the scatter is seeded, so peers agree); loot is granted locally on pickup.
-  smashForage(pos, reach) {
+  // Harvest every forage prop the walking hero touches. Each pops in a leafy
+  // burst and may drop edible loot on the grass where it stood. Runs
+  // client-side (the scatter is seeded, so peers agree); loot is granted
+  // locally on pickup.
+  collectForage(pos) {
     const props = this.forageProps;
     if (!props || !props.length) return false;
     let hit = false;
     for (let i = props.length - 1; i >= 0; i--) {
       const d = props[i];
-      if (Math.hypot(d.x - pos.x, d.z - pos.z) > reach + d.radius) continue;
+      if (Math.hypot(d.x - pos.x, d.z - pos.z) > d.radius) continue;
       props.splice(i, 1);
       this._burstForage(d);
       this._dropForageLoot(d);
@@ -327,6 +328,7 @@ export class Shop {
     this._updateForageDrops(dt, elapsed);
     updateDojo(this, this.dojo, dt, elapsed);
     updateBuilder(this, dt, elapsed);
+    updateMorel(this, dt, elapsed);
 
     // throb the floor outline on whichever locked table is the current target
     if (this._glowTable && this._glowTable.outline)
@@ -341,7 +343,7 @@ export class Shop {
     const player = this.game.player;
     const cam = this.game.engine.camera;
     const chatNpc = this.game._npcChat?.target?.creature || null;
-    const dialogue = !!chatNpc || !!this.game._noteCam || !!this.game._selfCam;
+    const dialogue = !!chatNpc || !!this.game._sceneCam || !!this.game._selfCam;
     let extras = null;
     if (chatNpc) {
       chatNpc.getWorldPosition(_npcWorld); // customers ride the rotated shop group

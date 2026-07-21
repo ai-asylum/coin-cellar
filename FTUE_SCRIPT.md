@@ -1,8 +1,9 @@
 # FTUE Script — "What He Left"
 
-Editable draft. Full design notes live in `specs/game-design/08-ftue-script-inheritance.md`.
+Editable draft. Design notes live in `specs/game-design/08-ftue-script-inheritance.md`
+(see its 2026-07-21 addendum for this Morel revision).
 Rules: one idea per bubble, ≤ ~70 chars, max 3 bubbles in a row per speaker,
-every line readable by a 10-year-old.
+every line readable by a 10-year-old. Every bubble is a tap — arrows over words.
 
 ---
 
@@ -21,9 +22,8 @@ GUIDE: Head for the daylight
 ## Scene 2 — The Road
 
 *Hero steps out of the cave mouth. Village below, half the houses dark.
-Banner: "The end of the road".*
-
-ME: So that's the town? Smaller than I thought.
+Banner: "The end of the road". No spoken line — the banner and the guide
+arrow carry the beat.*
 
 GUIDE: Inspect  (arrow on the shop door)
 
@@ -40,29 +40,66 @@ the shop over — it was already theirs.*
 
 GUIDE: (bag arrow) Open backpack → USE the key → Step inside
 
-## Scene 3½ — The Note
+## Scene 4 — The Empty Shop
 
-*First step inside: the doors swing shut behind the heir. On the first
-table lies the note — a real prop, arrow on it. Walking up picks it up like
-any drop. The backpack pulses again (arrow only — the player knows this
-dance now); the hero stays put until the note is READ from the bag. Beside
-the bubble: the uncle's bust, sepia and burnt-edged like the paper.*
+*First step inside: bare boards, dust, a counter — and NOT ONE shelf. Uncle's
+letter waits on the counter. The player picks it up, opens the bag and reads
+both lines.*
 
-THE NOTE: Fill the tables and townsfolk will come to buy.
-THE NOTE: They're nice people. The town just needs fixing up.
+GUIDE: Pick up the letter → READ
 
-*Reading consumes the note. Only now does the haul move to the storeroom,
-and the doors reopen for business.*
+THE LETTER: Fill the tables and townsfolk will come to buy.
+THE LETTER: They're nice people. The town just needs fixing up.
 
-GUIDE: Take the note → (bag arrow) READ it → Stock this table
+*Only when the final line is dismissed does Morel appear inside the shop, just
+in front of the door. He walks right up to the hero; they turn to face him
+before he speaks. Morel: mushroom-mad regular, zero patience, heart of gold.*
 
-## Scene 4 — The First Sale & the Send-off
+MOREL: Finally, you're open! One basket of mushrooms, please.
 
-*Player stocks one item. A villager walks in, buys it at sticker price.
-The hero, alone in their shop:*
+ME: I... JUST got here.
 
-ME: ...So that's what you really left me.
-ME: I'll need to get used to this new life...
-ME: But first, let's do some restocking!
+MOREL: The old keeper picked mine in the cave. Your job now!
 
-GUIDE: To the cave — dive for more loot  (arrow down the road, then the pit)
+GUIDE: Get mushrooms in the cave  (arrow: door → road → pit)
+
+*Talking to Morel again before filling the order always repeats:*
+
+MOREL: Your uncle would be in the cave already...
+
+## Scene 5 — The Forage Floor
+
+*The pit drops onto the dungeon's first floor — rats scuttle, nothing worse.
+Mushroom clusters glow along the walls; a stout chest waits off the path.
+A shut trapdoor seals the way deeper: no falling into the dark on day one.
+No dialogue. Arrows only; the basket counts itself (0/3).*
+
+GUIDE: Walk through the mushrooms → Crack the chest → Back to shop
+
+## Scene 6 — The Trade
+
+*Back through the doors. Morel hasn't moved an inch. Walking up to him
+hands the basket over — and his whole face lights up.*
+
+MOREL: THERE they are! Oh, the knobbly ones!
+MOREL: I don't have any coin but I can give you this table in exchange
+
+*THUNK — one shelf lands by the wall, glowing. The rest of the haul slides
+to the storeroom; the bag arrow walks the player through laying one out.*
+
+GUIDE: Put an item on the shelf
+
+MOREL: People may buy what you put on there!
+MOREL: Come see me if you need more of them
+
+*Morel is the shelf fellow from here on: talk to him in town to buy the
+next shelf. No more glowing floor outlines.*
+
+## Scene 7 — Send-off
+
+*Morel leaves. No additional hero dialogue.*
+
+GUIDE: Dive deeper for better goods  *(FTUE ends)*
+
+*A beat later a villager wanders in and buys the stocked mushroom at
+sticker price — Morel's "folk will wander in" made true, no words.*

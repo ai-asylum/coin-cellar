@@ -156,12 +156,12 @@ export const DECOR_BURST = {
   bones: 0xe8e0c8,
 };
 
-// What each destructible category coughs up when smashed. `chance` is the odds a
-// single smash yields anything at all; `items` is a flat pool the drop is picked
+// What each forage category yields when walked through. `chance` is the odds a
+// single harvest yields anything at all; `items` is a flat pool the drop is picked
 // from (repeat an id to weight it). This is where moon herb and wild mushrooms
 // live now — foraged from the scenery rather than looted off monsters/chests —
-// and where the rocks pay out their crystals. Categories left out (bones, and
-// the street-only trees/bushes/flowers) smash purely for show. Rolled
+// and where the rocks pay out their crystals. Categories left out (bones and
+// non-forage kit clutter) remain attack-smashable scenery. Rolled
 // host-side, so the item ids just need to exist in ITEMS.
 export const DECOR_LOOT = {
   mushrooms: { chance: 0.6, items: ["mushroom", "mushroom", "caveshroom", "herb"] },
@@ -187,8 +187,8 @@ export const FIELD_FORAGE = {
 // stray bone pile. Seeded off the floor's rng so co-op peers see the same
 // layout, and dimmed to a cool tint so it sits in the cellar's moody light.
 // Returns the list of destructible props (every category with a DECOR_BURST
-// colour, which now includes stones) so the dungeon can let the player smash
-// them into a particle puff — and, for some, forage a drop (see DECOR_LOOT).
+// colour, which now includes stones). Categories in DECOR_LOOT harvest on
+// contact; the others remain attack-smashable scenery.
 const CAVE_TINT = 0xc7c2d4;
 // default mix, matching the classic cellar look; a hole theme can override
 // both the category weights and the tint via opts.theme
@@ -248,3 +248,16 @@ export function scatterDungeonDecor(group, r, rooms, cellPos, opts = {}) {
 }
 
 const clampR = (v) => Math.max(0.55, Math.min(1.0, v));
+
+// Place one destructible prop of `cat` at an exact group-local spot — the
+// deterministic sibling of scatterDungeonDecor's random scatter, for floors
+// that need guaranteed forage (the FTUE's mushroom clusters). Returns the
+// same destructible entry shape so it slots straight into dungeon.decor.
+export function placeDecorProp(group, r, cat, x, z, opts = {}) {
+  const tint = opts.tint ?? CAVE_TINT;
+  const height = opts.height ?? CAVE_HEIGHT[cat](r);
+  const s = decorSprite(pick(r, DECOR[cat]), { height, tint });
+  s.position.set(x, 0, z);
+  group.add(s);
+  return { group: s, cat, x, z, height, color: DECOR_BURST[cat], radius: clampR(height * 0.4) };
+}

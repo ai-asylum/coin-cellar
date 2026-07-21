@@ -234,12 +234,10 @@ export const combatMethods = {
   // undefined lets each area fall back to its own body-to-body default.
   _applyStrike(reach) {
     if (this.playerArea === "shop") {
-      // above ground the strike forages: it smashes the meadow's flower clumps,
-      // berry bushes and nut saplings for edible loot (no foes to fight here),
-      // and knocks the dojo's straw training dummies about
+      // Meadow forage is collected by walking through it; attacks above ground
+      // are reserved for knocking the dojo's straw training dummies about.
       const r = reach ?? this.player.radius + 0.5;
       this.shop.dojoDashHit(this.player.position, r);
-      this.shop.smashForage(this.player.position, r);
       return;
     }
     if (this.playerArea === "cave" && this.cave) {

@@ -4,11 +4,12 @@
 // The old shopkeeper's only kin inherited his shop, and the road to it ends
 // at a cave: the heir wakes at its deep end (the scripted slime opener),
 // walks out into the daylight with a full pack, finds the shop shut — and
-// opens it with the key that came with the will. Nobody welcomes them; a
-// note on the first table explains the shop instead. The loop is then taught
-// in the order you live it: stock a table, watch the first sale land, and
-// follow the guide back to the cave, whose pit is the way down. Steps:
-//   exit → shop → stock → sell → delve
+// opens it with the key that came with the will. Nobody welcomes them:
+// Morel barges in wanting mushrooms before the second step lands, and the
+// loop is taught in the order you live it — dive the pit (rats only, the
+// way deeper sealed), gather the basket full, trade it for the shop's first
+// shelf, lay a mushroom out, and take the send-off back to the cave. Steps:
+//   exit → shop → fetch → forage → trade → stock → delve
 // The Mayor exists but stays out of the FTUE — his first appearance is the
 // praise visit after the player funds their first ruin rebuild.
 import * as THREE from "three";
@@ -17,6 +18,8 @@ import { portraitDataURL } from "../chargen/portrait.js";
 import { icon, itemIcon } from "../core/icons.js";
 import { ITEMS } from "./items.js";
 import { SHOP } from "./shop-data.js";
+import { morelWalk } from "./morel.js";
+import { DUNGEON_ORIGIN } from "./dungeon-data.js";
 import { npcLinesFor, timeOfDay, npcReflectionLine, npcIntroLines, npcWishLine, activeOccasion, npcOccasionLine, npcDeedLine } from "./npc-data.js";
 import { track } from "../core/analytics.js";
 
@@ -42,20 +45,28 @@ const PLAYER_WAKE_LINES = [
 // then the key that came with the will turns. Nobody has to hand over
 // anything.
 const PLAYER_DOOR_LINE = "Time to use the key that uncle left me.";
-// Scene 3½ — the note the uncle left on the first table: the loop in line
-// one, and in line two the reason to care — nice people, shabby town, someone
-// should fix it up. It replaces the Mayor's welcome.
-const NOTE_LINES = [
+// Scene 4 — the uncle's letter on the counter: the shop loop and the reason
+// to care. Morel waits until both lines have been read before barging in.
+const LETTER_LINES = [
   "Fill the tables and townsfolk will come to buy.",
   "They're nice people. The town just needs fixing up.",
 ];
-// Scene 4 — the first sale just landed: the resolve bookend (answering Scene
-// 1's "let's go see what you left me"), then straight back to work — the
-// last bubble hands off to the delve arrow.
-const PLAYER_RESOLVE_LINES = [
-  "...So that's what you really left me.",
-  "I'll need to get used to this new life...",
-  "But first, let's do some restocking!",
+// Once the letter is finished, Morel arrives with the first concrete order.
+const MOREL_INTRO_ORDER = "Finally, you're open! One basket of mushrooms, please.";
+const PLAYER_INTRO_LINE = "I... JUST got here.";
+const MOREL_INTRO_JOB = "The old keeper picked mine in the cave. Your job now!";
+const MOREL_REMINDER_LINE = "Your uncle would be in the cave already...";
+// Scene 6 — the trade: the basket lands, and Morel pays the only way he
+// knows how (coin jingles; jingling wakes the dog).
+const MOREL_TRADE_LINES = [
+  "THERE they are! Oh, the knobbly ones!",
+  "I don't have any coin but I can give you this table in exchange",
+];
+// …and his sign-off once the first item hits the shelf: he explains the sale
+// loop, then establishes himself as the shelf fellow (see _morelPrompt).
+const MOREL_STOCKED_LINES = [
+  "People may buy what you put on there!",
+  "Come see me if you need more of them",
 ];
 // The optional epilogue: the player rebuilt their first home, the Mayor drops by
 const MAYOR_PRAISE_LINES = [
@@ -63,7 +74,9 @@ const MAYOR_PRAISE_LINES = [
   "Every roof you raise brings more custom through your door.",
 ];
 
-const TUT_ORDER = ["exit", "shop", "stock", "sell", "delve"];
+const TUT_ORDER = ["exit", "shop", "fetch", "forage", "trade", "stock", "delve"];
+// Morel's order: how many mushrooms (either kind) fill the basket
+const BASKET_SIZE = 3;
 
 // Which player deed is the bigger news when two land close together: a boss
 // kill always trumps a mere new-depth push (see recordPlayerDeed).
@@ -83,9 +96,14 @@ export const narrativeMethods = {
     this.shop.doorLocked = true; // the shopfront reads firmly shut until Scene 3
     this._doorScene = false; // Scene 3 runs once
     this._ftueFreeze = false; // the bag beats root the player while they're live
-    this._noteSpawned = false; // the uncle's note appears on the first entry
-    this._notePicked = false; // …is picked off the table like any drop
-    this._noteRead = false; // …and is consumed by reading it from the bag
+    this._letterSpawned = false; // the uncle's letter waits on the counter
+    this._letterPicked = false;
+    this._letterRead = false; // Morel enters only after the player finishes it
+    this._morelIntroDone = false; // Morel barges in on the first step inside
+    this._morelTradeDone = false; // …and takes his basket exactly once
+    // Morel does not wait conspicuously outside the inherited shop. He first
+    // appears just inside its door when the letter has been read.
+    if (this.shop.morel?.creature) this.shop.morel.creature.visible = false;
     // the key that came with the will rides at the top of the bag until the
     // shopfront's gates consume it (see _useShopKey)
     if (!this.inventory.includes("shopkey")) this.inventory.unshift("shopkey");
@@ -205,18 +223,25 @@ export const narrativeMethods = {
   },
 
   // Per-frame FTUE triggers that aren't tied to an existing action: reaching
-  // the shopfront, and crossing the threshold with the haul. (The cave's
-  // daylight walk-out is generic travel now — see _exitCave / _onFtueCaveExit.)
+  // the shopfront, the first step inside (Morel!), and walking the full
+  // basket back up to him. (The cave's daylight walk-out is generic travel
+  // now — see _exitCave / _onFtueCaveExit.)
   _updateFtue() {
     if (!this.tutorial || this.net.connected || this._cine || this.hud.speakOpen) return;
-    // the note on the table flashes while it's the thing to grab: a slow
-    // white↔gold breathe plus a size pulse, same cadence as the bag cue
-    if (this._noteProp) {
+    // Make the letter unmistakable while it is the current objective.
+    if (this._letterProp) {
       const k = 0.5 + 0.5 * Math.sin(performance.now() / 1000 * 7.4);
-      this._noteProp.mesh.scale.setScalar(1 + 0.18 * k);
-      this._noteProp.mesh.material.color.setRGB(1, 1 - 0.17 * k, 1 - 0.65 * k);
+      this._letterProp.mesh.scale.setScalar(1 + 0.18 * k);
+      this._letterProp.paperMats.forEach((mat) =>
+        mat.color.setRGB(1, 0.87 - 0.12 * k, 0.58 - 0.2 * k));
     }
     const p = this.player.position;
+    // is the player inside the shop's footprint? (the town is rotated a
+    // quarter-turn, so the rect is D wide in x and W deep in z; measured
+    // against the live origin so a relocated shop still trips the trigger)
+    const o = this.shop.shopOrigin;
+    const inside = this.playerArea === "shop" &&
+      Math.abs(p.x - o.x) < SHOP.D / 2 && Math.abs(p.z - o.z) < SHOP.W / 2;
     switch (this.tutorial) {
       case "shop":
         // fires only right on the door step (the shut door stops the player
@@ -225,24 +250,25 @@ export const narrativeMethods = {
         if (!this._doorScene && this.playerArea === "shop" && p.distanceTo(this.shop.doorPos) < 0.9)
           this._shopDoorScene();
         break;
-      case "stock": {
-        // first step through the door: the gates swing shut behind the heir,
-        // and the uncle's note waits on the first table (the town is rotated a
-        // quarter-turn, so the shop rect is D wide in x and W deep in z).
-        // Measure against the shop's live origin so a relocated shop still trips
-        // the trigger (the whole footprint slides with buildings.shop).
-        const o = this.shop.shopOrigin;
-        if (!this._noteSpawned && this.playerArea === "shop" &&
-            Math.abs(p.x - o.x) < SHOP.D / 2 && Math.abs(p.z - o.z) < SHOP.W / 2) {
-          this._noteSpawned = true;
-          this.shop.doorLocked = true; // the doors close behind the player
-          this._spawnNoteProp();
+      case "fetch":
+        // The first step inside reveals the uncle's letter on the counter.
+        // Morel waits outside until the player walks over and picks it up.
+        if (!inside || this._morelIntroDone) break;
+        if (!this._letterSpawned) this._spawnLetterProp();
+        if (this._letterProp && !this._letterPicked &&
+            p.distanceTo(_v.copy(this._letterProp.pos).setY(0)) < 1.2)
+          this._pickUpLetter();
+        break;
+      case "trade": {
+        // (safety: a player who somehow skipped the intro gets it now)
+        if (!this._morelIntroDone) {
+          if (inside) this._morelIntroScene();
+          break;
         }
-        // the note picks up like any drop: walk up to the table and it hops
-        // into the bag (then wants reading — see _pickUpNote)
-        if (this._noteProp && !this._notePicked &&
-            p.distanceTo(_v.copy(this._noteProp.pos).setY(0)) < 1.2)
-          this._pickUpNote();
+        const m = this.shop.morel;
+        if (!this._morelTradeDone && m?.creature && this.playerArea === "shop" &&
+            p.distanceTo(m.creature.position) < 1.6)
+          this._morelTradeScene();
         break;
       }
     }
@@ -253,12 +279,16 @@ export const narrativeMethods = {
     const hints = {
       exit: `${icon("bag")} Pack's ready — head for the daylight`,
       shop: `${icon("shop")} Head down the road and take a look at the shop`,
-      // the stock step is two beats now: the note first, then the tables
-      stock: this._noteRead
-        ? `${icon("box")} Stand at the glowing table and lay out your goods`
-        : `${icon("scroll")} Step inside — something's on the table`,
-      sell: `${icon("coin")} A shopper's on their way in — watch your first sale land`,
-      delve: `${icon("hole")} Head back to the cave — its pit is the way down for more loot`,
+      // the fetch step is three beats: enter, take the letter, hear the errand
+      fetch: this._morelIntroDone
+        ? `${icon("hole")} Morel wants mushrooms — the cave pit is the way down`
+        : this._letterSpawned
+          ? `${icon("scroll")} Pick up uncle's letter from the counter`
+          : `${icon("shop")} Step inside`,
+      forage: `${icon("bag")} Walk through mushrooms till the basket's full (${BASKET_SIZE})`,
+      trade: `${icon("shop")} Bring Morel his mushrooms`,
+      stock: `${icon("box")} Put an item on the shelf`,
+      delve: `${icon("hole")} Dive deeper for better goods`,
     };
     if (hints[this.tutorial]) this.hud.toast(hints[this.tutorial]);
   },
@@ -269,26 +299,21 @@ export const narrativeMethods = {
     if (this.tutorial !== step) return;
     this.tutorial = TUT_ORDER[TUT_ORDER.indexOf(step) + 1] || null;
     track("ftue_step", { step, day: this.day, gold: this.gold });
-    // advancing past the last step (the first real descent) ends the FTUE
+    // advancing past the last step (the send-off's real dive) ends the FTUE
     if (!this.tutorial) track("ftue_completed", { day: this.day, gold: this.gold });
-    // the first table's just been stocked — send in the scripted first shopper,
-    // who always commits: a plain-table purchase the player just watches land.
-    // The doorway stays FTUE-locked so the player can't wander out mid-sale: the
-    // leaves still swing open and the customer paths in (they read the base
-    // colliders), but the player is fenced by shop.playerColliders until the
-    // send-off (the "delve" step below).
-    if (this.tutorial === "sell") {
-      this.shop.spawnScriptedCustomer();
-    }
-    // the first sale just landed — a beat for the coin to fly, then the hero,
-    // alone in their shop, closes the loop's first lap
+    // the first item just hit the shelf — Morel explains what happens next,
+    // reminds the player where more shelves come from, and sees himself out.
+    // A beat later his promise comes true: a villager wanders
+    // in and buys the stocked mushroom at sticker price, no words (the
+    // scripted shopper always commits — see shop-customers).
     if (this.tutorial === "delve") {
-      this.shop.doorLocked = false; // sale's done — the shopfront's free to leave now
-      setTimeout(() => this._selfSay(PLAYER_RESOLVE_LINES, () => {
-        // send-off: once the resolve monologue lands, the shopfront swings
-        // open on its own — a wordless invitation out to the new life the
-        // heir just named. Released when they reach the cave (see _enterCave).
-        this.shop.doorHeld = true;
+      const m = this.shop.morel;
+      this.shop.doorHeld = true; // hold the shopfront open for his exit
+      setTimeout(() => this._speakLines(m?.npc.name ?? "Morel", m?.portrait, MOREL_STOCKED_LINES, () => {
+        if (m) morelWalk(this.shop, [this.shop.doorInside, this.shop.doorPos, m.home], () => {
+          this.shop.doorHeld = false;
+        });
+        if (!this.net.connected) setTimeout(() => this.shop.spawnScriptedCustomer(), 3500);
       }), 600);
     }
     if (this.tutorial) setTimeout(() => this._tutHint(), 700);
@@ -326,23 +351,72 @@ export const narrativeMethods = {
       case "shop":
         if (inShop) { pos = _v.copy(this.shop.doorPos); text = "Inspect"; }
         break;
-      case "stock": {
-        if (!inShop) break;
-        if (!this._noteSpawned) { pos = _v.copy(this.shop.doorInside); text = "Step inside"; break; }
-        if (!this._notePicked) {
-          if (this._noteProp) { pos = _v.copy(this._noteProp.pos).setY(0); text = "Take the note"; }
+      case "fetch":
+        // Step inside, take the counter letter, then follow Morel's errand down
+        // the road and into the pit. Completes on descent (see _enterHole).
+        if (!this._morelIntroDone) {
+          if (!this._letterSpawned) {
+            if (inShop) { pos = _v.copy(this.shop.doorInside); text = "Step inside"; }
+          } else if (!this._letterPicked && this._letterProp) {
+            pos = _v.copy(this._letterProp.pos).setY(0);
+            text = "Pick up the letter";
+          }
           break;
         }
-        if (!this._noteRead) break; // frozen with the bag arrow up — nothing to point at
-        if (!this.stash.length) break; // nothing left to place — no target
-        const slot = this.shop.freeSlot();
-        if (slot) { pos = _v.copy(slot.pos).setY(0); text = "Stock this table"; }
+        if (inShop && this.shop.caveMouthPos) {
+          pos = _v.copy(this.shop.caveMouthPos);
+          text = "Get mushrooms in the cave";
+        } else if (this.playerArea === "cave") {
+          pos = _v.copy(this.cave.descentPos);
+          text = "Get mushrooms in the cave";
+        }
+        break;
+      case "forage": {
+        // underground: fill the basket, crack the chest, take the stairs
+        // home. Above ground short a mushroom (climbed out early), the
+        // arrows point back down the pit.
+        if (this.playerArea !== "dungeon" || !this.dungeon.active) {
+          if (inShop && this.shop.caveMouthPos) { pos = _v.copy(this.shop.caveMouthPos); text = ""; }
+          else if (this.playerArea === "cave") { pos = _v.copy(this.cave.descentPos); text = ""; }
+          break;
+        }
+        const basket = this._ftueBasket();
+        if (basket < BASKET_SIZE) {
+          const shroom = this._nearestFtueShroom();
+          if (shroom) {
+            pos = _v.set(shroom.wx, 0, shroom.wz);
+            text = `Gather the mushrooms  ${basket}/${BASKET_SIZE}`;
+            break;
+          }
+        }
+        const chest = this.dungeon.chests.find((c) => !c.opened);
+        if (chest && basket < BASKET_SIZE + 1) {
+          pos = _v.copy(chest.mesh.position).add(DUNGEON_ORIGIN);
+          text = "Crack the chest";
+          break;
+        }
+        if (basket >= BASKET_SIZE) {
+          pos = _v.copy(this.dungeon.upStairsPos).add(DUNGEON_ORIGIN);
+          text = "Back to shop";
+        }
         break;
       }
-      case "sell": {
-        const cust = this.shop.customers.find((c) => c.ready && c.state === "want")
-          || this.shop.customers.find((c) => !c._outside);
-        if (cust) { pos = _v.copy(cust.creature.position); text = "Here is your first customer"; }
+      case "trade": {
+        // ate one on the walk home? the basket's short — back down the pit
+        if (this._ftueBasket() < BASKET_SIZE) {
+          if (inShop && this.shop.caveMouthPos) { pos = _v.copy(this.shop.caveMouthPos); text = ""; }
+          else if (this.playerArea === "cave") { pos = _v.copy(this.cave.descentPos); text = ""; }
+          break;
+        }
+        const m = this.shop.morel;
+        if (inShop && m?.creature) { pos = _v.copy(m.creature.position); text = "Give mushrooms to Morel"; }
+        else if (this.playerArea === "cave") { pos = _v.copy(this.cave.exitPos); text = "Back to shop"; }
+        break;
+      }
+      case "stock": {
+        if (!inShop || !this.stash.length) break; // nothing to place — no target
+        const slot = this.shop.freeSlot();
+        if (slot) { pos = _v.copy(slot.pos).setY(0); text = "Put an item on the shelf"; }
         break;
       }
       case "delve":
@@ -350,10 +424,10 @@ export const narrativeMethods = {
         // inside — at the descent pit itself. Completes on the first descent.
         if (inShop && this.shop.caveMouthPos) {
           pos = _v.copy(this.shop.caveMouthPos);
-          text = "To the cave — dive for more loot";
+          text = "Dive deeper for better goods";
         } else if (this.playerArea === "cave") {
           pos = _v.copy(this.cave.descentPos);
-          text = "Dive here for more loot";
+          text = "Dive deeper for better goods";
         }
         break;
     }
@@ -397,50 +471,66 @@ export const narrativeMethods = {
     this._tutAdvance("shop");
   },
 
-  // Scene 3½, just inside: the doors have shut behind the heir and the
-  // uncle's note waits on the first table as a real prop — the guide arrow
-  // walks the player to it and it pops into the bag like any drop.
-  _spawnNoteProp() {
-    if (this._noteProp) return;
-    const slot = this.shop.freeSlot();
-    if (!slot) return;
-    // placeholder art: a plain white sheet lying flat on the tabletop,
-    // skewed a little so it reads as left there, not laid out for sale
-    const mesh = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.5, 0.65),
-      // polygonOffset pulls the sheet toward the camera in the depth buffer so
-      // it never fights the tabletop it lies flush against (same trick as the
-      // door/grate trim); the tiny lift is belt-and-braces.
-      new THREE.MeshBasicMaterial({
-        color: 0xffffff,
-        polygonOffset: true,
-        polygonOffsetFactor: -1,
-        polygonOffsetUnits: -1,
-      })
-    );
-    mesh.rotation.x = -Math.PI / 2;
-    mesh.rotation.z = 0.35;
-    mesh.position.copy(slot.pos).y += 0.02; // just off the wood, no z-fighting
-    this.shop.group.add(mesh);
-    this._noteProp = { mesh, pos: slot.pos.clone() };
+  // Put the uncle's letter on the clear centre of the counter. This restores
+  // the old FTUE note prop without depending on a display slot: Morel's version
+  // of the opening deliberately starts with every shelf unbuilt.
+  _spawnLetterProp() {
+    if (this._letterProp || !this.shop.counterLetterPos) return;
+    const letter = new THREE.Group();
+    const paper = new THREE.MeshBasicMaterial({ color: 0xf3ddb0 });
+    const fold = new THREE.MeshBasicMaterial({ color: 0xc79f68 });
+    const wax = new THREE.MeshBasicMaterial({ color: 0xa83232 });
+
+    // A thick paper envelope, built from primitives so it reads from the high
+    // gameplay camera instead of disappearing into the benchtop like a plane.
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.035, 0.48), paper);
+    letter.add(body);
+
+    // Two inset diagonal seams imply the closed triangular flap. Keeping the
+    // seams inside the rectangular silhouette avoids the old triangle primitive
+    // poking out of the envelope when viewed from the gameplay camera.
+    for (const side of [-1, 1]) {
+      const seam = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.012, 0.018), fold);
+      seam.position.set(side * 0.17, 0.026, -0.065);
+      seam.rotation.y = side * 0.65;
+      letter.add(seam);
+    }
+
+    // Red wax seal at the flap's point.
+    const seal = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.028, 12), wax);
+    seal.position.set(0, 0.045, 0.065);
+    letter.add(seal);
+
+    letter.rotation.y = 0.35;
+    letter.position.copy(this.shop.counterLetterPos);
+    this.shop.group.add(letter);
+    this._letterProp = {
+      mesh: letter,
+      pos: this.shop.counterLetterPos.clone(),
+      paperMats: [paper, fold],
+    };
+    this._letterSpawned = true;
   },
 
-  _removeNoteProp() {
-    if (!this._noteProp) return;
-    this.shop.group.remove(this._noteProp.mesh);
-    this._noteProp.mesh.geometry.dispose();
-    this._noteProp.mesh.material.dispose();
-    this._noteProp = null;
+  _removeLetterProp() {
+    if (!this._letterProp) return;
+    this.shop.group.remove(this._letterProp.mesh);
+    this._letterProp.mesh.traverse((obj) => {
+      obj.geometry?.dispose();
+      obj.material?.dispose();
+    });
+    this._letterProp = null;
   },
 
-  // The note hops into the bag with the usual loot juice, then the bag pulses
-  // again — arrow only, the player knows this dance now — and the hero stays
-  // put until it's read (see _readNote).
-  _pickUpNote() {
-    this._notePicked = true;
-    const at = this._noteProp.pos;
-    this._removeNoteProp();
-    this.inventory.unshift("unclenote"); // top of the bag, like the key was
+  // Reaching the counter takes the letter with the usual pickup flourish.
+  // It lands at the top of the bag and roots the player until they read it.
+  _pickUpLetter() {
+    if (!this._letterProp || this._letterPicked) return;
+    this._letterPicked = true;
+    const at = this._letterProp.pos.clone();
+    this._removeLetterProp();
+    this.inventory.unshift("unclenote");
+    this._syncInv();
     this.audio.pickup();
     const it = ITEMS.unclenote;
     this.hud.float(_v.copy(at).setY(1.2), `${itemIcon(it.icon)} ${it.name}`, "loot");
@@ -449,26 +539,160 @@ export const narrativeMethods = {
     this.hud.bagAttention();
   },
 
-  // The bag's "Read" on the note: the uncle's pitch plays beside his sepia,
-  // burnt-edged bust — the game's only glimpse of him, never in the flesh,
-  // only as the note's voice. Reading consumes the note; then the haul moves
-  // to the storeroom (not a moment sooner) and the shop is open for business.
-  _readNote() {
-    if (!this._notePicked || this._noteRead) return;
+  // The bag's Read action plays every letter bubble. Only after the final
+  // bubble is dismissed is the letter consumed and Morel allowed through.
+  _readLetter() {
+    if (!this._letterPicked || this._letterRead) return;
     this.hud.hideSheet();
     this.hud.clearBagAttention();
-    this._noteCam = true; // drop the camera to eye level while the hero reads
-    this._speakLines("The Note", "characters/uncle-portrait.png", NOTE_LINES, () => {
-      this._noteCam = false;
-      this._noteRead = true;
+    this._sceneCam = true;
+    this._speakLines("The Letter", "characters/uncle-portrait.png", LETTER_LINES, () => {
+      this._letterRead = true;
       const i = this.inventory.indexOf("unclenote");
       if (i !== -1) this.inventory.splice(i, 1);
-      this._ftueFreeze = false;
-      // doors stay shut through the stock step — they only open for business
-      // once the first table's actually stocked (see _tutAdvance)
-      this._depositBag();
-      this._tutHint();
+      this._syncInv();
+      this._sceneCam = false;
+      this._morelIntroScene();
     });
+  },
+
+  // Scene 4, the empty shop: once the heir finishes the counter letter, Morel
+  // appears just inside the door, walks right up to them, and orders mushrooms.
+  _morelIntroScene() {
+    const m = this.shop.morel;
+    if (!m || !this._letterRead || this._morelIntroDone) return;
+    this._morelIntroDone = true;
+    this._ftueFreeze = true; // rooted while Morel makes his entrance
+    this._sceneCam = true; // eye level for the whole barge-in, no cam bouncing
+    const inward = _v.copy(this.shop.doorInside).sub(this.shop.doorPos).setY(0).normalize();
+    m.creature.position.copy(this.shop.doorInside).addScaledVector(inward, 0.55);
+    m.creature.visible = true;
+    // Stop less than a stride away, on the door side of the player.
+    const towardDoor = _v.copy(m.creature.position).sub(this.player.position).setY(0);
+    const spot = this.player.position.clone().addScaledVector(
+      towardDoor.lengthSq() > 0.01 ? towardDoor.normalize() : towardDoor.set(0, 0, 1),
+      0.95);
+    morelWalk(this.shop, [spot], () => {
+      m.state = "talk";
+      // Square both characters toward one another before the first bubble opens.
+      m.creature.heading = Math.atan2(
+        this.player.position.x - m.creature.position.x,
+        this.player.position.z - m.creature.position.z);
+      this.player.heading = Math.atan2(
+        m.creature.position.x - this.player.position.x,
+        m.creature.position.z - this.player.position.z);
+      this._speakLines(m.npc.name, m.portrait, [MOREL_INTRO_ORDER], () =>
+        this._selfSay([PLAYER_INTRO_LINE], () =>
+          this._speakLines(m.npc.name, m.portrait, [MOREL_INTRO_JOB], () => {
+            m.state = "idle"; // he waits right here — very good at waiting
+            this._sceneCam = false;
+            this._ftueFreeze = false;
+            this._tutHint();
+          })));
+    });
+  },
+
+  // Scene 6, the trade: walking the full basket up to Morel hands it over —
+  // three mushrooms out of the bag, and his payment lands with a THUNK: the
+  // shop's first shelf. The rest of the haul slides to the storeroom so the
+  // stock beat has something to lay out.
+  _morelTradeScene() {
+    const m = this.shop.morel;
+    if (!m || this._morelTradeDone) return;
+    if (this._ftueBasket() < BASKET_SIZE) return; // short — arrows point back down
+    this._morelTradeDone = true;
+    this._ftueFreeze = true;
+    this._sceneCam = true;
+    m.state = "talk";
+    // the basket leaves the bag
+    let need = BASKET_SIZE;
+    for (let i = this.inventory.length - 1; i >= 0 && need > 0; i--) {
+      const id = this.inventory[i];
+      if (id === "mushroom" || id === "caveshroom") {
+        this.inventory.splice(i, 1);
+        need--;
+      }
+    }
+    this._syncInv();
+    this.audio.pickup();
+    this.hud.float(_v.copy(m.creature.position).setY(1.5), `${itemIcon(ITEMS.mushroom.icon)} ×${BASKET_SIZE}`, "loot");
+    this._speakLines(m.npc.name, m.portrait, MOREL_TRADE_LINES, () => {
+      // THUNK — the first shelf lands (repairTable brings its own chest-thunk
+      // + shake), plus a puff of sawdust where it settles
+      this.shop.repairTable(0);
+      this.tablesRepaired[0] = true;
+      this._syncTables();
+      const t = this.shop.tables[0];
+      if (t) this.particles.burst(_v.copy(t.group.position).setY(0.6), { color: 0xcaa46a, n: 14, speed: 2.8, up: 1.6, gravity: 4, life: 0.55, size: 0.8 });
+      this._depositBag();
+      this._sceneCam = false;
+      this._ftueFreeze = false;
+      this._tutAdvance("trade");
+    });
+  },
+
+  // The mushroom order stays conversational: speaking to Morel before it is
+  // fulfilled always gets the same impatient nudge, however often he is asked.
+  _morelReminder() {
+    const m = this.shop.morel;
+    if (!m || !this._morelIntroDone) return;
+    m.state = "talk";
+    this.player.heading = Math.atan2(
+      m.creature.position.x - this.player.position.x,
+      m.creature.position.z - this.player.position.z);
+    this._speakLines(m.npc.name, m.portrait, [MOREL_REMINDER_LINE], () => {
+      m.state = "idle";
+    });
+  },
+
+  // Post-FTUE, Morel is the shelf fellow: talking to him at his patch offers
+  // the next unbuilt table (cheapest first — the vitrine last) with the same
+  // pay/not-now choice as the builder. All built → a proud brush-off.
+  _morelPrompt() {
+    const m = this.shop.morel;
+    if (!m) return;
+    let idx = -1, best = Infinity;
+    this.shop.tables.forEach((t, i) => {
+      if (!t.repaired && t.cost < best) { best = t.cost; idx = i; }
+    });
+    if (idx < 0) {
+      return this._speakLines(m.npc.name, m.portrait, ["Not a shelf left in my cart. Fine shop you've built!"]);
+    }
+    const table = this.shop.tables[idx];
+    const what = table.fancy ? "a fancy glass case" : "another shelf";
+    if (this.gold < table.cost) {
+      return this._speakLines(m.npc.name, m.portrait, [
+        `I've got ${what} in the cart. ${table.cost}g and it's yours.`,
+        `You don't have enough coin. Come back when you have ${table.cost}g.`,
+      ]);
+    }
+    this.audio.pickup?.();
+    this.hud.speak({
+      name: m.npc.name, portrait: m.portrait,
+      text: `I've got ${what} in the cart. ${table.cost}g and it's yours.`,
+      choices: [
+        { label: `${icon("coin")} Pay ${table.cost}g`, fn: () => { this.hud.hideSpeak(); this._repairTable(idx); } },
+        { label: "Not now", fn: () => this.hud.hideSpeak() },
+      ],
+    });
+  },
+
+  // How many of Morel's mushrooms (either kind) ride in the bag right now.
+  _ftueBasket() {
+    return this.inventory.reduce((n, id) => n + (id === "mushroom" || id === "caveshroom" ? 1 : 0), 0);
+  },
+
+  // The closest uncollected mushroom cluster on the FTUE forage floor — the
+  // guide arrow's target while the basket wants filling.
+  _nearestFtueShroom() {
+    let bestD = Infinity, best = null;
+    const p = this.player.position;
+    for (const d of this.dungeon.decor) {
+      if (d.cat !== "mushrooms") continue;
+      const dist = Math.hypot(d.wx - p.x, d.wz - p.z);
+      if (dist < bestD) { bestD = dist; best = d; }
+    }
+    return best;
   },
 
   // Which story action a quest prop offers in the bag right now, if any
@@ -476,8 +700,8 @@ export const narrativeMethods = {
   _questBagAction(id) {
     if (id === "shopkey" && this._doorScene && this.tutorial === "shop")
       return { label: "Use", fn: () => this._useShopKey() };
-    if (id === "unclenote" && this._notePicked && !this._noteRead)
-      return { label: "Read", fn: () => this._readNote() };
+    if (id === "unclenote" && this._letterPicked && !this._letterRead)
+      return { label: "Read", fn: () => this._readLetter() };
     return null;
   },
 

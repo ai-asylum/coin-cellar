@@ -453,20 +453,37 @@ export const customerMethods = {
     return !!nav.blocked[r * nav.cols + c];
   },
 
+  // Another shopper already stands at (or is heading for) this exact spot.
+  // Adjacent slots share their table's end spots as separate Vector3s with the
+  // same coordinates, so compare by distance rather than identity.
+  _spotTaken(p, cust) {
+    return this.customers.some((o) => {
+      if (o === cust) return false;
+      const s =
+        ((o.state === "goto" || o.state === "look") && o.browseSpot) ||
+        (o.state === "autobuy" && o.buySpot) || null;
+      return !!s && Math.hypot(s.x - p.x, s.z - p.z) < 0.5;
+    });
+  },
+
   // Choose which side of an item's table a shopper should stand at. Rather than
   // always crowding the front (which can wall a customer off behind a table),
-  // pick the reachable spot closest to where they're standing now — so someone
-  // coming from the door views it from the near side instead of squeezing past.
+  // pick the closest free reachable spot — so someone coming from the door
+  // views it from the near side instead of squeezing past, and two shoppers at
+  // adjacent slots never overlap on a shared end spot. If every side is taken,
+  // settle for the closest reachable one anyway rather than stalling.
   _browseSpotFor(cust, slot) {
     const spots = slot.browseSpots || [slot.browsePos];
     const from = cust.creature?.position || cust.creature?.group?.position;
     let best = null, bestD = Infinity;
+    let bestFree = null, bestFreeD = Infinity;
     for (const s of spots) {
       if (this._spotBlocked(s)) continue;
       const d = from ? from.distanceToSquared(s) : 0;
       if (d < bestD) { bestD = d; best = s; }
+      if (!this._spotTaken(s, cust) && d < bestFreeD) { bestFreeD = d; bestFree = s; }
     }
-    return best || slot.browsePos;
+    return bestFree || best || slot.browsePos;
   },
 
   // Position in the counter queue (0 = at the head, being served). Everyone
@@ -533,11 +550,7 @@ export const customerMethods = {
       }
     }
     const fav = cust.favorite;
-    // FTUE: on the tutorial's sell step every shopper must actually commit, so a
-    // brand-new player is always handed a haggle to win instead of watching the
-    // rush browse and wander off — skip the usual "maybe they just leave" roll.
-    const mustBuy = this.game.tutorial === "sell";
-    if (fav && fav.item && (mustBuy || Math.random() < cust.arch.buy)) {
+    if (fav && fav.item && Math.random() < cust.arch.buy) {
       cust.slot = fav;
       const base = ITEMS[fav.item].base;
       cust.maxPay = Math.round(base * (cust.arch.lo + Math.random() * (cust.arch.hi - cust.arch.lo)));

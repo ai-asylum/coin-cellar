@@ -168,20 +168,40 @@ export const combatMethods = {
     return hit;
   },
 
-  // Smash every destructible prop caught within `reach` of `pos`. The burst
+  // Smash non-forage scenery caught within `reach` of `pos`. Loot-bearing
+  // environmental props are contact-harvested instead (see collectDecor).
+  // The burst
   // (particles + crunch) is cosmetic and runs client-side for everyone (the
-  // layout is seeded, so peers agree). Some props also forage a drop: the host
-  // rolls and spawns it; a guest instead pings the host by the prop's stable id
-  // so the loot is rolled exactly once (see game-net dSmash).
+  // layout is seeded, so peers agree). Loot-bearing categories are skipped.
   _smashDecor(pos, reach) {
     if (!this.decor.length) return false;
     const isGuest = this.game.net.isGuest;
     let hit = false;
     for (let i = this.decor.length - 1; i >= 0; i--) {
       const d = this.decor[i];
+      if (DECOR_LOOT[d.cat]) continue;
       const dx = d.wx - pos.x;
       const dz = d.wz - pos.z;
       if (Math.hypot(dx, dz) > reach + d.radius) continue;
+      this.decor.splice(i, 1);
+      this._burstDecor(d);
+      if (isGuest) this.game.net.send({ t: "dSmash", id: d.id });
+      else this._dropDecorLoot(d);
+      hit = true;
+    }
+    return hit;
+  },
+
+  // Walking into a loot-bearing environmental prop harvests it. Networking is
+  // identical to a smashed prop so host and guest still roll exactly one drop.
+  collectDecor(pos) {
+    if (!this.decor.length) return false;
+    const isGuest = this.game.net.isGuest;
+    let hit = false;
+    for (let i = this.decor.length - 1; i >= 0; i--) {
+      const d = this.decor[i];
+      if (!DECOR_LOOT[d.cat]) continue;
+      if (Math.hypot(d.wx - pos.x, d.wz - pos.z) > d.radius) continue;
       this.decor.splice(i, 1);
       this._burstDecor(d);
       if (isGuest) this.game.net.send({ t: "dSmash", id: d.id });
@@ -208,6 +228,10 @@ export const combatMethods = {
     const table = DECOR_LOOT[d.cat];
     if (!table) return;
     const r = rng(this.seed + d.id * 131 + 7);
+    // Morel's errand can't hinge on a coin flip: on the FTUE forage floor
+    // every mushroom cluster pays out a mushroom, no herb subs, no blanks
+    if (this.ftue && d.cat === "mushrooms")
+      return this.spawnDrop(r() < 0.7 ? "mushroom" : "caveshroom", d.wx, d.wz);
     if (r() > table.chance) return;
     this.spawnDrop(pick(r, table.items), d.wx, d.wz);
   },
@@ -651,9 +675,9 @@ export const combatMethods = {
       this.spawnDrop(pick(r, table.common), cx + 0.7, cz);
       return "key";
     }
-    // the FTUE chest always pays out the same two starter wares so the guided
-    // first sale is predictable — a Wild Mushroom and a Roast Meat, every time
-    if (this.tutorial) {
+    // the FTUE chest always pays out the same two starter wares — a Wild
+    // Mushroom to top up Morel's basket and a Roast Meat for the new shelf
+    if (this.tutorial || this.ftue) {
       this.spawnDrop("mushroom", cx, cz + 0.8);
       this.spawnDrop("meat", cx + 0.7, cz);
       return "mushroom";

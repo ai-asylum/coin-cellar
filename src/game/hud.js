@@ -341,7 +341,9 @@ export class HUD {
   spendCoins(worldPos, count = 8, onLand = null) {
     const rect = this.goldChip.getBoundingClientRect();
     const start = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-    const end = (worldPos && this._project(worldPos)) || { x: viewport.w / 2, y: viewport.h / 2 };
+    const view = this._viewRect();
+    const end = (worldPos && this._project(worldPos)) ||
+      { x: view.left + view.width / 2, y: view.top + view.height / 2 };
     const n = Math.max(3, Math.min(Math.round(count), 16));
     for (let i = 0; i < n; i++) {
       const coin = document.createElement("div");
@@ -517,13 +519,21 @@ export class HUD {
     const p = this._projectGuide(worldPos);
     const el = this.guideEl;
     el.classList.remove("hidden");
+    el.classList.toggle("no-text", !text);
     if (text !== this._guideText) {
       this._guideText = text;
       this.guideTextEl.innerHTML = text;
     }
-    const m = 70;
-    const x = Math.max(m, Math.min(viewport.w - m, p.x));
-    const y = Math.max(m, Math.min(viewport.h - m, p.y - 44));
+    // Keep the label + arrow inside a box that clears the fixed UI: the top bar
+    // up top and the bag/store/action buttons along the bottom, with a little
+    // breathing room on the sides. Bigger vertical insets so the guide never
+    // slides up behind the top bar or down under the corner buttons.
+    const insetX = 120;
+    const insetTop = 100;
+    const insetBottom = 130;
+    const view = this._viewRect();
+    const x = Math.max(view.left + insetX, Math.min(view.left + view.width - insetX, p.x));
+    const y = Math.max(view.top + insetTop, Math.min(view.top + view.height - insetBottom, p.y - 44));
     const edge = x !== p.x || y !== p.y;
     el.classList.toggle("edge", edge);
     el.style.left = x + "px";
@@ -858,9 +868,24 @@ export class HUD {
   _project(worldPos) {
     _v.copy(worldPos).project(this.engine.camera);
     if (_v.z > 1) return null;
+    const view = this._viewRect();
     return {
-      x: ((_v.x + 1) / 2) * viewport.w,
-      y: ((1 - _v.y) / 2) * viewport.h,
+      x: view.left + ((_v.x + 1) / 2) * view.width,
+      y: view.top + ((1 - _v.y) / 2) * view.height,
+    };
+  }
+
+  _viewRect() {
+    const canvas = this.engine.renderer.domElement.getBoundingClientRect();
+    const root = this.root.getBoundingClientRect();
+    if (!canvas.width || !canvas.height) {
+      return { left: 0, top: 0, width: viewport.w, height: viewport.h };
+    }
+    return {
+      left: canvas.left - root.left,
+      top: canvas.top - root.top,
+      width: canvas.width,
+      height: canvas.height,
     };
   }
 
@@ -876,9 +901,10 @@ export class HUD {
     _v.copy(worldPos).project(cam);
     let nx = _v.x, ny = _v.y;
     if (behind) { nx = -nx; ny = -ny; }
+    const view = this._viewRect();
     return {
-      x: ((nx + 1) / 2) * viewport.w,
-      y: ((1 - ny) / 2) * viewport.h,
+      x: view.left + ((nx + 1) / 2) * view.width,
+      y: view.top + ((1 - ny) / 2) * view.height,
     };
   }
 
@@ -991,7 +1017,8 @@ export class HUD {
     // menu above the slot pushes it out of thumb's reach. Keep it pinned near
     // the bottom, but raise it above the bag/storeroom buttons so they don't
     // overlap the sheet's controls.
-    if (matchMedia("(pointer: coarse)").matches && viewport.h > viewport.w) {
+    const view = this._viewRect();
+    if (matchMedia("(pointer: coarse)").matches && view.height > view.width) {
       this._clearSheetAnchor();
       this.sheetEl.style.bottom = `calc(${bottomReserve}px + env(safe-area-inset-bottom))`;
       return;
@@ -999,7 +1026,7 @@ export class HUD {
     const p = this._project(worldPos);
     const el = this.sheetEl;
     const w = el.offsetWidth, h = el.offsetHeight;
-    const vw = viewport.w, vh = viewport.h;
+    const vw = view.width, vh = view.height;
     const gap = 12, edge = 10;
     let left, top;
     if (p) {

@@ -314,7 +314,7 @@ export function updateDojo(shop, dojo, dt, elapsed) {
   // master, or reading the note) — the straw dummies out front would fill the
   // frame at that height, so they duck out of sight for the duration and pop
   // back the moment the dialogue closes
-  const dialogue = !!game._npcChat || !!game._noteCam || !!game._selfCam;
+  const dialogue = !!game._npcChat || !!game._sceneCam || !!game._selfCam;
 
   // dummies: critically-ish damped spring back to upright, with a hit flash
   for (const d of dojo.dummies) {
