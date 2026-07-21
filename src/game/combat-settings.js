@@ -56,7 +56,7 @@ export const COMBAT_SLIDERS = {
 // Code-defined baseline — the saved JSON is folded over this at load, so a
 // partial/older file still boots with every knob present.
 const DEFAULTS = {
-  attackMode: "strikeInPlace",
+  attackMode: "autodash",
   // lungeTime/lungeDist shape the auto-lunge's burst; knockback is the DISTANCE
   // (world units) a struck foe travels, converted to an impulse where applied.
   // The cooldown counts from the end of the swing, not the trigger.
