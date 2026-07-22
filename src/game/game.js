@@ -1202,13 +1202,13 @@ export class Game {
       if (morelOrderLive && morel?.creature && morel.state === "idle" &&
           p.distanceTo(morel.creature.position) < 1.9) {
         const focus = _focus.copy(morel.creature.position).setY(0.06).clone();
-        return { label: "speak", hint: "Talk", fn: () => this._morelReminder(), focus, color: 0x9ad0ff };
+        return { label: "speak", hint: "Talk", fn: () => this._talkToNpc(morel), focus, color: 0x9ad0ff };
       }
       if (!this.tutorial && morel?.creature && morel.state === "idle" &&
           p.distanceTo(morel.creature.position) < 1.9 &&
           this.shop.tables.some((t) => !t.repaired)) {
         const focus = _focus.copy(morel.creature.position).setY(0.06).clone();
-        return { label: "speak", hint: "Buy shelf", fn: () => this._morelPrompt(), focus, color: 0x66ff9e };
+        return { label: "speak", hint: "Buy shelf", fn: () => this._talkToNpc(morel), focus, color: 0x66ff9e };
       }
       // the town builder: step up to the foreman waiting by the ruined row to
       // hire him to raise the next house (cheapest first). Unlike the old direct
@@ -1387,18 +1387,14 @@ export class Game {
     }
     for (const pb of shop.passersby) if (talkable(pb)) pairs.push([pb.creature, { type: "npc", obj: pb }]);
     if (talkable(shop.dojo?.master)) pairs.push([shop.dojo.master.creature, { type: "npc", obj: shop.dojo.master }]);
-    // Morel has story/vendor dialogue rather than the generic townsfolk chat,
-    // but tapping him should work at any distance just like tapping another NPC.
+    // Morel uses the same NPC pick/dispatch path as every other talkable;
+    // _talkToNpc selects his current story/vendor dialogue.
     const morel = shop.morel;
     const morelOrderLive = this._morelIntroDone &&
       (this.tutorial === "fetch" || this.tutorial === "forage" || this.tutorial === "trade");
     const morelShelfLive = !this.tutorial && shop.tables.some((t) => !t.repaired);
-    if (morel?.creature?.visible && morel.state === "idle" && (morelOrderLive || morelShelfLive)) {
-      pairs.push([morel.creature, {
-        type: "morel",
-        action: morelOrderLive ? "reminder" : "shelves",
-      }]);
-    }
+    if (morel?.creature?.visible && morel.state === "idle" && (morelOrderLive || morelShelfLive))
+      pairs.push([morel.creature, { type: "npc", obj: morel }]);
     // the town builder: click him (or a ruined lot below) to open his repair offer
     if (!this.tutorial && shop.builder?.creature) pairs.push([shop.builder.creature, { type: "builder" }]);
     for (const table of shop.tables) pairs.push([table.group, { type: "table", table }]);
@@ -1451,14 +1447,6 @@ export class Game {
       const focus = target.obj.creature.getWorldPosition(_focus).setY(0.06).clone();
       return { hint: "Talk", focus, color: 0x9ad0ff };
     }
-    if (target.type === "morel") {
-      const focus = this.shop.morel.creature.getWorldPosition(_focus).setY(0.06).clone();
-      return {
-        hint: target.action === "reminder" ? "Talk" : "Buy shelf",
-        focus,
-        color: target.action === "reminder" ? 0x9ad0ff : 0x66ff9e,
-      };
-    }
     if (target.type === "builder") {
       const b = this.shop.builder;
       const hasWork = this.shop.lots?.some((lot, i) => !lot.restored && !this.townRestored[i]);
@@ -1494,11 +1482,6 @@ export class Game {
     }
     if (target.type === "npc") {
       this._talkToNpc(target.obj);
-      return;
-    }
-    if (target.type === "morel") {
-      if (target.action === "reminder") this._morelReminder();
-      else this._morelPrompt();
       return;
     }
     if (target.type === "builder") {

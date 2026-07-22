@@ -827,6 +827,13 @@ export const narrativeMethods = {
   // cycling through their five. Advancing closes it.
   _talkToNpc(target) {
     if (!target || !target.npc || this._npcChat) return;
+    if (target === this.shop.morel) {
+      const orderLive = this._morelIntroDone &&
+        (this.tutorial === "fetch" || this.tutorial === "forage" || this.tutorial === "trade");
+      if (orderLive) this._morelReminder();
+      else if (!this.tutorial) this._morelPrompt();
+      return;
+    }
     const npc = target.npc;
     const c = target.creature;
     // world position: the dojo master is nested in the positioned dojo group,
