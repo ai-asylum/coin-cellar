@@ -5,6 +5,7 @@ import * as THREE from "three";
 import { BOSS_ATK_WINDUP, BOSS_ATK_GLOW } from "./dungeon-data.js";
 
 const IMP_DECAY = 0.0012; // per-second base for impulse/knockback friction
+const IMP_COLLISION_STEP = 0.2; // max world-space step before checking walls
 // an impulse of v decays to a total travel of v / -ln(IMP_DECAY); invert that so
 // a lunge can be aimed to land a chosen distance away instead of a fixed speed
 export const LEAP_K = -Math.log(IMP_DECAY);
@@ -92,10 +93,26 @@ export const aiMethods = {
     e.t += dt;
     e.attackCd -= dt;
 
-    // apply + decay impulse velocity (knockback + lunge dashes) every frame
+    // Apply + decay impulse velocity (knockback + lunge dashes) in short,
+    // collision-checked steps. A single large frame step could otherwise jump
+    // entirely across a thin prop/wall before the end-of-frame collision pass.
     const fr = Math.pow(IMP_DECAY, dt);
-    c.position.x += e.vx * dt;
-    c.position.z += e.vz * dt;
+    const moveX = e.vx * dt;
+    const moveZ = e.vz * dt;
+    const steps = Math.max(1, Math.ceil(Math.hypot(moveX, moveZ) / IMP_COLLISION_STEP));
+    let stepX = moveX / steps;
+    let stepZ = moveZ / steps;
+    for (let i = 0; i < steps; i++) {
+      const wantX = c.position.x + stepX;
+      const wantZ = c.position.z + stepZ;
+      c.position.set(wantX, c.position.y, wantZ);
+      this.game.collide(c.position, c.radius, this.colliders);
+      // Kill only the wall-normal component; the remaining axis can still slide
+      // naturally along the obstacle for the rest of the impulse.
+      if (Math.abs(c.position.x - wantX) > 1e-5) { e.vx = 0; stepX = 0; }
+      if (Math.abs(c.position.z - wantZ) > 1e-5) { e.vz = 0; stepZ = 0; }
+      if (!stepX && !stepZ) break;
+    }
     e.vx *= fr;
     e.vz *= fr;
 

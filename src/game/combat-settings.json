@@ -1,5 +1,6 @@
 {
   "attackMode": "autodash",
+  "distanceMultiplier": 1,
   "autodash": {
     "range": 3,
     "cooldown": 0.8,

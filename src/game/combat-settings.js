@@ -57,6 +57,7 @@ export const COMBAT_SLIDERS = {
 // partial/older file still boots with every knob present.
 const DEFAULTS = {
   attackMode: "autodash",
+  distanceMultiplier: 1,
   // lungeTime/lungeDist shape the auto-lunge's burst; knockback is the DISTANCE
   // (world units) a struck foe travels, converted to an impulse where applied.
   // The cooldown counts from the end of the swing, not the trigger.

@@ -694,11 +694,12 @@ export const uiMethods = {
     el.addEventListener("input", (e) => {
       const t = e.target.closest("input[data-cset]");
       if (!t) return;
-      const [m, key] = t.dataset.cset.split(".");
       const v = +t.value;
-      setCombatSettings({ [m]: { [key]: v } });
-      const lbl = el.querySelector(`[data-cval="${m}.${key}"]`);
-      if (lbl) lbl.textContent = v;
+      const path = t.dataset.cset.split(".");
+      if (path.length === 1) setCombatSettings({ [path[0]]: v });
+      else setCombatSettings({ [path[0]]: { [path[1]]: v } });
+      const lbl = el.querySelector(`[data-cval="${t.dataset.cset}"]`);
+      if (lbl) lbl.textContent = path.length === 1 ? `${v}×` : v;
     });
     el.addEventListener("change", (e) => {
       if (e.target.closest("input[data-cset]")) this._saveCombat();
@@ -712,6 +713,7 @@ export const uiMethods = {
   _combatPanelHtml() {
     const mode = attackMode();
     const active = ATTACK_MODES.find((m) => m.id === mode);
+    const distanceMultiplier = combat.distanceMultiplier ?? 1;
     const sliders = (COMBAT_SLIDERS[mode] || []).map((d) => {
       const val = combat[mode]?.[d.key];
       return `<div class="admin-slider cslider">
@@ -721,6 +723,10 @@ export const uiMethods = {
     }).join("");
     return `
       <div class="admin-hints cmode-desc"><b>${active ? esc(active.label) : ""}</b> — ${active ? esc(active.desc) : ""}</div>
+      <div class="admin-slider cslider">
+        <label>Attack distance multiplier <b data-cval="distanceMultiplier">${distanceMultiplier}×</b></label>
+        <input type="range" data-cset="distanceMultiplier" min="0.1" max="5" step="0.1" value="${distanceMultiplier}">
+      </div>
       ${sliders}
     `;
   },

@@ -203,6 +203,9 @@ export class Input {
       this.interactBtn.innerHTML = icon(name);
     }
     this.interactBtn.style.display = on ? "flex" : "none";
+    // Let the responsive HUD reflow the bag/store buttons when this becomes the
+    // only action occupying the lower-right corner.
+    this.hudEl?.classList.toggle("interact-on", on);
   }
 
   // Arm/disarm the joystick-centre action button (joystick dash button attack

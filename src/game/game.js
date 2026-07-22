@@ -49,6 +49,8 @@ const START_INV = ["caveshroom", "meat"];
 // responsive. Shared by _respawn in game-combat.js (kept in sync there).
 export const PLAYER_TURN_RATE = 7;
 const BASE_MAXHP = 6; // hearts before any chestplate / ring bonuses
+const CHEST_AUTO_OPEN_RANGE = 1.7;
+const TARGET_MOVE_SPEED_MUL = 0.55;
 
 export class Game {
   constructor(engine, input, audio, hud, opts = {}) {
@@ -235,6 +237,9 @@ export class Game {
     this.player = new BlockyCreature("a", { height: 1.5, turnRate: PLAYER_TURN_RATE });
     this.player.setTorchLit(false); // the hero's own lantern shouldn't wash out their model
     this.player.position.copy(this.shop.playerSpawn);
+    this._dungeonCamLook = new THREE.Vector3(0, 0, -DUNGEON_LOOKAHEAD);
+    this._dungeonCamPrevPos = this.player.position.clone();
+    this._cameraArea = this.playerArea;
     this._heldWeaponId = this.equipment.weapon;
     this.player.holdItem(weaponMesh(this.equipment.weapon));
     engine.scene.add(this.player);
@@ -557,10 +562,34 @@ export class Game {
     const outdoors = !inDungeon && !inCave;
     const zone = outdoors ? this.shop.zoneCenter(p) : null;
     const street = outdoors && !zone ? this.shop.streetCenter(p) : null;
+    // In the dungeon, ease the framing toward the direction the hero is
+    // actually travelling. Vertical movement gets the full portrait-friendly
+    // look-ahead; sideways movement only nudges the view and preserves the
+    // default extra space toward the top of the screen.
+    if (inDungeon) {
+      _dungeonLookWanted.set(0, 0, -DUNGEON_LOOKAHEAD);
+      if (this._cameraArea === "dungeon") {
+        const dx = p.x - this._dungeonCamPrevPos.x;
+        const dz = p.z - this._dungeonCamPrevPos.z;
+        const d = Math.hypot(dx, dz);
+        if (d > 0.0001) {
+          const nx = dx / d;
+          const nz = dz / d;
+          _dungeonLookWanted.x = nx * DUNGEON_SIDE_LOOKAHEAD;
+          _dungeonLookWanted.z = nz * DUNGEON_LOOKAHEAD -
+            (1 - Math.abs(nz)) * DUNGEON_LOOKAHEAD;
+        }
+      }
+      this._dungeonCamLook.lerp(_dungeonLookWanted, 1 - Math.pow(0.08, dt));
+    } else {
+      this._dungeonCamLook.set(0, 0, -DUNGEON_LOOKAHEAD);
+    }
+    this._dungeonCamPrevPos.copy(p);
+    this._cameraArea = this.playerArea;
     const camTarget =
-      // delving, look a little up the floor (−z reads as "ahead" on screen) so
-      // the player sits lower in frame and you can see more of what's coming
-      inDungeon || inCave ? _dungeonFocus.set(p.x, 0, p.z - DUNGEON_LOOKAHEAD)
+      inDungeon ? _dungeonFocus.copy(p).add(this._dungeonCamLook).setY(0)
+      // The cave keeps the original upward-biased framing.
+      : inCave ? _dungeonFocus.set(p.x, 0, p.z - DUNGEON_LOOKAHEAD)
       : zone ? _townCenter.set(zone.cx, 0, zone.cz)
       : street ? _townCenter.set(street.cx, 0, street.cz)
       : p;
@@ -681,6 +710,10 @@ export class Game {
     // there's no attack button — a quick tap on the screen is the attack.
     const underground = this.playerArea === "dungeon" || this.playerArea === "cave";
     const mode = attackMode();
+    const attackDistanceMul = combat.distanceMultiplier ?? 1;
+    const targetRange = mode === "autodash"
+      ? (combat.autodash.range || 3.0) * attackDistanceMul
+      : (combat.strikeInPlace.range || 2.2) * attackDistanceMul;
     // Manual triggers work in EVERY mode (keys / RMB, the on-screen button and
     // the landscape screen-tap while delving) so combat is always reachable.
     let attackPress = this.input.dodgeEdge ||
@@ -706,7 +739,7 @@ export class Game {
       // the button now fires a plant-and-strike (not a lunge), so it should only
       // light within the strike's actual reach — otherwise there's a dead zone
       // where the button reads "attack" but the swing can't land
-      const joyRange = combat.strikeInPlace.range || 2.2;
+      const joyRange = (combat.strikeInPlace.range || 2.2) * attackDistanceMul;
       joyFoe = underground && !sheetBlocked
         ? (this._nearestEnemyWithin(joyRange, 0, 0, -2)
           || this._nearestChestWithin(joyRange, 0, 0, -2)) : null;
@@ -714,9 +747,22 @@ export class Game {
     } else {
       this.input.setJoyDash(false);
     }
+    const autoDashTarget = mode === "autodash"
+      ? this._nearestEnemyWithin(targetRange, 0, 0, -2)
+      : null;
+    let movingAwayFromDash = false;
+    if (autoDashTarget) {
+      const moveLen = Math.hypot(this.input.move.x, this.input.move.y);
+      if (moveLen > 0.15) {
+        const moveTowardTarget =
+          (this.input.move.x * autoDashTarget.dx + this.input.move.y * autoDashTarget.dz) /
+          (moveLen * autoDashTarget.dist);
+        movingAwayFromDash = moveTowardTarget < -0.1;
+      }
+    }
     if (mode === "autodash" && underground && !sheetBlocked &&
         this._dashT < 0 && this._dashWindT < 0 && this._dodgeCd <= 0 &&
-        this._nearestEnemyWithin(combat.autodash.range || 3.0, 0, 0, -2)) {
+        autoDashTarget && !movingAwayFromDash) {
       attackPress = true; // no button — a foe in range triggers the strike
     }
     // "Auto strike": like autodash (no button, foe-in-range triggers) but it
@@ -725,7 +771,7 @@ export class Game {
     // A short wind-up telegraph delays the swing after a foe becomes strikeable
     // so it doesn't fire the instant one steps into range; it re-arms after each
     // swing (and whenever no foe is reachable) so every strike waits the beat.
-    const strikeRange = combat.strikeInPlace.range || 2.2;
+    const strikeRange = (combat.strikeInPlace.range || 2.2) * attackDistanceMul;
     if (mode === "strikeInPlace" && underground && !sheetBlocked &&
         this._dashT < 0 && this._dashWindT < 0 && this._dodgeCd <= 0 &&
         (this._nearestEnemyWithin(strikeRange, 0, 0, -2) ||
@@ -754,6 +800,13 @@ export class Game {
       if (this._dashWindT < 0) this._launchDash(true);
     }
 
+    // Locking onto a nearby foe keeps the hero facing it. Advancing/strafing
+    // slows for deliberate footwork, while retreating keeps the visual lock but
+    // restores full movement speed.
+    const combatTarget = !sheetBlocked
+      ? this._nearestEnemyWithin(targetRange, 0, 0, -2)
+      : null;
+
     if (this._dashT >= 0) {
       // committed dash: ease-out lunge along the dash direction, damaging every
       // foe / chest / prop it sweeps through (resolved per frame in _dashStrike)
@@ -768,7 +821,9 @@ export class Game {
       this.slash.follow(c.position.x, 0.62, c.position.z);
       if (this._dashT >= this._dashDur) this._dashT = -1;
     } else if (!sheetBlocked && this._dashWindT < 0 && (mv.x || mv.y)) {
-      const speed = 3.7 * (this.stats.speedMul || 1); // boots / heavy-armour tweak
+      const fullSpeedRetreat = mode === "autodash" && movingAwayFromDash;
+      const targetMul = combatTarget && !fullSpeedRetreat ? TARGET_MOVE_SPEED_MUL : 1;
+      const speed = 3.7 * (this.stats.speedMul || 1) * targetMul; // boots / target lock tweak
       c.position.x += mv.x * speed * dt;
       c.position.z += mv.y * speed * dt;
     }
@@ -790,19 +845,26 @@ export class Game {
       // standing or strafing — so who the next dash will strike is telegraphed
       // before the press ever lands. The stick only steers facing when nothing
       // is close enough to fight. (minDot -2: any bearing, no forward-arc cut.)
-      const foe = this._nearestEnemyWithin(AUTOAIM_RANGE, 0, 0, -2);
+      const foe = combatTarget;
       if (foe) c.heading = Math.atan2(foe.dx, foe.dz);
       else if (mv.x || mv.y) c.heading = Math.atan2(mv.x, mv.y);
       else {
         // standing still by a chest: square off with it so the tap-strike that
         // cracks it open is telegraphed, the same way the hero faces a foe
-        const chest = this._nearestChestWithin(AUTOAIM_RANGE, 0, 0, -2);
+        const chest = this._nearestChestWithin(AUTOAIM_RANGE * attackDistanceMul, 0, 0, -2);
         if (chest) c.heading = Math.atan2(chest.dx, chest.dz);
       }
     }
     const colliders = this.playerArea === "shop" ? this.shop.playerColliders
       : this.playerArea === "cave" ? this.cave.colliders : this.dungeon.colliders;
     this.collide(c.position, c.radius * 0.8, colliders);
+    // Treasure is collected by proximity: once the final, collision-corrected
+    // player position reaches a chest, crack it without requiring an attack or
+    // interact press.
+    if (!sheetBlocked && !this.gameOver) {
+      const nearbyChest = this._nearestChestWithin(CHEST_AUTO_OPEN_RANGE, 0, 0, -2);
+      if (nearbyChest) this._openChest(nearbyChest.chest);
+    }
     // Environmental forage is gathered by contact, not by attacking it.
     if (!sheetBlocked) {
       if (this.playerArea === "shop") this.shop.collectForage(c.position);
@@ -875,8 +937,8 @@ export class Game {
     }
 
     // context action. Combat is dash-only now, so the action button is purely a
-    // context / interact button: it appears for portals / stairs / gates / chests
-    // and the shop's deals, and hides when there's nothing to do. `act.label`
+    // context / interact button: it appears for portals / stairs / gates and the
+    // shop's deals, and hides when there's nothing to do. `act.label`
     // is null when the floor's clear — there's no "swing" fallback any more.
     const act = this._contextAction();
     const inDungeon = this.playerArea === "dungeon";
@@ -918,10 +980,9 @@ export class Game {
         this.input.setJoyDash(false);
       }
     } else if (underground) {
-      // the primary button is the ATTACK button while delving (crossed swords);
-      // real interacts (stairs / gate / portal / chest) get their own button
-      // when something's in reach, so the two never fight over one press.
-      this.input.setActionLabel("swords", false);
+      // Auto lunge needs no attack button. Manual strike modes keep the crossed
+      // swords button; real interactions retain their separate context button.
+      this.input.setActionLabel(mode === "autodash" ? null : "swords", false);
       this.input.setInteract(act.label, hasInteract);
       this._fieldDashBtn = false;
     } else {
@@ -1226,9 +1287,8 @@ export class Game {
         _v.copy(this.dungeon.stairsPos).add(DUNGEON_ORIGIN);
         if (_v.distanceTo(p) < 1.5) return { label: "arrowDown", hint: "Descend", fn: () => this._descend(), focus: _v.clone().setY(0.06), color: 0xff8a3d };
       }
-      // chests aren't a button — you crack them open with the dash (handled in
-      // dungeon.dashHit). We just ring the nearest one so it reads as a target
-      // to dash into; there's no button or keycap for it.
+      // Chests open automatically at arm's reach. Ring the nearest one while the
+      // player approaches so the proximity target is easy to read.
       for (const chest of this.dungeon.chests) {
         if (chest.opened) continue;
         _v.copy(chest.mesh.position).add(DUNGEON_ORIGIN);
@@ -1942,8 +2002,12 @@ const _camDungeon = new THREE.Vector3(0, 11.25, 10.98);
 // how far up the floor the delving camera looks past the hero (world units):
 // biases the focus toward the top of the screen so more of the path ahead shows
 const DUNGEON_LOOKAHEAD = 3;
+// Horizontal look-ahead is deliberately restrained: portrait screens have
+// much less room at the sides than above and below the hero.
+const DUNGEON_SIDE_LOOKAHEAD = 1.15;
 // scratch focus point for the delving camera's look-ahead bias
 const _dungeonFocus = new THREE.Vector3();
+const _dungeonLookWanted = new THREE.Vector3();
 // scratch target for the bounded indoor camera focus
 const _townCenter = new THREE.Vector3();
 // scratch framing for the eye-level dialogue camera (see _dialogueCamTarget)

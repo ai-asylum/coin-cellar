@@ -107,12 +107,13 @@ export const combatMethods = {
   // around into the lunge — the wind-up is what makes the turn readable.
   _dodge(dir = null) {
     if (this._dashT >= 0 || this._dashWindT >= 0 || this._dodgeCd > 0 || this._respawnT >= 0 || this.gameOver) return;
+    const distanceMul = combat.distanceMultiplier ?? 1;
     // Auto-lunge mode strikes with its own tuned burst; every other mode keeps
     // the baseline dash. Set per launch so a live mode/slider change in the
     // admin panel shapes the very next lunge.
     if (combat.attackMode === "autodash") {
       this._dashDur = combat.autodash.lungeTime ?? 0.16;
-      this._dashSpeed = (combat.autodash.lungeDist ?? 0.9) / (DASH_EASE_AVG * this._dashDur);
+      this._dashSpeed = ((combat.autodash.lungeDist ?? 0.9) * distanceMul) / (DASH_EASE_AVG * this._dashDur);
     } else {
       this._dashDur = DASH_DUR;
       this._dashSpeed = DASH_SPEED;
@@ -121,7 +122,12 @@ export const combatMethods = {
     // dashes in the flicked direction rather than the current steer.
     const mv = dir || this.input.move;
     let dx, dz;
-    if (mv.x || mv.y) {
+    // Auto lunge follows the hero's facing, never the movement stick. This keeps
+    // strafing around a locked foe from sending the attack sideways.
+    if (combat.attackMode === "autodash") {
+      dx = Math.sin(this.player.heading);
+      dz = Math.cos(this.player.heading);
+    } else if (mv.x || mv.y) {
       const l = Math.hypot(mv.x, mv.y) || 1;
       dx = mv.x / l; dz = mv.y / l;
     } else {
@@ -135,11 +141,19 @@ export const combatMethods = {
     // up — a rooted beat where nothing moves but the hero's shoulders, so the
     // pivot toward the foe can't get lost under the lunge's VFX. The lunge
     // itself fires from _launchDash once the beat runs out (ticked in game.js).
-    const target = this._nearestEnemyWithin(AUTOAIM_RANGE, dx, dz, AUTOAIM_FACE_DOT);
+    // Auto lunge is trigger-driven, so every enemy inside its configured range
+    // must become the locked target; otherwise the attack could fire without a
+    // reachable foe when the target is behind the old facing or beyond the
+    // generic auto-aim radius.
+    const auto = combat.attackMode === "autodash";
+    const aimRange = auto
+      ? (combat.autodash.range ?? 3.0) * distanceMul
+      : AUTOAIM_RANGE * distanceMul;
+    const target = this._nearestEnemyWithin(aimRange, dx, dz, auto ? -2 : AUTOAIM_FACE_DOT);
     if (!target) {
       // no foe in the arc — but a treasure chest is a valid strike target too:
       // aim the lunge straight at it so a tap cracks it open like hitting a foe
-      const chest = this._nearestChestWithin(AUTOAIM_RANGE, dx, dz, AUTOAIM_FACE_DOT);
+      const chest = this._nearestChestWithin(AUTOAIM_RANGE * distanceMul, dx, dz, AUTOAIM_FACE_DOT);
       if (chest) {
         this._dashFaceT = 0;
         this._dashDX = chest.dx / chest.dist;
@@ -191,6 +205,18 @@ export const combatMethods = {
         if (dist > 0.01) {
           this._dashFaceDX = fdx / dist;
           this._dashFaceDZ = fdz / dist;
+          // A triggered auto lunge must physically reach its locked target.
+          // Extend short authored lunges just enough to enter the body-contact
+          // hit radius. Both the trigger range and padding follow the global
+          // attack-distance multiplier.
+          if (combat.attackMode === "autodash") {
+            const distanceMul = combat.distanceMultiplier ?? 1;
+            const contactReach = this.player.radius + 0.5 + (foe.creature.radius ?? 0.4);
+            const authoredTravel = (combat.autodash.lungeDist ?? 0.9) * distanceMul;
+            const requiredTravel = Math.max(0, dist - contactReach + 0.2 * distanceMul);
+            const travel = Math.max(authoredTravel, requiredTravel);
+            this._dashSpeed = travel / (DASH_EASE_AVG * this._dashDur);
+          }
         }
       }
       this._dashDX = this._dashFaceDX;
@@ -250,7 +276,7 @@ export const combatMethods = {
     // dashHit's `knock` is an impulse multiplier (base impulse 4·knock, which
     // travels impulse/LEAP_K under the dungeon's friction) — convert here.
     if (combat.attackMode === "autodash") {
-      opts.knock = ((combat.autodash.knockback ?? 3) * LEAP_K) / 4;
+      opts.knock = ((combat.autodash.knockback ?? 3) * (combat.distanceMultiplier ?? 1) * LEAP_K) / 4;
     }
     this.dungeon.dashHit(this.player, this._dashDmg, this, opts);
   },
@@ -262,7 +288,7 @@ export const combatMethods = {
   _strikeInPlace() {
     if (this._dashT >= 0 || this._dashWindT >= 0 || this._dodgeCd > 0 || this._respawnT >= 0 || this.gameOver) return;
     const cfg = combat.strikeInPlace;
-    const range = cfg.range || 2.2;
+    const range = (cfg.range || 2.2) * (combat.distanceMultiplier ?? 1);
     this._dodgeCd = (cfg.cooldown || 0.4) * (this.stats.dodgeCdMul || 1);
     // aim: square off with the nearest foe in reach, else the nearest chest,
     // else follow the steer

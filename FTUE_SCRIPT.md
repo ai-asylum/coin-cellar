@@ -59,7 +59,7 @@ MOREL: Finally, you're open! One basket of mushrooms, please.
 
 ME: I... JUST got here.
 
-MOREL: The old keeper picked mine in the cave. Your job now!
+MOREL: the old keeper got them in the cave. Your job now!
 
 GUIDE: Get mushrooms in the cave  (arrow: door → road → pit)
 

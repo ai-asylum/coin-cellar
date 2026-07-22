@@ -398,21 +398,28 @@ button { font-family: inherit; cursor: pointer; }
 .npc-dbg.stuck { border-color: #ff6b7a; box-shadow: 0 0 0 1px #ff6b7a, 0 0 8px rgba(255, 60, 80, 0.6); }
 
 .bag-full-msg {
-  position: absolute; transform: translate(-50%, 0);
+  position: absolute;
+  left: 50%;
+  top: calc(env(safe-area-inset-top) + 72px);
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100% - env(safe-area-inset-left) - env(safe-area-inset-right) - 24px);
+  box-sizing: border-box;
   background: linear-gradient(rgba(255, 246, 226, 0.97), rgba(236, 211, 160, 0.97));
-  color: #a11; border: 2px solid #c0392b;
-  border-radius: 12px; padding: 5px 12px; font-size: 13px; font-weight: 900;
-  white-space: nowrap; pointer-events: none; z-index: 22;
-  box-shadow: 0 3px 0 var(--wood-dark), inset 0 1px 0 #fff7e4;
-  animation: bagfull 1.5s forwards;
+  color: #9d1515; border: 3px solid #c0392b;
+  border-radius: 16px; padding: 10px 18px; font-size: 18px; font-weight: 900;
+  line-height: 1.1; text-align: center; white-space: nowrap;
+  pointer-events: none; z-index: 50;
+  box-shadow: 0 4px 0 var(--wood-dark), 0 4px 18px rgba(70, 15, 10, 0.35), inset 0 1px 0 #fff7e4;
+  animation: bagfull 2.2s forwards;
 }
-.bag-full-msg .ic { width: 1.1em; height: 1.1em; vertical-align: -0.2em; }
+.bag-full-msg .ic { width: 1.25em; height: 1.25em; vertical-align: -0.25em; }
 @keyframes bagfull {
-  0% { opacity: 0; transform: translate(-50%, -8px) scale(0.8); }
-  12% { opacity: 1; transform: translate(-50%, 0) scale(1.08); }
-  22% { transform: translate(-50%, 0) scale(1); }
-  80% { opacity: 1; }
-  100% { opacity: 0; transform: translate(-50%, -6px); }
+  0% { opacity: 0; transform: translate(-50%, -10px) scale(0.75); }
+  10% { opacity: 1; transform: translate(-50%, 0) scale(1.1); }
+  18% { transform: translate(-50%, 0) scale(1); }
+  82% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -8px) scale(0.96); }
 }
 .coin-fly {
   position: absolute; transform: translate(-50%, -50%);
@@ -678,14 +685,24 @@ button { font-family: inherit; cursor: pointer; }
   /* store sits beside the bag when both are up (shop) */
   #store-btn { right: calc(102px + env(safe-area-inset-right)); }
 
-  /* while the action button owns the corner, slide the bag inboard of it —
-     and push the storeroom further in still so it stays beside the bag rather
-     than overlapping it */
-  #hud.action-on #bag-btn {
+  /* When either action button owns the corner, slide the bag inboard and keep
+     the storeroom beside it instead of overlapping the live control. */
+  #hud.action-on #bag-btn,
+  #hud.interact-on #bag-btn {
     right: calc(114px + env(safe-area-inset-right));
   }
-  #hud.action-on #store-btn {
+  #hud.action-on #store-btn,
+  #hud.interact-on #store-btn {
     right: calc(198px + env(safe-area-inset-right));
+  }
+
+  /* With no manual attack button (auto-lunge), promote the occasional interact
+     control into the vacated primary corner instead of leaving it floating a
+     button-height above empty space. */
+  #hud.interact-on:not(.action-on) #interact-btn {
+    right: calc(18px + env(safe-area-inset-right));
+    bottom: calc(26px + env(safe-area-inset-bottom));
+    width: 84px; height: 84px; font-size: 36px;
   }
 }
 

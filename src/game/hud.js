@@ -259,29 +259,21 @@ export class HUD {
     setTimeout(() => el.remove(), 950);
   }
 
-  /** Brief "Bag is full!" nudge, popped by the bag button (or top-centre when
-   * the button's hidden) when loot can't be picked up. */
+  /** Prominent, screen-safe "Bag is full!" warning when loot can't be picked
+   * up. The bag button also pops to show the player what needs attention. */
   bagFull() {
     const bag = this.root.querySelector("#bag-btn");
     const el = document.createElement("div");
     el.className = "bag-full-msg";
     el.innerHTML = `${icon("bag")} Bag is full!`;
     this.floatiesEl.appendChild(el);
-    const rect = bag && !bag.classList.contains("hidden") ? bag.getBoundingClientRect() : null;
-    if (rect) {
-      el.style.left = rect.left + rect.width / 2 + "px";
-      el.style.top = rect.bottom + 10 + "px";
-    } else {
-      el.style.left = "50%";
-      el.style.top = "20%";
-    }
-    // pop the bag button too so the eye goes there
-    if (bag && rect) {
+    // Pop the bag button too so the eye goes there.
+    if (bag && !bag.classList.contains("hidden")) {
       bag.classList.remove("pop");
       void bag.offsetWidth;
       bag.classList.add("pop");
     }
-    setTimeout(() => el.remove(), 1500);
+    setTimeout(() => el.remove(), 2200);
   }
 
   /** Re-trigger the gold chip's little bounce (e.g. as coins land). */

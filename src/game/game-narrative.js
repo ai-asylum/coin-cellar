@@ -54,7 +54,7 @@ const LETTER_LINES = [
 // Once the letter is finished, Morel arrives with the first concrete order.
 const MOREL_INTRO_ORDER = "Finally, you're open! One basket of mushrooms, please.";
 const PLAYER_INTRO_LINE = "I... JUST got here.";
-const MOREL_INTRO_JOB = "The old keeper picked mine in the cave. Your job now!";
+const MOREL_INTRO_JOB = "the old keeper got them in the cave. Your job now!";
 const MOREL_REMINDER_LINE = "Your uncle would be in the cave already...";
 // Scene 6 — the trade: the basket lands, and Morel pays the only way he
 // knows how (coin jingles; jingling wakes the dog).
