@@ -1387,6 +1387,18 @@ export class Game {
     }
     for (const pb of shop.passersby) if (talkable(pb)) pairs.push([pb.creature, { type: "npc", obj: pb }]);
     if (talkable(shop.dojo?.master)) pairs.push([shop.dojo.master.creature, { type: "npc", obj: shop.dojo.master }]);
+    // Morel has story/vendor dialogue rather than the generic townsfolk chat,
+    // but tapping him should work at any distance just like tapping another NPC.
+    const morel = shop.morel;
+    const morelOrderLive = this._morelIntroDone &&
+      (this.tutorial === "fetch" || this.tutorial === "forage" || this.tutorial === "trade");
+    const morelShelfLive = !this.tutorial && shop.tables.some((t) => !t.repaired);
+    if (morel?.creature?.visible && morel.state === "idle" && (morelOrderLive || morelShelfLive)) {
+      pairs.push([morel.creature, {
+        type: "morel",
+        action: morelOrderLive ? "reminder" : "shelves",
+      }]);
+    }
     // the town builder: click him (or a ruined lot below) to open his repair offer
     if (!this.tutorial && shop.builder?.creature) pairs.push([shop.builder.creature, { type: "builder" }]);
     for (const table of shop.tables) pairs.push([table.group, { type: "table", table }]);
@@ -1439,6 +1451,14 @@ export class Game {
       const focus = target.obj.creature.getWorldPosition(_focus).setY(0.06).clone();
       return { hint: "Talk", focus, color: 0x9ad0ff };
     }
+    if (target.type === "morel") {
+      const focus = this.shop.morel.creature.getWorldPosition(_focus).setY(0.06).clone();
+      return {
+        hint: target.action === "reminder" ? "Talk" : "Buy shelf",
+        focus,
+        color: target.action === "reminder" ? 0x9ad0ff : 0x66ff9e,
+      };
+    }
     if (target.type === "builder") {
       const b = this.shop.builder;
       const hasWork = this.shop.lots?.some((lot, i) => !lot.restored && !this.townRestored[i]);
@@ -1474,6 +1494,11 @@ export class Game {
     }
     if (target.type === "npc") {
       this._talkToNpc(target.obj);
+      return;
+    }
+    if (target.type === "morel") {
+      if (target.action === "reminder") this._morelReminder();
+      else this._morelPrompt();
       return;
     }
     if (target.type === "builder") {
